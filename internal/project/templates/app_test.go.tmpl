@@ -1,0 +1,84 @@
+package app
+
+import (
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"{{.Module}}/internal/config"
+	"{{.Module}}/internal/transport"
+)
+
+func TestDefaultDenyAndLiveness(t *testing.T) {
+	cfg, err := config.LoadFrom(
+		func(string) (string, bool) { return "", false },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	router := New(
+		cfg,
+		transport.DenyAll{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	for _, test := range []struct {
+		method string
+		path   string
+		status int
+	}{
+		{"GET", "/healthz", 200},
+		{"GET", "/api/features", 401},
+		{"GET", "/missing", 404},
+		{"POST", "/healthz", 405},
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(test.method, test.path, nil)
+		request.Header.Set("Authorization", "Bearer untrusted")
+		request.Header.Set("X-Tenant-ID", "untrusted")
+		router.ServeHTTP(response, request)
+
+		if response.Code != test.status ||
+			response.Header().Get("Cache-Control") != "no-store" ||
+			response.Header().Get("X-Frame-Options") != "DENY" ||
+			response.Header().Get("Referrer-Policy") != "no-referrer" ||
+			response.Header().Get("Content-Security-Policy") == "" ||
+			response.Header().Get("X-Request-ID") == "" {
+			t.Fatalf(
+				"%s: status=%d headers=%v",
+				test.path,
+				response.Code,
+				response.Header(),
+			)
+		}
+	}
+}
+
+func TestSecurityHeadersOnPanic(t *testing.T) {
+	cfg, err := config.LoadFrom(
+		func(string) (string, bool) { return "", false },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	router := New(
+		cfg,
+		nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	request := httptest.NewRequest("GET", "/api/features", nil)
+	request.Header.Set("Authorization", "Bearer triggers-nil-auth-panic")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError ||
+		response.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		response.Header().Get("X-Frame-Options") != "DENY" ||
+		response.Header().Get("Content-Security-Policy") == "" {
+		t.Fatalf("panic response: %d %v", response.Code, response.Header())
+	}
+}

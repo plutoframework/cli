@@ -1,0 +1,105 @@
+package config
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"{{.Module}}/internal/features"
+)
+
+const Prefix = {{q .Prefix}}
+
+type Config struct {
+	Server   Server
+	Database Database
+	Logging  Logging
+	Features map[string]*bool
+}
+
+type Server struct {
+	Address      string
+	Gzip         bool
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	IdleTimeout  time.Duration
+	BodyLimit    int64
+}
+type (
+	Database struct{ URL string }
+	Logging  struct{ Level string }
+)
+
+func Load() (Config, error) { return LoadFrom(os.LookupEnv) }
+
+func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
+	cfg := Config{
+		Server: Server{
+			Address:      "127.0.0.1:8080",
+			Gzip:         true,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 15 * time.Second,
+			IdleTimeout:  60 * time.Second,
+			BodyLimit:    16 * 1024,
+		},
+		Logging:  Logging{Level: "info"},
+		Features: map[string]*bool{},
+	}
+	for _, setting := range []struct {
+		name   string
+		target *string
+	}{
+		{"SERVER_ADDRESS", &cfg.Server.Address},
+		{"DATABASE_URL", &cfg.Database.URL},
+		{"LOG_LEVEL", &cfg.Logging.Level},
+	} {
+		if value, ok := lookup(Prefix + setting.name); ok {
+			*setting.target = value
+		}
+	}
+
+	if value, ok := lookup(Prefix + "SERVER_GZIP"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("%sSERVER_GZIP must be boolean", Prefix)
+		}
+
+		cfg.Server.Gzip = parsed
+	}
+
+	for _, definition := range features.Declarations() {
+		key := strings.NewReplacer(".", "_", "-", "_").
+			Replace(strings.ToUpper(definition.Key))
+		if value, ok := lookup(Prefix + "FEATURE_" + key); ok {
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return Config{}, fmt.Errorf(
+					"%sFEATURE_%s must be boolean",
+					Prefix,
+					key,
+				)
+			}
+
+			cfg.Features[definition.Key] = &parsed
+		}
+	}
+
+ _,port,err:=net.SplitHostPort(cfg.Server.Address)
+ if err!=nil { return Config{},fmt.Errorf("%sSERVER_ADDRESS must be host:port",Prefix) }
+ number,err:=strconv.Atoi(port)
+ if err!=nil || number<1 || number>65535 { return Config{},fmt.Errorf("%sSERVER_ADDRESS requires a numeric port from 1 to 65535",Prefix) }
+
+	switch cfg.Logging.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		return Config{}, fmt.Errorf(
+			"%sLOG_LEVEL must be debug/info/warn/error",
+			Prefix,
+		)
+	}
+
+	return cfg, nil
+}

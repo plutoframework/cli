@@ -1,0 +1,53 @@
+package main
+
+import (
+	"bytes"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"{{.Module}}/internal/api"
+)
+
+func run() error {
+	check := flag.Bool(
+		"check",
+		false,
+		"Check artifact freshness without writing",
+	)
+
+	flag.Parse()
+
+	data, err := api.Document()
+	if err != nil {
+		return err
+	}
+
+	path := filepath.Join("openapi", "openapi.json")
+	if *check {
+		current, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		if !bytes.Equal(current, data) {
+			return fmt.Errorf("OpenAPI is stale; run go run ./cmd/openapi")
+		}
+
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0o644)
+}
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

@@ -1,0 +1,59 @@
+package {{.Group}}
+
+import (
+	"context"
+	"net/http"
+
+	"{{.Module}}/internal/domain"
+	"{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/transport"
+ {{if .Params}}"github.com/go-chi/chi/v5"{{end}}
+)
+
+// {{.Action}}Operations is a narrow consumer-owned interface.
+type {{.Action}}Operations interface {
+	Execute(
+		context.Context,
+		domain.Principal,
+		{{.Group}}.{{.Action}}Request,
+	) ({{.Group}}.{{.Action}}Data, error)
+}
+
+func Register{{.Action}}(
+	reg transport.Registrar,
+	operation {{.Action}}Operations,
+	bodyLimit int64,
+) {
+	reg.Handle(
+		paths.{{.Symbol}},
+		func(w http.ResponseWriter, r *http.Request) {
+			input := {{.Group}}.{{.Action}}Request{}
+{{if .Body}}			if !transport.Decode(w, r, &input, bodyLimit) {
+				return
+			}
+
+{{end}}
+ {{if .Params}}input.Path=map[string]string{
+ {{range .Params}}{{q .}}:chi.URLParam(r,{{q .}}),
+ {{end}}}
+ {{end}}
+			output, err := operation.Execute(
+				r.Context(),
+				transport.Principal(r.Context()),
+				input,
+			)
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			transport.JSON(
+				w,
+				paths.{{.Symbol}}.SuccessStatus,
+				{{.Group}}.{{.Action}}Response{Data: output},
+			)
+		},
+	)
+}

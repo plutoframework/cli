@@ -1,0 +1,18 @@
+package domain
+
+import "errors"
+
+var ErrNotImplemented = errors.New("operation not implemented")
+
+// Principal comes only from the injected trusted authenticator. Tenant membership
+// must be verified there; request headers alone never establish identity.
+type Principal struct {
+	ActorID string
+ {{if .Multi}}TenantID string{{end}}
+
+	Permissions map[string]bool
+}
+
+func (p Principal) Verified() bool {
+	return p.ActorID != ""{{if .Multi}} && p.TenantID != ""{{end}}
+}

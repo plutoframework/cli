@@ -1,0 +1,107 @@
+package app_test
+
+import (
+ "context"
+ "encoding/json"
+ "errors"
+ "io"
+ "log/slog"
+ "net/http/httptest"
+ "strings"
+ "testing"
+
+ "{{.Module}}/internal/app"
+ "{{.Module}}/internal/config"
+ "{{.Module}}/internal/domain"
+ "{{.Module}}/internal/features"
+ "{{.Module}}/internal/handlers/widgets"
+ widgetmodels "{{.Module}}/internal/models/widgets"
+ "{{.Module}}/internal/paths"
+ "{{.Module}}/internal/transport"
+
+ "github.com/go-chi/chi/v5"
+)
+
+type trustedAuth struct { permission bool }
+func (auth trustedAuth) Authenticate(_ context.Context,token string{{if .Multi}},tenant string{{end}}) (domain.Principal,error) {
+ if token!="trusted"{{if .Multi}} || tenant!="member-tenant"{{end}} { return domain.Principal{},errors.New("untrusted") }
+ return domain.Principal{
+  ActorID:"actor",
+  {{if .Multi}}TenantID:"member-tenant",{{end}}
+  Permissions:map[string]bool{"widgets.write":auth.permission},
+ },nil
+}
+
+type recordingOperation struct { calls int; principal domain.Principal; input widgetmodels.CreateRequest }
+func (operation *recordingOperation) Execute(_ context.Context,principal domain.Principal,input widgetmodels.CreateRequest) (widgetmodels.CreateData,error) {
+ operation.calls++
+ operation.principal=principal
+ operation.input=input
+ return widgetmodels.CreateData{Value:"recorded"},nil
+}
+
+func TestIndependentPolicyMatrix(t *testing.T) {
+ for _,test:=range []struct {
+  name,token,tenant,body string
+  permission,enabled bool
+  status,calls int
+ }{
+  {"auth-first","bad","member-tenant",`{}`,true,true,401,0},
+  {"permission","trusted","member-tenant",`{}`,false,true,403,0},
+  {"feature","trusted","member-tenant",`{}`,true,false,403,0},
+  {"success","trusted","member-tenant",`{"value":"input"}`,true,true,200,1},
+  {"unknown-field","trusted","member-tenant",`{"unknown":1}`,true,true,400,0},
+  {"invalid-type","trusted","member-tenant",`{"value":42}`,true,true,400,0},
+  {"extra-json","trusted","member-tenant",`{} {}`,true,true,400,0},
+  {"null","trusted","member-tenant",`null`,true,true,400,0},
+  {"oversized","trusted","member-tenant",`{"value":"`+strings.Repeat("x",20000)+`"}`,true,true,413,0},
+  {{if .Multi}}{"tenant","trusted","untrusted-tenant",`{}`,true,true,401,0},{{end}}
+ } {
+  t.Run(test.name,func(t *testing.T) {
+   router:=chi.NewRouter()
+   operation:=&recordingOperation{}
+   evaluator:=features.New(map[string]*bool{"widgets-create":&test.enabled})
+   reg:=transport.Registrar{Router:router,Auth:trustedAuth{permission:test.permission},Features:evaluator,Logger:slog.New(slog.NewTextHandler(io.Discard,nil))}
+   widgets.RegisterCreate(reg,operation,16*1024)
+   request:=httptest.NewRequest("POST","/api/widgets/item-1",strings.NewReader(test.body))
+   request.Header.Set("Authorization","Bearer "+test.token)
+   request.Header.Set("X-Tenant-ID",test.tenant)
+   response:=httptest.NewRecorder()
+   router.ServeHTTP(response,request)
+   if response.Code!=test.status || operation.calls!=test.calls {
+    t.Fatalf("status=%d calls=%d body=%s",response.Code,operation.calls,response.Body)
+   }
+   if test.calls==1 {
+    if operation.input.Path["id"]!="item-1" || operation.input.Value!="input" || operation.principal.ActorID!="actor"{{if .Multi}} || operation.principal.TenantID!="member-tenant"{{end}} { t.Fatal("verified scope or route input lost") }
+   }
+  })
+ }
+}
+
+func TestResolvedFlagsAndIncompleteOperation(t *testing.T) {
+ lookup:=func(name string)(string,bool) {
+  if name==config.Prefix+"FEATURE_WIDGETS_CREATE" { return "false",true }
+  return "",false
+ }
+ cfg,err:=config.LoadFrom(lookup)
+ if err!=nil { t.Fatal(err) }
+ if cfg.Features["widgets-create"]==nil || *cfg.Features["widgets-create"] { t.Fatal("explicit false lost") }
+ enabled:=true
+ cfg.Features["widgets-create"]=&enabled
+ cfg.Features["private-report"]=&enabled
+ router:=app.New(cfg,trustedAuth{permission:true},slog.New(slog.NewTextHandler(io.Discard,nil)))
+ request:=httptest.NewRequest("GET","/api/features",nil)
+ request.Header.Set("Authorization","Bearer trusted")
+ request.Header.Set("X-Tenant-ID","member-tenant")
+ response:=httptest.NewRecorder()
+ router.ServeHTTP(response,request)
+ var envelope struct { Data map[string]bool `json:"data"` }
+ if err:=json.Unmarshal(response.Body.Bytes(),&envelope);err!=nil { t.Fatal(err) }
+ if response.Code!=200 || !envelope.Data["widgets-create"] || len(envelope.Data)!=1 || response.Header().Get("Cache-Control")!="no-store" { t.Fatalf("visible flags: %s",response.Body) }
+ request=httptest.NewRequest(paths.WidgetsCreate.Method,"/api/widgets/item-1",strings.NewReader(`{"value":"input"}`))
+ request.Header.Set("Authorization","Bearer trusted")
+ request.Header.Set("X-Tenant-ID","member-tenant")
+ response=httptest.NewRecorder()
+ router.ServeHTTP(response,request)
+ if response.Code!=501 || !strings.Contains(response.Body.String(),"not_implemented") { t.Fatalf("stub claimed success: %d %s",response.Code,response.Body) }
+}

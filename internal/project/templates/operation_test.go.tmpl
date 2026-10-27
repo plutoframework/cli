@@ -1,0 +1,17 @@
+package {{.Group}}
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"{{.Module}}/internal/domain"
+	"{{.Module}}/internal/models/{{.Group}}"
+)
+
+func Test{{.Action}}Incomplete(t *testing.T) {
+	output, err := New{{.Action}}().Execute(context.Background(), domain.Principal{}, {{.Group}}.{{.Action}}Request{Value: "must not succeed"})
+	if !errors.Is(err, domain.ErrNotImplemented) || output.Value != "" {
+		t.Fatalf("incomplete operation returned %#v, %v", output, err)
+	}
+}

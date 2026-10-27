@@ -1,0 +1,44 @@
+// Package paths owns the runtime catalog derived from pluto.toml.
+package paths
+
+type Endpoint struct {
+	ID            string
+	Name          string
+	Description   string
+	Method        string
+	Path          string
+	Authenticated bool
+	Permission    string
+	Feature       string
+	Request       any
+	Response      any
+	SuccessStatus int
+}
+
+type FeaturesResponse struct {
+	Data map[string]bool `json:"data"`
+}
+type HealthResponse struct {
+	Data string `json:"data"`
+}
+
+var GetFeatures = Endpoint{
+	ID:            "features.get",
+	Name:          "Read visible feature flags",
+	Description:   "Authenticated allowlist; flags do not grant authorization.",
+	Method:        "GET",
+	Path:          "/api/features",
+	Authenticated: true,
+	Response:      FeaturesResponse{},
+	SuccessStatus: 200,
+}
+
+var Health = Endpoint{
+	ID:            "health.get",
+	Name:          "Liveness",
+	Description:   "Process liveness; does not claim database readiness.",
+	Method:        "GET",
+	Path:          "/healthz",
+	Response:      HealthResponse{},
+	SuccessStatus: 200,
+}

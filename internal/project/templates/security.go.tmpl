@@ -1,0 +1,36 @@
+package transport
+
+import "net/http"
+
+// SecurityHeaders applies the API's browser security policy to every response.
+// This authored file is the customization point for HTML/docs or other needs.
+// HSTS belongs at the HTTPS terminator; forwarded headers are not trusted here.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers := w.Header()
+		headers.Set("Cache-Control", "no-store")
+		headers.Set("X-Content-Type-Options", "nosniff")
+		headers.Set("X-Frame-Options", "DENY")
+		headers.Set("Referrer-Policy", "no-referrer")
+		headers.Set(
+			"Content-Security-Policy",
+			"default-src 'none'; base-uri 'none'; "+
+				"form-action 'none'; frame-ancestors 'none'",
+		)
+		headers.Set(
+			"Permissions-Policy",
+			"camera=(), microphone=(), geolocation=()",
+		)
+		headers.Set("Cross-Origin-Embedder-Policy", "require-corp")
+		headers.Set("Cross-Origin-Opener-Policy", "same-origin")
+		headers.Set("Cross-Origin-Resource-Policy", "same-origin")
+		headers.Set("Origin-Agent-Cluster", "?1")
+		headers.Set("X-DNS-Prefetch-Control", "off")
+		headers.Set("X-Download-Options", "noopen")
+		headers.Set("X-Permitted-Cross-Domain-Policies", "none")
+		// Disable legacy browser XSS filters; CSP provides the document policy.
+		headers.Set("X-XSS-Protection", "0")
+
+		next.ServeHTTP(w, r)
+	})
+}

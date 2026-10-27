@@ -1,0 +1,20 @@
+package api
+
+import "testing"
+
+type recursiveModel struct { Next *recursiveModel `json:"next"` }
+
+func TestUnsupportedRecursiveModel(t *testing.T) {
+ if _,err:=modelSchema(recursiveModel{});err==nil { t.Fatal("recursive model silently accepted") }
+}
+
+func TestConcreteJSONShape(t *testing.T) {
+ schema,err:=modelSchema(struct {
+  Price float64 `json:"price"`
+  Private string `json:"-"`
+  Labels []string `json:"labels"`
+ }{})
+ if err!=nil { t.Fatal(err) }
+ properties:=schema["properties"].(map[string]any)
+ if len(properties)!=2 || properties["price"].(map[string]any)["type"]!="number" || properties["labels"].(map[string]any)["type"]!="array" { t.Fatalf("unexpected schema: %v",schema) }
+}

@@ -1,0 +1,20 @@
+package transport
+
+import (
+ "io"
+ "log/slog"
+ "net/http"
+ "net/http/httptest"
+ "strings"
+ "testing"
+)
+
+func TestRecoverEnvelope(t *testing.T) {
+ logger:=slog.New(slog.NewTextHandler(io.Discard,nil))
+ handler:=Recover(logger)(http.HandlerFunc(func(http.ResponseWriter,*http.Request) {
+  panic("secret-must-not-leak")
+ }))
+ response:=httptest.NewRecorder()
+ handler.ServeHTTP(response,httptest.NewRequest("GET","/",nil))
+ if response.Code!=500 || !strings.Contains(response.Body.String(),"internal_error") || strings.Contains(response.Body.String(),"secret-must-not-leak") { t.Fatalf("unsafe panic response: %d %s",response.Code,response.Body) }
+}

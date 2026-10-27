@@ -1,0 +1,15 @@
+package {{.Group}}
+
+// {{.Action}}Request is intentionally small. Add domain input deliberately.
+// Path contains decoded Chi parameters and is never decoded from JSON.
+type {{.Action}}Request struct {
+	Value string            `json:"value"`
+	Path  map[string]string `json:"-"`
+}
+
+type {{.Action}}Data struct {
+	Value string `json:"value"`
+}
+type {{.Action}}Response struct {
+	Data {{.Action}}Data `json:"data"`
+}

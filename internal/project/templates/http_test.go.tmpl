@@ -1,0 +1,67 @@
+package transport
+
+import (
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestDecode(t *testing.T) {
+	for _, test := range []struct {
+		body   string
+		status int
+	}{
+		{`{"value":"ok"}`, 200},
+		{`{"value":42}`, 400},
+		{`{"unknown":true}`, 400},
+		{`{} {}`, 400},
+		{`null`, 400},
+		{``, 400},
+		{`{"value":"` + strings.Repeat("a", 100) + `"}`, 413},
+	} {
+		t.Run(test.body, func(t *testing.T) {
+			request := httptest.NewRequest(
+				"POST",
+				"/",
+				strings.NewReader(test.body),
+			)
+			response := httptest.NewRecorder()
+
+			var input struct {
+				Value string `json:"value"`
+			}
+
+			accepted := Decode(response, request, &input, 64)
+			if response.Code != test.status ||
+				accepted != (test.status == 200) {
+				t.Fatalf("status=%d accepted=%t", response.Code, accepted)
+			}
+		})
+	}
+}
+
+func FuzzDecode(f *testing.F) {
+	f.Add(`{"unknown":true}`)
+	f.Add(`{} {}`)
+	f.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 64*1024 {
+			t.Skip()
+		}
+
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest("POST", "/", strings.NewReader(body))
+
+		var input struct {
+			Value string `json:"value"`
+		}
+
+		accepted := Decode(response, request, &input, 1024)
+		if accepted && len(body) > 1024 {
+			t.Fatal("oversized body accepted")
+		}
+
+		if !accepted && response.Code != 400 && response.Code != 413 {
+			t.Fatal("unexpected rejection")
+		}
+	})
+}

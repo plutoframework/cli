@@ -1,0 +1,66 @@
+package app
+
+import (
+	"log/slog"
+	"net/http"
+
+	"{{.Module}}/internal/config"
+	"{{.Module}}/internal/features"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/transport"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+func New(
+	cfg config.Config,
+	auth transport.Authenticator,
+	logger *slog.Logger,
+) http.Handler {
+	evaluator := features.New(cfg.Features)
+	router := chi.NewRouter()
+	router.Use(middleware.RequestID)
+	router.Use(transport.SecurityHeaders)
+	router.Use(transport.Recover(logger))
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Request-ID", middleware.GetReqID(r.Context()))
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	if cfg.Server.Gzip {
+		router.Use(middleware.Compress(5, "application/json"))
+	}
+
+	reg := transport.Registrar{
+		Router:   router,
+		Auth:     auth,
+		Features: evaluator,
+		Logger:   logger,
+	}
+	reg.Handle(paths.Health, func(w http.ResponseWriter, _ *http.Request) {
+		transport.JSON(
+			w,
+			paths.Health.SuccessStatus,
+			paths.HealthResponse{Data: "ok"},
+		)
+	})
+	reg.Handle(paths.GetFeatures, func(w http.ResponseWriter, _ *http.Request) {
+		transport.JSON(
+			w,
+			paths.GetFeatures.SuccessStatus,
+			paths.FeaturesResponse{Data: evaluator.Visible()},
+		)
+	})
+	RegisterGenerated(reg, Dependencies{Config: cfg})
+	router.NotFound(
+		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 404, "not_found") },
+	)
+	router.MethodNotAllowed(
+		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 405, "method_not_allowed") },
+	)
+
+	return router
+}

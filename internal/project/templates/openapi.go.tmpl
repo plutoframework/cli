@@ -1,0 +1,124 @@
+// Package api derives OpenAPI from the exact catalog and concrete wire models.
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+ "strconv"
+	"strings"
+
+	"{{.Module}}/internal/paths"
+)
+
+func Document() ([]byte, error) {
+	routes := map[string]map[string]any{}
+	for _, endpoint := range paths.All() {
+		if routes[endpoint.Path] == nil {
+			routes[endpoint.Path] = map[string]any{}
+		}
+
+ responseSchema,err:=modelSchema(endpoint.Response)
+ if err!=nil { return nil,fmt.Errorf("%s response: %w",endpoint.ID,err) }
+
+		operation := map[string]any{
+			"operationId":  endpoint.ID,
+			"summary":      endpoint.Name,
+			"description":  endpoint.Description,
+			"x-permission": endpoint.Permission,
+			"x-feature":    endpoint.Feature,
+			"responses": map[string]any{
+				strconv.Itoa(endpoint.SuccessStatus): map[string]any{
+					"description": "Success",
+					"content": map[string]any{
+						"application/json": map[string]any{
+							"schema": responseSchema,
+						},
+					},
+				},
+				"default": map[string]any{
+					"description": "Error envelope: code, message, request_id. Incomplete operations return 501.",
+					"content": map[string]any{
+						"application/json": map[string]any{
+							"schema": map[string]any{
+								"$ref": "#/components/schemas/Error",
+							},
+						},
+					},
+				},
+			},
+		}
+		if endpoint.Authenticated {
+			operation["security"] = []any{
+				map[string]any{"bearerAuth": []string{}},
+			}
+		}
+
+		if endpoint.Request != nil {
+ requestSchema,err:=modelSchema(endpoint.Request)
+ if err!=nil { return nil,fmt.Errorf("%s request: %w",endpoint.ID,err) }
+
+			operation["requestBody"] = map[string]any{
+				"required": true,
+				"content": map[string]any{
+					"application/json": map[string]any{
+						"schema": requestSchema,
+					},
+				},
+			}
+		}
+
+		parameters := []any{}
+
+		for _, part := range strings.Split(endpoint.Path, "/") {
+			if strings.HasPrefix(part, "{") {
+				parameters = append(
+					parameters,
+					map[string]any{
+						"name":     strings.Trim(part, "{}"),
+						"in":       "path",
+						"required": true,
+						"schema":   map[string]any{"type": "string"},
+					},
+				)
+			}
+		}
+
+		if len(parameters) > 0 {
+			operation["parameters"] = parameters
+		}
+
+		routes[endpoint.Path][strings.ToLower(endpoint.Method)] = operation
+	}
+
+	document := map[string]any{
+		"openapi": "3.1.0",
+		"info":    map[string]any{"title": {{q .Name}}, "version": "0.1.0"},
+		"paths":   routes,
+		"components": map[string]any{
+			"securitySchemes": map[string]any{
+				"bearerAuth": map[string]any{
+					"type":   "http",
+					"scheme": "bearer",
+				},
+			},
+			"schemas": map[string]any{
+				"Error": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"error": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"code":       map[string]any{"type": "string"},
+								"message":    map[string]any{"type": "string"},
+								"request_id": map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(document, "", "  ")
+
+	return append(data, '\n'), err
+}

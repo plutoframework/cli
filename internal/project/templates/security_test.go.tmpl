@@ -1,0 +1,62 @@
+package transport
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestSecurityHeaders(t *testing.T) {
+	for _, status := range []int{200, 400, 401, 403, 404, 405, 413, 500, 501} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			called := false
+			handler := SecurityHeaders(http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) {
+					called = true
+					w.WriteHeader(status)
+				},
+			))
+			request := httptest.NewRequest("GET", "/", nil)
+			request.Header.Set("X-Forwarded-Proto", "https")
+			request.Header.Set("Forwarded", "proto=https")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+
+			if !called || response.Code != status {
+				t.Fatalf("downstream called=%v status=%d", called, response.Code)
+			}
+
+			want := map[string]string{
+				"Cache-Control": "no-store",
+				"X-Content-Type-Options": "nosniff",
+				"X-Frame-Options": "DENY",
+				"Referrer-Policy": "no-referrer",
+				"Content-Security-Policy": "default-src 'none'; "+
+					"base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+				"Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+				"Cross-Origin-Embedder-Policy": "require-corp",
+				"Cross-Origin-Opener-Policy": "same-origin",
+				"Cross-Origin-Resource-Policy": "same-origin",
+				"Origin-Agent-Cluster": "?1",
+				"X-DNS-Prefetch-Control": "off",
+				"X-Download-Options": "noopen",
+				"X-Permitted-Cross-Domain-Policies": "none",
+				"X-XSS-Protection": "0",
+			}
+			for name, value := range want {
+				if got := response.Result().Header.Get(name); got != value {
+					t.Errorf("%s = %q, want %q", name, got, value)
+				}
+			}
+
+			for _, name := range []string{
+				"Strict-Transport-Security",
+				"Access-Control-Allow-Origin",
+			} {
+				if got := response.Header().Get(name); got != "" {
+					t.Errorf("unexpected %s = %q", name, got)
+				}
+			}
+		})
+	}
+}

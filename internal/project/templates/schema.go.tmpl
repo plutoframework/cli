@@ -1,0 +1,65 @@
+package api
+
+import (
+ "fmt"
+ "encoding/json"
+ "reflect"
+ "strings"
+ "time"
+)
+
+// modelSchema describes ordinary JSON model shapes only. Unsupported recursive
+// or custom marshalers fail regeneration instead of emitting a fabricated schema.
+func modelSchema(model any) (map[string]any,error) {
+ if model==nil { return nil,fmt.Errorf("missing concrete wire model") }
+ return describe(reflect.TypeOf(model),map[reflect.Type]bool{})
+}
+
+func describe(value reflect.Type,seen map[reflect.Type]bool) (map[string]any,error) {
+ for value.Kind()==reflect.Pointer { value=value.Elem() }
+ if value==reflect.TypeOf(time.Time{}) { return map[string]any{"type":"string","format":"date-time"},nil }
+ marshaler:=reflect.TypeOf((*json.Marshaler)(nil)).Elem()
+ if value.Implements(marshaler) || reflect.PointerTo(value).Implements(marshaler) { return nil,fmt.Errorf("custom JSON marshaler %s requires a schema adapter",value) }
+
+ if seen[value] { return nil,fmt.Errorf("recursive model %s is unsupported; author a schema adapter",value) }
+ seen[value]=true
+ defer delete(seen,value)
+ switch value.Kind() {
+ case reflect.Struct:
+  properties:=map[string]any{}
+  for i:=0;i<value.NumField();i++ {
+   field:=value.Field(i)
+   name:=strings.Split(field.Tag.Get("json"),",")[0]
+   if name=="-" || !field.IsExported() { continue }
+   if field.Anonymous && name=="" { return nil,fmt.Errorf("embedded JSON fields require an explicit schema adapter") }
+   if name=="" { name=field.Name }
+   property,err:=describe(field.Type,seen)
+   if err!=nil { return nil,err }
+   properties[name]=property
+  }
+  return map[string]any{"type":"object","properties":properties},nil
+ case reflect.Slice,reflect.Array:
+  if value.Kind()==reflect.Slice && value.Elem().Kind()==reflect.Uint8 {
+   return map[string]any{"type":"string","contentEncoding":"base64"},nil
+  }
+  items,err:=describe(value.Elem(),seen)
+  if err!=nil { return nil,err }
+  return map[string]any{"type":"array","items":items},nil
+ case reflect.Map:
+  property,err:=describe(value.Elem(),seen)
+  if err!=nil { return nil,err }
+  return map[string]any{"type":"object","additionalProperties":property},nil
+ case reflect.Bool:
+  return map[string]any{"type":"boolean"},nil
+ case reflect.Int,reflect.Int8,reflect.Int16,reflect.Int32,reflect.Int64,reflect.Uint,reflect.Uint8,reflect.Uint16,reflect.Uint32,reflect.Uint64:
+  return map[string]any{"type":"integer"},nil
+ case reflect.Float32,reflect.Float64:
+  return map[string]any{"type":"number"},nil
+ case reflect.String:
+  return map[string]any{"type":"string"},nil
+ case reflect.Interface:
+  return map[string]any{},nil
+ default:
+  return nil,fmt.Errorf("unsupported JSON model type %s",value)
+ }
+}

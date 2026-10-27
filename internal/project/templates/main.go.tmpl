@@ -1,0 +1,101 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"{{.Module}}/internal/app"
+	"{{.Module}}/internal/config"
+	"{{.Module}}/internal/storage/postgres"
+	"{{.Module}}/internal/transport"
+)
+
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.Logging.Level)); err != nil {
+		return err
+	}
+
+	logger := slog.New(
+		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}),
+	)
+
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	if cfg.Database.URL != "" {
+		pool, err := postgres.Open(ctx, cfg.Database.URL)
+		if err != nil {
+			return errors.New("postgres connectivity failed; verify DATABASE_URL and database availability")
+		}
+		defer pool.Close()
+	}
+
+	server := &http.Server{
+		Addr:              cfg.Server.Address,
+		Handler:           app.New(cfg, transport.DenyAll{}, logger),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		MaxHeaderBytes:    16 * 1024,
+	}
+	done := make(chan struct{})
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			shutdown, cancel := context.WithTimeout(
+				context.Background(),
+				10*time.Second,
+			)
+			defer cancel()
+
+			if err := server.Shutdown(shutdown); err != nil {
+				logger.Error("shutdown failed")
+			}
+		case <-done:
+		}
+	}()
+
+	defer close(done)
+
+	logger.Info(
+		"listening",
+		"address",
+		server.Addr,
+		"authentication",
+		"deny-all",
+	)
+
+	err = server.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+
+	return err
+}
+
+func main() {
+	if err := run(); err != nil {
+		// Database driver errors are sanitized at their boundary above.
+  slog.Error("startup/server failed","error",err)
+
+		os.Exit(1)
+	}
+}

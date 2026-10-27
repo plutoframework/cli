@@ -1,0 +1,22 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	"{{.Module}}/internal/domain"
+	"{{.Module}}/internal/models/{{.Group}}"
+)
+
+type {{.Action}} struct{}
+
+func New{{.Action}}() *{{.Action}} { return &{{.Action}}{} }
+
+// Execute must enforce resource authorization and tenant-scoped repositories.
+// A route permission is a capability check, not resource authorization.
+func (operation *{{.Action}}) Execute(
+	_ context.Context,
+	_ domain.Principal,
+	_ {{.Group}}.{{.Action}}Request,
+) ({{.Group}}.{{.Action}}Data, error) {
+	return {{.Group}}.{{.Action}}Data{}, domain.ErrNotImplemented
+}

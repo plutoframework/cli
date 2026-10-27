@@ -1,0 +1,128 @@
+package {{.Group}}
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"{{.Module}}/internal/domain"
+	"{{.Module}}/internal/features"
+	"{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/transport"
+
+	"github.com/go-chi/chi/v5"
+)
+
+type fake{{.Action}} struct{ calls int }
+
+func (f *fake{{.Action}}) Execute(
+	_ context.Context,
+	_ domain.Principal,
+	input {{.Group}}.{{.Action}}Request,
+) ({{.Group}}.{{.Action}}Data, error) {
+	f.calls++
+	return {{.Group}}.{{.Action}}Data{Value: input.Value}, nil
+}
+
+type auth{{.Action}} struct{}
+
+func (auth{{.Action}}) Authenticate(
+	context.Context,
+	string,
+ {{if .Multi}}string,{{end}}
+) (domain.Principal, error) {
+	return domain.Principal{
+		ActorID: "verified-test-actor",
+ {{if .Multi}}TenantID:"verified-test-tenant",{{end}}
+
+		Permissions: map[string]bool{ {{q .Permission}}: true},
+	}, nil
+}
+
+func Test{{.Action}}HTTP(t *testing.T) {
+	router := chi.NewRouter()
+	operation := &fake{{.Action}}{}
+	enabled := true
+	evaluator := features.New(map[string]*bool{ {{q .Feature}}: &enabled})
+	reg := transport.Registrar{
+		Router:   router,
+		Auth:     auth{{.Action}}{},
+		Features: evaluator,
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	Register{{.Action}}(reg, operation, 16*1024)
+
+	request := httptest.NewRequest(
+		paths.{{.Symbol}}.Method,
+		{{q .TestPath}},
+		strings.NewReader(`{"value":"verified"}`),
+	)
+	request.Header.Set("Authorization", "Bearer verified")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != 200 || operation.calls != 1 {
+		t.Fatalf(
+			"status=%d calls=%d body=%s",
+			response.Code,
+			operation.calls,
+			response.Body,
+		)
+	}
+
+{{if not .Public}}
+	request = httptest.NewRequest(
+		paths.{{.Symbol}}.Method,
+		{{q .TestPath}},
+		strings.NewReader(`{"value":"verified"}`),
+	)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != 401 || operation.calls != 1 {
+		t.Fatal("unverified caller reached operation")
+	}
+{{end}}
+}
+
+// Fuzz{{.Action}}Boundary verifies denied requests cannot call operations.
+func Fuzz{{.Action}}Boundary(f *testing.F) {
+	f.Add("Bearer invalid", `{"unknown":true}`)
+	f.Add("", `{} {}`)
+	f.Fuzz(func(t *testing.T, authorization, body string) {
+		if len(body) > 32*1024 {
+			t.Skip()
+		}
+
+		router := chi.NewRouter()
+		operation := &fake{{.Action}}{}
+		reg := transport.Registrar{
+			Router:   router,
+			Auth:     transport.DenyAll{},
+			Features: features.New(nil),
+			Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}
+		Register{{.Action}}(reg, operation, 16*1024)
+
+		request := httptest.NewRequest(
+			paths.{{.Symbol}}.Method,
+			{{q .TestPath}},
+			strings.NewReader(body),
+		)
+		request.Header.Set("Authorization", authorization)
+
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+
+{{if not .Public}}		if operation.calls != 0 || response.Code != 401 {
+			t.Fatal("deny-all invariant violated")
+		}{{else}}
+ if operation.calls>1 || response.Code>=500 { t.Fatal("public boundary failed") }
+{{end}}
+	})
+}

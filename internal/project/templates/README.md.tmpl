@@ -1,0 +1,178 @@
+# {{.Name}}
+
+Generated with the provisional Pluto CLI. Requires Go 1.25.5+. These app-local
+primitives will be candidates for framework extraction; no published Pluto API
+is imported. Chi is the HTTP router, PostgreSQL/pgx + sqlc the database direction.
+
+```sh
+go mod download
+go run ./cmd/api
+# Another terminal: curl http://127.0.0.1:8080/healthz
+```
+
+Authentication fails closed. `/healthz` is public. `/api/features` and newly
+scaffolded endpoints require authentication. Inject a real `transport.Authenticator`
+in cmd/api; an arbitrary tenant/identity header is never a verified identity.
+{{if .Multi}}This app requires verified ActorID AND TenantID. Authenticator verifies the
+selected X-Tenant-ID against bearer membership. Operations receive that principal.
+Public generated business endpoints are deliberately refused in multi tenancy.{{else}}This app uses single tenancy; no tenant header is used.{{end}}
+No demo tokens or cookie sessions are supplied; CSRF protection for cookie auth
+is not implemented. Incomplete operations return 501, never fabricated success.
+
+```sh
+pluto add endpoint widgets Create --method POST --path /api/widgets \
+  --name 'Create widget' --description 'Create a widget after resource checks.' \
+  --permission widgets.write --feature widgets-create --feature-client-visible
+pluto add endpoint widgets Get --method GET --path '/api/widgets/{id}' \
+  --name 'Read widget' --description 'Read a widget in the verified scope.'
+pluto add endpoint reports List --method GET --path /api/reports \
+  --name 'List reports' --description 'List authorized reports.'
+pluto fmt
+pluto vet
+```
+
+New apps include Docker, mise and fnox files by default. Init can omit each
+independently with `--no-docker`, `--no-mise` or `--no-fnox`. Choices are saved;
+endpoint additions do not enable omitted presets. Core lint/config/SQL files
+are always included and Git hooks remain opt-in.
+
+Commands discover pluto.toml in cwd/parents; saved tenancy/prefix are reused.
+`pluto.toml` is project metadata, never runtime settings/secrets. Schema 2 extends
+the prototype schema 1 with developer presets and endpoint generation records.
+Unknown fields/settings fail; no automatic schema migration is implied.
+
+Metadata in `[[endpoints]]` is the generation source for CLI-owned paths,
+feature declarations and group/composition registries (`*_gen.go`). Do not edit
+these files; vet checks their semantic content against the manifest. Route strings
+appear only in paths at runtime. Models, per-endpoint handlers/operations/tests,
+config and transport are authored files: the CLI creates them once and refuses
+overwrite. Additions regenerate only managed files after checking prior ownership.
+Manual catalog additions require taking over the generator contract deliberately.
+
+`internal/handlers/<group>` only decodes input, reads verified context, calls a
+consumer-owned operation interface and maps output. Business policies belong in
+`internal/operations/<group>`, without HTTP or DB imports. Models are independent
+wire types. Path parameters reach the operation via Request.Path, not JSON.
+Inject real domain-specific repositories into operations when persistence is needed;
+there is no universal database interface, ORM, resource authorization or durable
+business audit implementation. Slog is diagnostic output, not durable audit.
+
+Runtime defaults then explicit environment overrides, loaded/validated once and
+injected. No implicit .env loading. `.env.example` documents {{.Prefix}} variables.
+`FEATURE_<UPPERCASE_KEY>` normalizes dots/hyphens to underscores. Flags default
+false; explicit false is preserved using pointers. Client-visible declarations
+alone reach authenticated `/api/features`; route gates use the same evaluator.
+These startup flags require restart and do not claim OpenFeature compatibility.
+Feature visibility does not make an endpoint public or grant permissions.
+
+Responses are `{data:...}` or `{error:{code,message,request_id}}`. JSON decoding
+rejects unknown fields, invalid types, trailing JSON, and bodies over 16 KiB.
+Known duplicate JSON keys use stdlib last-value semantics; bodies must be JSON
+objects. GET/DELETE/HEAD/OPTIONS starters have no body contract. Add explicit
+domain validation and resource policies; OpenAPI cannot infer them. The server
+sets timeouts/security headers/no-store, negotiates gzip, and logs endpoint,
+status, generated request ID and verified actor{{if .Multi}}/tenant{{end}}, never bodies or credentials.
+
+Browser security defaults live in authored `internal/transport/security.go`,
+registered globally before recovery/authentication. They apply to successful,
+denied, missing, method-error and recovered-panic responses:
+
+- `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
+- CSP: `default-src 'none'; base-uri 'none'; form-action 'none';
+  frame-ancestors 'none'`, suitable for this JSON-only API.
+- Permissions Policy disables camera, microphone and geolocation.
+- COEP `require-corp`, COOP/CORP `same-origin`, and Origin-Agent-Cluster `?1`.
+- DNS prefetch is off; legacy download/cross-domain policies are restricted;
+  `X-XSS-Protection: 0` disables obsolete browser XSS filters.
+
+These are inspired by [Fiber Helmet](https://docs.gofiber.io/next/middleware/helmet/),
+implemented with net/http and no additional dependency. Adjust the authored
+middleware deliberately if serving HTML, interactive documentation or embeddable
+resources. CSP controls this API response document, not a separately hosted UI.
+CORP limits cross-origin no-cors resource loading; it does not configure CORS.
+Cross-origin frontend access still requires a reviewed CORS origin allowlist.
+Set HSTS at your HTTPS terminator after choosing the domain policy. The local
+HTTP scaffold neither sets HSTS nor trusts forwarded protocol headers; it never
+opts a domain into includeSubDomains or preload. Headers do not replace
+authentication, authorization, input validation or CSRF defenses for cookie auth.
+
+```sh
+go test ./...
+go vet ./...
+go run ./cmd/openapi -check
+go test ./internal/transport -run '^$' -fuzz '^FuzzDecode$' -fuzztime=3s -parallel=2
+pluto fmt                 # formatters + wsl fixes + formatters
+pluto vet                 # nonmutating; appropriate for CI
+pluto vet --staged        # conservative index/working-tree policy; see below
+```
+
+Install golangci-lint 2.15.0 from its official releases and put it on PATH, or
+use `mise exec golangci-lint@2.15.0 -- pluto vet`. The CLI requires the exact tool
+version and fails with guidance if absent. `.golangci.yml` is configurable; its
+80-column golines target permits indivisible strings/comments. Vet also enforces
+architecture imports (transitively), file sizes, manifest/generated contracts,
+OpenAPI freshness, Go vet and tests. Do not compress code to evade size checks.
+No formatter or import check can prove every business policy.
+
+Git init runs only outside existing worktrees and never invokes user hooks.
+Hook installation is opt-in (`pluto init --hook` or `pluto hook install`). It
+refuses existing pre-commit hooks, honors core.hooksPath and never changes Git
+config. Installing from a nested project refuses to alter ancestor hooks. An
+installed hook invokes `pluto vet --staged` from the resolved project root.
+Staged policy: refuse any unstaged, untracked or ignored project files, unresolved index
+entries and staged symlinks; verify indexed regular files against their raw Git blob hashes, then vet the
+identical working-tree contents. Ignored .env/bin files must be outside the
+project for hook use; clean/smudge transformations that differ are refused.
+No stash/index rewrite or claim to check a different staged snapshot. Stage all
+project files before committing; reinstall the CLI on PATH for the hook. Hooks
+are bypassable convenience; CI should run pluto vet.
+
+Database foundation: optional {{.Prefix}}DATABASE_URL opens and pings pgxpool at
+startup, then closes on shutdown. No operation uses it yet. db/migrations and
+queries provide only a schema metadata probe, not domain persistence. Regenerate:
+
+```sh
+sqlc generate  # pin 1.31.1; sqlc.yaml uses pgx/v5, version 2
+```
+
+SQL integration requires a real dedicated database; default tests make no SQL
+integration claim. No migration runner or production pool tuning is supplied.
+{{if .Mise}}
+`mise.toml` pins Go, golangci-lint and sqlc and supplies run/fmt/check/openapi
+ tasks. Review before `mise trust; mise install`. Install pluto locally first.{{end}}
+{{if .Fnox}}
+`fnox.toml` has only a nonsecret local log-level value. Run
+`fnox exec -- go run ./cmd/api` to scope environment injection to the child.
+{{if .Mise}}`mise run run` supplies this command with pinned fnox 1.43.0.{{else}}Install
+fnox 1.43.0 on PATH; this project omitted mise.{{end}}
+For real secrets, install age, generate a key outside the repo with
+`age-keygen -o ~/.config/fnox/age.txt` (do not overwrite an existing key), and add
+`[providers.age]`, `type = "age"`, `recipients = ["<your public age recipient>"]`.
+Set top-level `default_provider = "age"`, then `fnox set {{.Prefix}}DATABASE_URL --provider age` uses a hidden prompt and
+writes ciphertext. Remove the plaintext local value/provider first; keep private keys outside
+Git and arrange key access separately in CI. `fnox check --all` validates without
+dumping secrets. Never commit .env/private keys or run env dumps for diagnosis.
+See https://fnox.jdx.dev/guide/quick-start and provider docs.{{end}}
+{{if .Docker}}
+`docker compose up --build --wait` starts API + PostgreSQL using local-only
+example credentials, loopback published ports 8080/55432, no privileged sockets
+or host database mounts. API binds 0.0.0.0 inside its container; authentication
+still fails closed. Compose healthchecks verify process liveness and pg_isready;
+no domain SQL integration is implied. `docker compose down -v` discards local
+state. Docker images use version tags, not immutable digests; review/pin digests
+for deployment. Container checks require a running Docker daemon.{{end}}
+
+Prototype boundaries: no identity provider, RBAC role management, durable audit,
+domain SQL generator, distributed flags, production deployment, complete OpenAPI
+schema inference (recursive types unsupported), or automatic migrations. No
+network-free/offline promise: Go modules and optional tools may need downloads.
+Generation preflights known conflicts/symlinks and rolls back its own file writes
+on ordinary failures, but concurrent writers/process crashes are outside its
+transaction guarantee. Keep a backup/version control for authored changes.
+
+Per-endpoint `internal/app/<group>_<action>.go` bindings are authored constructor
+choices. Change the operation constructor and this binding together when adding
+repositories. Add typed fields to app.Dependencies and construct/inject them in
+app.New. Generated group registries accept narrow Operations interfaces and never
+choose concrete implementations; additions preserve authored constructor wiring.

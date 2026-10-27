@@ -1,0 +1,38 @@
+package features
+
+// Definition is an app-local feature declaration, not an OpenFeature contract.
+type Definition struct {
+	Key           string
+	ClientVisible bool
+	Default       bool
+}
+
+type Evaluator struct{ values map[string]bool }
+
+func New(overrides map[string]*bool) Evaluator {
+	values := make(map[string]bool, len(Declarations()))
+	for _, definition := range Declarations() {
+		value := definition.Default
+		if override := overrides[definition.Key]; override != nil {
+			value = *override
+		}
+
+		values[definition.Key] = value
+	}
+
+	return Evaluator{values: values}
+}
+
+func (e Evaluator) Enabled(key string) bool { return e.values[key] }
+
+func (e Evaluator) Visible() map[string]bool {
+	result := map[string]bool{}
+
+	for _, definition := range Declarations() {
+		if definition.ClientVisible {
+			result[definition.Key] = e.Enabled(definition.Key)
+		}
+	}
+
+	return result
+}
