@@ -1,0 +1,10 @@
+package access
+
+import rbac "github.com/plutoframework/pluto-rbac"
+
+// Roles is authored application policy. Adding an endpoint declares a capability
+// but never grants it to a role automatically. Assign known roles only after
+// verifying the subject and its membership in the selected scope.
+func Roles() []rbac.Role {
+	return []rbac.Role{}
+}

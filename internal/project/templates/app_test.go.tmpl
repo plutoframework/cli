@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"{{.Module}}/internal/config"
+"{{.Module}}/internal/access"
+rbac "github.com/plutoframework/pluto-rbac"
 	"{{.Module}}/internal/transport"
 )
 
@@ -23,6 +25,7 @@ func TestDefaultDenyAndLiveness(t *testing.T) {
 		cfg,
 		transport.DenyAll{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
+ testPolicy(t),
 	)
 
 	for _, test := range []struct {
@@ -69,6 +72,7 @@ func TestSecurityHeadersOnPanic(t *testing.T) {
 		cfg,
 		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
+ testPolicy(t),
 	)
 	request := httptest.NewRequest("GET", "/api/features", nil)
 	request.Header.Set("Authorization", "Bearer triggers-nil-auth-panic")
@@ -81,4 +85,11 @@ func TestSecurityHeadersOnPanic(t *testing.T) {
 		response.Header().Get("Content-Security-Policy") == "" {
 		t.Fatalf("panic response: %d %v", response.Code, response.Header())
 	}
+}
+
+func testPolicy(t testing.TB) *rbac.Policy {
+    t.Helper()
+    policy, err := access.NewPolicy()
+    if err != nil { t.Fatal(err) }
+    return policy
 }

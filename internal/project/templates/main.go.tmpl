@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"{{.Module}}/internal/app"
+	"{{.Module}}/internal/access"
 	"{{.Module}}/internal/config"
 	"{{.Module}}/internal/storage/postgres"
 	"{{.Module}}/internal/transport"
@@ -18,6 +19,11 @@ import (
 
 func run() error {
 	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	policy, err := access.NewPolicy()
 	if err != nil {
 		return err
 	}
@@ -48,7 +54,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              cfg.Server.Address,
-		Handler:           app.New(cfg, transport.DenyAll{}, logger),
+		Handler:           app.New(cfg, transport.DenyAll{}, logger, policy),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,

@@ -50,6 +50,20 @@ mutations = [
         '// Anti-sniffing header removed by mutation.',
         "TestGeneratedApplications/single",
     ),
+    (
+        "route RBAC gate",
+        "internal/project/templates/register.go.tmpl",
+        "!principal.Can(reg.Policy, endpoint.Permission)",
+        "false",
+        "TestGeneratedApplications/single",
+    ),
+    (
+        "direct operation RBAC gate",
+        "internal/project/templates/operation.go.tmpl",
+        "if !principal.Can(operation.policy, access.{{.Symbol}}Permission) {",
+        "if false && !principal.Can(operation.policy, access.{{.Symbol}}Permission) {",
+        "TestGeneratedApplications/single",
+    ),
 ]
 
 results = []

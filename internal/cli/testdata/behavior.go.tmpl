@@ -11,6 +11,7 @@ import (
  "testing"
 
  "{{.Module}}/internal/app"
+"{{.Module}}/internal/access"
  "{{.Module}}/internal/config"
  "{{.Module}}/internal/domain"
  "{{.Module}}/internal/features"
@@ -20,15 +21,21 @@ import (
  "{{.Module}}/internal/transport"
 
  "github.com/go-chi/chi/v5"
+rbac "github.com/plutoframework/pluto-rbac"
 )
 
-type trustedAuth struct { permission bool }
+type trustedAuth struct { permission bool; unknownRole bool }
 func (auth trustedAuth) Authenticate(_ context.Context,token string{{if .Multi}},tenant string{{end}}) (domain.Principal,error) {
- if token!="trusted"{{if .Multi}} || tenant!="member-tenant"{{end}} { return domain.Principal{},errors.New("untrusted") }
+ if token!="trusted"{{if .Multi}} || tenant!="member-tenant"{{end}} {
+  return domain.Principal{},errors.New("untrusted")
+ }
+ roles:=[]rbac.RoleID{"viewer"}
+ if auth.permission { roles=[]rbac.RoleID{"fixture"} }
+ if auth.unknownRole { roles=append(roles,"unknown-role") }
  return domain.Principal{
   ActorID:"actor",
   {{if .Multi}}TenantID:"member-tenant",{{end}}
-  Permissions:map[string]bool{"widgets.write":auth.permission},
+  Roles: roles,
  },nil
 }
 
@@ -61,7 +68,7 @@ func TestIndependentPolicyMatrix(t *testing.T) {
    router:=chi.NewRouter()
    operation:=&recordingOperation{}
    evaluator:=features.New(map[string]*bool{"widgets-create":&test.enabled})
-   reg:=transport.Registrar{Router:router,Auth:trustedAuth{permission:test.permission},Features:evaluator,Logger:slog.New(slog.NewTextHandler(io.Discard,nil))}
+   reg:=transport.Registrar{Router:router,Auth:trustedAuth{permission:test.permission},Features:evaluator,Policy:publishedPolicy(t),Logger:slog.New(slog.NewTextHandler(io.Discard,nil))}
    widgets.RegisterCreate(reg,operation,16*1024)
    request:=httptest.NewRequest("POST","/api/widgets/item-1",strings.NewReader(test.body))
    request.Header.Set("Authorization","Bearer "+test.token)
@@ -89,7 +96,7 @@ func TestResolvedFlagsAndIncompleteOperation(t *testing.T) {
  enabled:=true
  cfg.Features["widgets-create"]=&enabled
  cfg.Features["private-report"]=&enabled
- router:=app.New(cfg,trustedAuth{permission:true},slog.New(slog.NewTextHandler(io.Discard,nil)))
+ router:=app.New(cfg,trustedAuth{permission:true},slog.New(slog.NewTextHandler(io.Discard,nil)),publishedPolicy(t))
  request:=httptest.NewRequest("GET","/api/features",nil)
  request.Header.Set("Authorization","Bearer trusted")
  request.Header.Set("X-Tenant-ID","member-tenant")
@@ -104,4 +111,35 @@ func TestResolvedFlagsAndIncompleteOperation(t *testing.T) {
  response=httptest.NewRecorder()
  router.ServeHTTP(response,request)
  if response.Code!=501 || !strings.Contains(response.Body.String(),"not_implemented") { t.Fatalf("stub claimed success: %d %s",response.Code,response.Body) }
+}
+
+func publishedPolicy(t testing.TB) *rbac.Policy {
+ t.Helper()
+ policy,err:=access.NewPolicy()
+ if err!=nil { t.Fatal(err) }
+ return policy
+}
+
+func TestUnknownRolesDoNotRetainGrants(t *testing.T) {
+ for _,policy:=range []*rbac.Policy{publishedPolicy(t),nil} {
+  router:=chi.NewRouter()
+  operation:=&recordingOperation{}
+  enabled:=true
+  reg:=transport.Registrar{
+   Router:router,
+   Auth:trustedAuth{permission:true,unknownRole:policy!=nil},
+   Features:features.New(map[string]*bool{"widgets-create":&enabled}),
+   Logger:slog.New(slog.NewTextHandler(io.Discard,nil)),
+   Policy:policy,
+  }
+  widgets.RegisterCreate(reg,operation,16*1024)
+  request:=httptest.NewRequest("POST","/api/widgets/item-1",strings.NewReader(`{}`))
+  request.Header.Set("Authorization","Bearer trusted")
+  request.Header.Set("X-Tenant-ID","member-tenant")
+  response:=httptest.NewRecorder()
+  router.ServeHTTP(response,request)
+  if response.Code!=403 || operation.calls!=0 {
+   t.Fatalf("unknown role/nil policy retained grants: status=%d calls=%d",response.Code,operation.calls)
+  }
+ }
 }

@@ -11,12 +11,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	rbac "github.com/plutoframework/pluto-rbac"
 )
 
 func New(
 	cfg config.Config,
 	auth transport.Authenticator,
 	logger *slog.Logger,
+	policy *rbac.Policy,
 ) http.Handler {
 	evaluator := features.New(cfg.Features)
 	router := chi.NewRouter()
@@ -39,6 +41,7 @@ func New(
 		Auth:     auth,
 		Features: evaluator,
 		Logger:   logger,
+		Policy:   policy,
 	}
 	reg.Handle(paths.Health, func(w http.ResponseWriter, _ *http.Request) {
 		transport.JSON(
@@ -54,7 +57,7 @@ func New(
 			paths.FeaturesResponse{Data: evaluator.Visible()},
 		)
 	})
-	RegisterGenerated(reg, Dependencies{Config: cfg})
+	RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy})
 	router.NotFound(
 		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 404, "not_found") },
 	)

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+	rbac "github.com/plutoframework/pluto-rbac"
 )
 
 const SchemaVersion = 2
@@ -216,10 +217,23 @@ func (e Endpoint) Validate(multi bool) error {
 		)
 	}
 
-	for _, key := range []string{e.Permission, e.Feature} {
-		if key != "" && !metadataKey.MatchString(key) {
-			return fmt.Errorf("invalid permission/feature key %q", key)
+	if e.Permission != "" {
+		_, err := rbac.New(rbac.Definition{
+			Permissions: []rbac.Permission{
+				{
+					ID:          rbac.PermissionID(e.Permission),
+					Name:        "Capability",
+					Description: "Endpoint capability.",
+				},
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("invalid permission %q: %w", e.Permission, err)
 		}
+	}
+
+	if e.Feature != "" && !metadataKey.MatchString(e.Feature) {
+		return fmt.Errorf("invalid feature key %q", e.Feature)
 	}
 
 	if e.ClientVisible && e.Feature == "" {

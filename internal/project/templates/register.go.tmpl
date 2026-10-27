@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	rbac "github.com/plutoframework/pluto-rbac"
 )
 
 // Authenticator validates bearer credentials and, for multi tenancy, selected
@@ -39,6 +40,7 @@ type Registrar struct {
 	Auth     Authenticator
 	Features features.Evaluator
 	Logger   *slog.Logger
+	Policy   *rbac.Policy
 }
 
 func (reg Registrar) Handle(endpoint paths.Endpoint, handler http.HandlerFunc) {
@@ -94,7 +96,7 @@ func (reg Registrar) Handle(endpoint paths.Endpoint, handler http.HandlerFunc) {
 					context.WithValue(r.Context(), principalKey{}, principal),
 				)
 				if endpoint.Permission != "" &&
-					!principal.Permissions[endpoint.Permission] {
+					!principal.Can(reg.Policy, endpoint.Permission) {
 					Error(writer, r, 403, "forbidden")
 
 					return

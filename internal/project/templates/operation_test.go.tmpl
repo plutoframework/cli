@@ -1,17 +1,63 @@
 package {{.Group}}
 
 import (
-	"context"
-	"errors"
-	"testing"
+    "context"
+    "errors"
+    "testing"
 
-	"{{.Module}}/internal/domain"
-	"{{.Module}}/internal/models/{{.Group}}"
+    "{{.Module}}/internal/access"
+    "{{.Module}}/internal/domain"
+    "{{.Module}}/internal/models/{{.Group}}"
+
+    rbac "github.com/plutoframework/pluto-rbac"
 )
 
 func Test{{.Action}}Incomplete(t *testing.T) {
-	output, err := New{{.Action}}().Execute(context.Background(), domain.Principal{}, {{.Group}}.{{.Action}}Request{Value: "must not succeed"})
-	if !errors.Is(err, domain.ErrNotImplemented) || output.Value != "" {
-		t.Fatalf("incomplete operation returned %#v, %v", output, err)
-	}
+    grants := []rbac.PermissionID{}
+{{if .Permission}}    grants = append(grants, access.{{.Symbol}}Permission)
+{{end}}    policy, err := rbac.New(rbac.Definition{
+        Permissions: access.Permissions(),
+        Roles: []rbac.Role{
+            {
+                ID: "test-caller",
+                Name: "Test caller",
+                Description: "Test-only capability grants.",
+                Permissions: grants,
+            },
+        },
+    })
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    operation := New{{.Action}}(policy)
+    principal := domain.Principal{
+        ActorID: "test-actor",
+{{if .Multi}}        TenantID: "test-tenant",
+{{end}}        Roles: []rbac.RoleID{"test-caller"},
+    }
+    input := {{.Group}}.{{.Action}}Request{Value: "must not succeed"}
+    output, err := operation.Execute(context.Background(), principal, input)
+    if !errors.Is(err, domain.ErrNotImplemented) || output.Value != "" {
+        t.Fatalf("incomplete operation returned %#v, %v", output, err)
+    }
+{{if not .Public}}
+    _, err = operation.Execute(context.Background(), domain.Principal{}, input)
+    if !errors.Is(err, domain.ErrUnauthenticated) {
+        t.Fatalf("unauthenticated direct operation call: %v", err)
+    }
+{{end}}
+{{if .Permission}}
+    principal.Roles = nil
+    _, err = operation.Execute(context.Background(), principal, input)
+    if !errors.Is(err, domain.ErrForbidden) {
+        t.Fatalf("missing grants reached incomplete operation: %v", err)
+    }
+
+    principal.Roles = []rbac.RoleID{"test-caller", "unknown-role"}
+    _, err = operation.Execute(context.Background(), principal, input)
+    if !errors.Is(err, domain.ErrForbidden) {
+        t.Fatalf("unknown role retained partial grants: %v", err)
+    }
+{{end}}
 }

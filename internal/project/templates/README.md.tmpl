@@ -41,7 +41,41 @@ Commands discover pluto.toml in cwd/parents; saved tenancy/prefix are reused.
 the prototype schema 1 with developer presets and endpoint generation records.
 Unknown fields/settings fail; no automatic schema migration is implied.
 
-Metadata in `[[endpoints]]` is the generation source for CLI-owned paths,
+Authorization imports `github.com/plutoframework/pluto-rbac` at the exact version
+in go.mod/go.sum, with no sibling checkout or local replacement. Startup compiles
+one immutable policy and injects it into the router and operations.
+`internal/access/permissions_gen.go` declares capabilities and named endpoint
+permission constants from the manifest. Authored `internal/access/roles.go`
+starts empty: adding a permission does not automatically grant it to anyone.
+
+After adding the sample widgets Create endpoint, edit `access.Roles()`:
+
+```go
+func Roles() []rbac.Role {
+    return []rbac.Role{
+        {
+            ID:          "member",
+            Name:        "Member",
+            Description: "Create authorized widgets in the active scope.",
+            Permissions: []rbac.PermissionID{WidgetsCreatePermission},
+        },
+    }
+}
+```
+
+Role inheritance uses `Inherits: []rbac.RoleID{"member"}` on another named role.
+Authored `access.Permissions()` can customize capability names/descriptions or
+append capabilities outside HTTP. Unknown grants, parents or cycles fail startup.
+The authenticator resolves `Principal.Roles` from verified server-side membership;
+never trust an arbitrary role header/claim. A subject can have different roles
+in different tenants. Route and direct operation checks use `principal.Can` with
+the same injected policy. Unknown roles (even alongside known roles), absent
+grants and a missing policy deny permission checks. Scope/ownership checks and
+membership freshness remain application responsibilities. The library evaluates
+trusted role IDs; this adapter uses the membership snapshot returned by auth.
+`pluto fmt` and `pluto vet` validate the resulting app and exercise both boundaries.
+
+Metadata in `[[endpoints]]` is the generation source for CLI-owned permissions, paths,
 feature declarations and group/composition registries (`*_gen.go`). Do not edit
 these files; vet checks their semantic content against the manifest. Route strings
 appear only in paths at runtime. Models, per-endpoint handlers/operations/tests,

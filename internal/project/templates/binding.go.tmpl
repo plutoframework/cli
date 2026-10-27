@@ -7,6 +7,6 @@ import (
 
 // new{{.Symbol}} is authored composition code. Add explicit dependencies here
 // when implementing the operation; future endpoint additions never rewrite it.
-func new{{.Symbol}}(_ Dependencies) {{.Group}}handlers.{{.Action}}Operations {
- return {{.Group}}operations.New{{.Action}}()
+func new{{.Symbol}}(dependencies Dependencies) {{.Group}}handlers.{{.Action}}Operations {
+ return {{.Group}}operations.New{{.Action}}(dependencies.Policy)
 }

@@ -1,18 +1,32 @@
 package domain
 
-import "errors"
+import (
+	"errors"
 
-var ErrNotImplemented = errors.New("operation not implemented")
+	rbac "github.com/plutoframework/pluto-rbac"
+)
 
-// Principal comes only from the injected trusted authenticator. Tenant membership
-// must be verified there; request headers alone never establish identity.
+var (
+	ErrNotImplemented = errors.New("operation not implemented")
+	ErrUnauthenticated = rbac.ErrUnauthenticated
+	ErrForbidden = rbac.ErrForbidden
+)
+
+// Principal comes only from the injected trusted authenticator. Roles must be
+// resolved for this actor and, in tenant mode, this exact verified membership.
+// Never copy identity, tenant or role claims from unverified request input.
 type Principal struct {
 	ActorID string
  {{if .Multi}}TenantID string{{end}}
 
-	Permissions map[string]bool
+	Roles []rbac.RoleID
 }
 
 func (p Principal) Verified() bool {
 	return p.ActorID != ""{{if .Multi}} && p.TenantID != ""{{end}}
+}
+
+// Can uses the same injected compiled policy at HTTP and operation boundaries.
+func (p Principal) Can(policy *rbac.Policy, permission rbac.PermissionID) bool {
+	return p.Verified() && policy.Allows(p.Roles, permission)
 }

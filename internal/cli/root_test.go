@@ -203,7 +203,7 @@ func TestGeneratedApplications(t *testing.T) {
 
 			for _, endpoint := range [][]string{
 				{"widgets", "Create", "--method", "POST", "--path", "/api/widgets/{id}", "--permission", "widgets.write", "--feature", "widgets-create", "--feature-client-visible"},
-				{"widgets", "Get", "--method", "GET", "--path", "/api/widgets/{id}"},
+				{"widgets", "Get", "--method", "GET", "--path", "/api/widgets/{id}", "--permission", "widgets.write"},
 				{"reports", "List", "--method", "GET", "--path", "/api/reports", "--feature", "private-report"},
 			} {
 				mustInvoke(
@@ -218,6 +218,45 @@ func TestGeneratedApplications(t *testing.T) {
 					)...)
 			}
 
+			rolePath := filepath.Join(root, "internal/access/roles.go")
+
+			roleSource, err := os.ReadFile(rolePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !bytes.Contains(roleSource, []byte("return []rbac.Role{}")) {
+				t.Fatal("generated roles grant capabilities automatically")
+			}
+
+			roleSource = bytes.Replace(
+				roleSource,
+				[]byte("return []rbac.Role{}"),
+				[]byte(`return []rbac.Role{
+                {
+                    ID: "writer",
+                    Name: "Writer",
+                    Description: "Can write widgets.",
+                    Permissions: []rbac.PermissionID{WidgetsCreatePermission},
+                },
+                {
+                    ID: "fixture",
+                    Name: "Test reviewer",
+                    Description: "Inherits widget writing for integration tests.",
+                    Inherits: []rbac.RoleID{"writer"},
+                },
+                {
+                    ID: "viewer",
+                    Name: "Viewer",
+                    Description: "No write grants.",
+                },
+            }`),
+				1,
+			)
+			if err := os.WriteFile(rolePath, roleSource, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
 			authored := filepath.Join(
 				root,
 				"internal/operations/widgets/create.go",
@@ -230,8 +269,8 @@ func TestGeneratedApplications(t *testing.T) {
 
 			original = bytes.Replace(
 				original,
-				[]byte("NewCreate()"),
-				[]byte("NewCreate(_ string)"),
+				[]byte("NewCreate(policy *rbac.Policy)"),
+				[]byte("NewCreate(policy *rbac.Policy, _ string)"),
 				1,
 			)
 
@@ -248,8 +287,8 @@ func TestGeneratedApplications(t *testing.T) {
 			bindingOriginal := replaceSource(
 				t,
 				bindingPath,
-				"NewCreate()",
-				`NewCreate("authored-dependency")`,
+				"NewCreate(dependencies.Policy)",
+				`NewCreate(dependencies.Policy, "authored-dependency")`,
 			)
 			replaceSource(
 				t,
@@ -257,8 +296,8 @@ func TestGeneratedApplications(t *testing.T) {
 					root,
 					"internal/operations/widgets/create_test.go",
 				),
-				"NewCreate()",
-				`NewCreate("unit-fixture")`,
+				"NewCreate(policy)",
+				`NewCreate(policy, "unit-fixture")`,
 			)
 
 			mustInvoke(
@@ -272,6 +311,8 @@ func TestGeneratedApplications(t *testing.T) {
 				"GET",
 				"--path",
 				"/api/reports/{id}",
+				"--permission",
+				"reports:read",
 				"--name",
 				"Read report",
 				"--description",
@@ -286,6 +327,11 @@ func TestGeneratedApplications(t *testing.T) {
 			bindingPreserved, err := os.ReadFile(bindingPath)
 			if err != nil || !bytes.Equal(bindingPreserved, bindingOriginal) {
 				t.Fatal("authored constructor binding overwritten")
+			}
+
+			retainedRoles, err := os.ReadFile(rolePath)
+			if err != nil || !bytes.Equal(roleSource, retainedRoles) {
+				t.Fatal("endpoint addition overwrote authored RBAC roles")
 			}
 
 			if !multi {
@@ -370,6 +416,7 @@ func TestGeneratedApplications(t *testing.T) {
 				Paths map[string]map[string]struct {
 					ID         string `json:"operationId"`
 					Feature    string `json:"x-feature"`
+					Permission string `json:"x-permission"`
 					Security   []any  `json:"security"`
 					Parameters []struct {
 						Name string `json:"name"`
@@ -383,10 +430,15 @@ func TestGeneratedApplications(t *testing.T) {
 			spec := openapi.Paths["/api/widgets/{id}"]["post"]
 			if spec.ID != "widgets.Create" ||
 				spec.Feature != "widgets-create" ||
+				spec.Permission != "widgets.write" ||
 				len(spec.Security) != 1 ||
 				len(spec.Parameters) != 1 ||
 				spec.Parameters[0].Name != "id" {
 				t.Fatalf("OpenAPI metadata lost: %+v", spec)
+			}
+
+			if openapi.Paths["/api/reports/{id}"]["get"].Permission != "reports:read" {
+				t.Fatal("colon-separated RBAC capability missing from OpenAPI")
 			}
 
 			if err := os.WriteFile(
@@ -522,7 +574,7 @@ func TestGeneratedApplications(t *testing.T) {
 			}
 
 			// Managed semantic tampering is detected; no subsequent generation occurs.
-			path := filepath.Join(root, "internal/paths/widgets_gen.go")
+			path := filepath.Join(root, "internal/access/permissions_gen.go")
 
 			content, err := os.ReadFile(path)
 			if err != nil {

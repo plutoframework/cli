@@ -5,7 +5,10 @@ import (
 	"strings"
 )
 
-// ToolFiles contains development dependencies only. None are app runtime imports.
+// RBACVersion pins the published package used by the CLI and generated apps.
+const RBACVersion = "v0.0.0-20261027065629-25c44e7fe21b"
+
+// ToolFiles contains module dependencies and optional development configuration.
 func ToolFiles(m Manifest) map[string][]byte {
 	files := map[string][]byte{}
 	files["go.mod"] = []byte(fmt.Sprintf(`module %s
@@ -15,6 +18,7 @@ go 1.25.5
 require (
  github.com/go-chi/chi/v5 v5.2.3
  github.com/jackc/pgx/v5 v5.7.6
+ github.com/plutoframework/pluto-rbac %s
 )
 
 require (
@@ -25,7 +29,7 @@ require (
  golang.org/x/sync v0.13.0 // indirect
  golang.org/x/text v0.24.0 // indirect
 )
-`, m.Project.Module))
+`, m.Project.Module, RBACVersion))
 	files["go.sum"] = []byte(appGoSum)
 	files[".golangci.yml"] = []byte(
 		strings.ReplaceAll(lintConfig, "MODULE", m.Project.Module),

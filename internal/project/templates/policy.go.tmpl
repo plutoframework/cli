@@ -1,0 +1,18 @@
+// Package access owns the application's RBAC catalog.
+package access
+
+import rbac "github.com/plutoframework/pluto-rbac"
+
+// NewPolicy compiles and validates the catalog once in the composition root.
+func NewPolicy() (*rbac.Policy, error) {
+	return rbac.New(rbac.Definition{
+		Permissions: Permissions(),
+		Roles: Roles(),
+	})
+}
+
+// Permissions is authored: customize display metadata here or append capabilities
+// used outside HTTP. Keep the generated declarations needed by your endpoints.
+func Permissions() []rbac.Permission {
+	return GeneratedPermissions()
+}

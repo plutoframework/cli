@@ -1,6 +1,8 @@
 // Package paths owns the runtime catalog derived from pluto.toml.
 package paths
 
+import rbac "github.com/plutoframework/pluto-rbac"
+
 type Endpoint struct {
 	ID            string
 	Name          string
@@ -8,7 +10,7 @@ type Endpoint struct {
 	Method        string
 	Path          string
 	Authenticated bool
-	Permission    string
+	Permission    rbac.PermissionID
 	Feature       string
 	Request       any
 	Response      any

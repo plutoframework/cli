@@ -57,6 +57,27 @@ The server runs, and public liveness works; generated business operations return
 incomplete operations never claim success. Resource authorization remains authored
 business logic, separate from route permissions and feature gates.
 
+Authorization uses the published `github.com/plutoframework/pluto-rbac` module,
+pinned to `v0.0.0-20261027065629-25c44e7fe21b` in the CLI and generated apps.
+The CLI validates permission IDs with that library, including `resource:action`
+IDs. No local `replace` or sibling checkout is required.
+
+Generated `internal/access/permissions_gen.go` holds deduplicated capability
+declarations and endpoint permission constants. Authored `internal/access/roles.go`
+starts empty: declaring a capability never grants it automatically. Define named
+roles, grants and optional inheritance there; customize display metadata through
+authored `access.Permissions()`. Startup compiles one policy and injects it through
+the router and `app.Dependencies.Policy` into each operation constructor.
+Authenticators return trusted `Principal.Roles` for the verified actor/tenant.
+Both route and direct operation permission checks use that same policy; unknown
+roles invalidate the complete assignment, and a nil policy grants nothing.
+Ownership, tenant-scoped SQL and revocation consistency remain application policy.
+
+The templates change authored principal, composition and operation signatures.
+Existing generated apps need an explicit RBAC migration (or a fresh scaffold);
+`add endpoint` does not overwrite authored files to perform that migration.
+The separate purchasing example is already integrated with this package.
+
 The generated README and AGENTS explain config, injection, models, strict bounded
 JSON, diagnostics, tests, Docker, secrets and the ownership boundary. Defaults then
 explicit uppercase environment overrides are loaded/validated once. `.env` is never

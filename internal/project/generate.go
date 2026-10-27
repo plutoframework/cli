@@ -90,6 +90,13 @@ func render(name string, data templateData) ([]byte, error) {
 func Managed(m Manifest) (map[string][]byte, error) {
 	files := map[string][]byte{}
 
+	permissions, err := permissionDeclarations(m)
+	if err != nil {
+		return nil, err
+	}
+
+	files["internal/access/permissions_gen.go"] = permissions
+
 	groups := map[string][]Endpoint{}
 	for _, e := range m.Endpoints {
 		groups[e.Group] = append(groups[e.Group], e)
@@ -129,9 +136,9 @@ func Managed(m Manifest) (map[string][]byte, error) {
 	for _, name := range names {
 		var paths, register strings.Builder
 		paths.WriteString(
-			"package paths\nimport " + strconv.Quote(
+			"package paths\nimport (" + strconv.Quote(
 				m.Project.Module+"/internal/models/"+name,
-			) + "\n",
+			) + "\n" + strconv.Quote(m.Project.Module+"/internal/access") + ")\n",
 		)
 		register.WriteString(
 			"package " + name + "\nimport " + strconv.Quote(
@@ -168,7 +175,7 @@ func Managed(m Manifest) (map[string][]byte, error) {
 
 			fmt.Fprintf(
 				&paths,
-				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\nMethod:%q,\nPath:%q,\nAuthenticated:%t,\nPermission:%q,\nFeature:%q,\nRequest:%s,\nResponse:%s.%sResponse{},\nSuccessStatus:200,\n}\n",
+				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\nMethod:%q,\nPath:%q,\nAuthenticated:%t,\nPermission:access.%sPermission,\nFeature:%q,\nRequest:%s,\nResponse:%s.%sResponse{},\nSuccessStatus:200,\n}\n",
 				d.Symbol,
 				e.Group+"."+e.Action,
 				e.Name,
@@ -176,7 +183,7 @@ func Managed(m Manifest) (map[string][]byte, error) {
 				e.Method,
 				e.Path,
 				!e.Public,
-				e.Permission,
+				d.Symbol,
 				e.Feature,
 				request,
 				e.Group,
@@ -295,6 +302,8 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	layout := map[string]string{
+		"internal/access/policy.go":                  "policy.go",
+		"internal/access/roles.go":                   "roles.go",
 		"internal/domain/principal.go":               "domain.go",
 		"internal/features/features.go":              "features.go",
 		"internal/config/config.go":                  "config.go",

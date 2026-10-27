@@ -39,6 +39,18 @@ func Error(w http.ResponseWriter, r *http.Request, status int, code string) {
 }
 
 func OperationError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, domain.ErrUnauthenticated) {
+		Error(w, r, http.StatusUnauthorized, "unauthenticated")
+
+		return
+	}
+
+	if errors.Is(err, domain.ErrForbidden) {
+		Error(w, r, http.StatusForbidden, "forbidden")
+
+		return
+	}
+
 	if errors.Is(err, domain.ErrNotImplemented) {
 		Error(w, r, http.StatusNotImplemented, "not_implemented")
 
