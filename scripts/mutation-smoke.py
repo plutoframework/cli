@@ -9,6 +9,20 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 mutations = [
     (
+        "job kind uniqueness",
+        "internal/project/jobs.go",
+        "identifiers[identifier] || kinds[job.Kind]",
+        "identifiers[identifier]",
+        "TestGeneratedJobs/single",
+    ),
+    (
+        "job tenant delivery guard",
+        "internal/project/templates/job.go.tmpl",
+        'if job.TenantID == nil || *job.TenantID == ""',
+        'if false',
+        "TestGeneratedJobs/multi",
+    ),
+    (
         "auth route namespace reservation",
         "internal/project/manifest.go",
         'strings.HasPrefix(e.Path, "/auth/")',

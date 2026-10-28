@@ -13,7 +13,7 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 type Manifest struct {
 	SchemaVersion int          `toml:"schema_version"`
@@ -22,6 +22,7 @@ type Manifest struct {
 	Database      Database     `toml:"database"`
 	Development   Development  `toml:"development"`
 	Endpoints     []Endpoint   `toml:"endpoints,omitempty"`
+	Jobs          []Job        `toml:"jobs,omitempty"`
 }
 
 type Project struct {
@@ -104,6 +105,10 @@ func (m Manifest) Validate() error {
 
 	if m.Database.Engine != "postgres" || m.Database.Queries != "sqlc" {
 		return fmt.Errorf("database requires engine=postgres and queries=sqlc")
+	}
+
+	if err := validateJobs(m.Jobs); err != nil {
+		return err
 	}
 
 	seenID, seenRoute := map[string]bool{}, map[string]bool{}

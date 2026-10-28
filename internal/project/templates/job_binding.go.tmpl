@@ -1,0 +1,12 @@
+package background
+
+import (
+    {{.Group}}jobs "{{.Module}}/internal/jobs/{{.Group}}"
+    jobs "github.com/plutoframework/pluto-jobs"
+)
+
+// new{{.Symbol}} is authored constructor wiring. Inject consumer-sized adapters
+// from Dependencies here; adding other jobs never changes this binding.
+func new{{.Symbol}}(dependencies Dependencies) jobs.Handler {
+    return {{.Group}}jobs.Handle{{.Action}}
+}

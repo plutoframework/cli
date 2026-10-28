@@ -23,4 +23,4 @@ if [[ "$ready" != true ]]; then
 fi
 port=$(docker port "$container" 5432/tcp | awk -F: '{print $NF}')
 PLUTO_CLI_TEST_DATABASE_URL="postgres://pluto_demo:local_only@127.0.0.1:${port}/pluto_demo?sslmode=disable" \
-  go test -race -count=1 ./internal/cli -run TestGeneratedLocalApplications -v
+  go test -race -count=1 ./internal/cli -run 'TestGeneratedLocalApplications|TestGeneratedJobs' -v

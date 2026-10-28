@@ -14,6 +14,10 @@ const CorePostgresVersion = "v0.1.0"
 
 const RBACVersion = "v0.1.0"
 
+const JobsVersion = "v0.1.1"
+
+const JobsPostgresVersion = "v0.1.0"
+
 // The published pgx adapter imports the local store in its package, so its
 // password/crypto dependencies are transitive even in session-only PG apps.
 func passwordRequirement(m Manifest) string {
@@ -39,6 +43,8 @@ require (
  github.com/plutoframework/pluto-rbac %s
  github.com/plutoframework/pluto-auth %s
  github.com/plutoframework/pluto-auth/stores/postgres %s
+ github.com/plutoframework/pluto-jobs %s
+ github.com/plutoframework/pluto-jobs/stores/postgres %s
 )
 
 require (
@@ -51,7 +57,7 @@ require (
  golang.org/x/sync v0.22.0 // indirect
  golang.org/x/text v0.41.0 // indirect
 )
-`, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthVersion, passwordRequirement(m)))
+`, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthVersion, JobsVersion, JobsPostgresVersion, passwordRequirement(m)))
 	files["go.sum"] = []byte(appGoSum)
 	files[".golangci.yml"] = []byte(
 		strings.ReplaceAll(lintConfig, "MODULE", m.Project.Module),
@@ -112,10 +118,13 @@ sql:
 [tools]
 go = "1.25.5"
 golangci-lint = "2.15.0"
-sqlc = "1.31.1"
+"go:github.com/sqlc-dev/sqlc/cmd/sqlc" = "1.31.1"
 
 [tasks.run]
 run = "go run ./cmd/api"
+
+[tasks.worker]
+run = "go run ./cmd/worker"
 
 [tasks.fmt]
 run = "pluto fmt"
@@ -132,14 +141,20 @@ run = "sqlc generate"
 		if m.Development.Fnox {
 			content = strings.Replace(
 				content,
-				"sqlc = \"1.31.1\"",
-				"sqlc = \"1.31.1\"\nfnox = \"1.43.0\"",
+				"\"go:github.com/sqlc-dev/sqlc/cmd/sqlc\" = \"1.31.1\"",
+				"\"go:github.com/sqlc-dev/sqlc/cmd/sqlc\" = \"1.31.1\"\nfnox = \"1.43.0\"",
 				1,
 			)
 			content = strings.Replace(
 				content,
 				"run = \"go run ./cmd/api\"",
 				"run = \"fnox exec -- go run ./cmd/api\"",
+				1,
+			)
+			content = strings.Replace(
+				content,
+				"run = \"go run ./cmd/worker\"",
+				"run = \"fnox exec -- go run ./cmd/worker\"",
 				1,
 			)
 		}
@@ -163,10 +178,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./cmd/api
+RUN CGO_ENABLED=0 go build -trimpath -o /out/worker ./cmd/worker
 
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates && adduser -D -u 10001 api
 COPY --from=build /out/api /usr/local/bin/api
+COPY --from=build /out/worker /usr/local/bin/worker
 USER api
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/api"]
@@ -190,6 +207,15 @@ ENTRYPOINT ["/usr/local/bin/api"]
       interval: 5s
       timeout: 3s
       retries: 10
+  worker:
+    build: .
+    profiles: ["worker"]
+    entrypoint: ["/usr/local/bin/worker"]
+    environment:
+      %sDATABASE_URL: postgres://pluto:local_only@postgres:5432/pluto?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
   postgres:
     image: postgres:18.6-alpine
     environment:
@@ -208,7 +234,7 @@ ENTRYPOINT ["/usr/local/bin/api"]
       retries: 10
 volumes:
   postgres-data:
-`, m.Project.EnvPrefix, m.Project.EnvPrefix))
+`, m.Project.EnvPrefix, m.Project.EnvPrefix, m.Project.EnvPrefix))
 	}
 
 	return files

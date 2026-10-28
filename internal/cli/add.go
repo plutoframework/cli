@@ -195,6 +195,7 @@ func addCommand(options Options) *cobra.Command {
 		"Preflight and list files without writing",
 	)
 	add.AddCommand(command)
+	add.AddCommand(addJobCommand(options))
 
 	return add
 }

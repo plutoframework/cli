@@ -22,6 +22,7 @@ type templateData struct {
 	Development
 	Endpoint
 	Symbol   string
+	JobKind  string
 	Params   []string
 	Body     bool
 	TestPath string
@@ -91,6 +92,16 @@ func render(name string, data templateData) ([]byte, error) {
 // are created once and never edited. No string replacement of user code occurs.
 func Managed(m Manifest) (map[string][]byte, error) {
 	files := map[string][]byte{}
+
+	jobs, err := jobRegistry(m)
+	if err != nil {
+		return nil, err
+	}
+
+	files["internal/background/handlers_gen.go"] = jobs
+	for path, source := range jobKinds(m) {
+		files[path] = source
+	}
 
 	permissions, err := permissionDeclarations(m)
 	if err != nil {
@@ -312,6 +323,9 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	layout := map[string]string{
+		"cmd/worker/main.go":                         "worker_main.go",
+		"internal/background/worker.go":              "worker.go",
+		"db/migrations/005_jobs.sql":                 "jobs_schema.sql",
 		"internal/access/policy.go":                  "policy.go",
 		"internal/access/memberships.go":             "memberships.go",
 		"internal/transport/pagination.go":           "pagination.go",

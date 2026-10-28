@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, **not an imaginary published Pluto framework**. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.1.1`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.2.0`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -96,15 +96,13 @@ at the HTTPS terminator. No Fiber dependency or automatic HSTS/preload is added.
 Rebuild the CLI before generating an app; existing authored app middleware is
 preserved and must be updated deliberately.
 
-`pluto.toml` schema **2** preserves the example's `[project]`, `[capabilities]` and
-`[database]` conventions. It deliberately extends schema 1 with `[development]`
-preset booleans and `[[endpoints]]` generator records. Unknown fields, incompatible
-versions, conflicting routes (including renamed parameter shapes), identifiers and
-feature environment aliases fail validation. Schema 1 is refused with a migration
-message; no silent interpretation of the purchasing example as a generic app.
+`pluto.toml` schema **6** records project/capability/database/development settings,
+endpoint definitions and typed job registrations. Unknown fields, incompatible
+versions, conflicting routes, job kinds and feature environment aliases fail
+validation. Older schemas require a deliberate manual migration.
 Metadata is authored once in TOML; generated paths/feature definitions/registries
 serve it at runtime. `pluto openapi` derives an artifact from those paths and actual
-Go wire models; `--check` verifies freshness. Add automatically regenerates it.
+Go wire models; `--check` verifies freshness. Endpoint addition automatically regenerates it.
 No business validations, resource policies or recursive model support are inferred.
 
 `*_gen.go` is wholly CLI-owned and checked semantically before regeneration.
@@ -213,7 +211,7 @@ choose concrete implementations; additions preserve authored constructor wiring.
 
 ## Session-enabled scaffolds
 
-New projects use manifest schema 5 and published Pluto Auth modules. Authenticated
+New projects use manifest schema 6 and published Pluto Auth modules. Authenticated
 routes verify sessions, then resolve trusted memberships through the authored
 access.Memberships adapter (deny by default). Cookie/Origin protection, optional
 opaque bearer credentials, session metadata/logout endpoints, explicit Postgres
@@ -260,10 +258,10 @@ transport adapters, Registrar/authentication/main wiring, and eligible endpoint
 metadata. Convert authored collection inputs/results/handlers to the shared page
 contracts and use bounded repository queries. Copy the new thin adapters from a
 fresh scaffold and review them; do not replace authored business logic. Only then
-set schema_version=5 and regenerate CLI-owned files. Older manifests are rejected
+set schema_version=6 and regenerate CLI-owned files. Older manifests are rejected
 before writes; regeneration never edits authored models/handlers/operations.
 
-## Optional local credentials (schema 5)
+## Optional local credentials
 
 `pluto init --local-credentials` saves `capabilities.local_credentials=true`.
 The default remains session-only external credential integration with no public
@@ -289,10 +287,10 @@ templates only wire its adapters. Auth root is stdlib-only, password uses x/cryp
 and the optional published pgx adapter currently imports password transitively in
 its package even for session-only consumers. The CLI's own dependencies stay small.
 
-Schema 4 and earlier manifests are rejected before writes. Compare a fresh schema-5
+Schema 5 and earlier manifests are rejected before writes. Compare a fresh schema-6
 scaffold, review published module pins and authored auth/config/main/path/transport
 changes, explicitly choose local_credentials=false (external sessions) or true,
-apply 004 only for local credentials, then set schema_version=5. Preserve existing
+apply 004 only for local credentials, then set schema_version=6. Preserve existing
 models/handlers/operations; add/check never migrates or overwrites authored code.
 An existing session-only app can retain its original schema and binary until it
 chooses a manual migration. No implicit generation upgrade is provided.
@@ -305,3 +303,57 @@ binding, Origin, challenge supersession/replay, delivery failure/resend, secure
 cookie/no-cache, reset/disable revocation, protected routes and logout. Existing
 single/multi generator tests retain pagination, idempotency, RBAC/flags and session
 compatibility checks. No messages leave test-process memory.
+
+## Jobs and transactional outbox (schema 6)
+
+Every new app imports published Pluto Jobs v0.1.1 and its Postgres adapter v0.1.0.
+It includes explicit migration `005_jobs.sql`, `cmd/worker`, an authored worker
+composition file and a CLI-owned registration catalog. No broker, startup DDL,
+provider client, implicit worker goroutine or copied worker implementation.
+
+```sh
+pluto add job invoices Send --kind invoice.send
+pluto fmt
+pluto vet
+go run ./cmd/worker
+```
+
+The command adds an authored typed payload/request constructor, handler and unit/
+fuzz tests in `internal/jobs/invoices`, then updates only the managed registry
+and TOML. Existing handlers remain intact. Duplicate kinds/identifiers, traversal,
+modified registries and file collisions fail before writes; `--dry-run` previews.
+Authored constructor bindings in `internal/background/<group>_<action>.go` receive
+typed Dependencies; extend them to inject adapters without globals or generated
+registry edits. Handlers deliberately return an unimplemented error until authored: they never
+acknowledge fake success. With no registrations, the worker refuses to claim work.
+
+Use the typed request with the published store's `EnqueueTx(ctx, tx, request)`
+inside the **same pgx transaction** as the domain write and audit. App repositories
+own commit/rollback; do not use independent Enqueue for transactional writes.
+Operations continue to depend on consumer-sized repository interfaces, not pgx.
+Set TenantID from the verified operation scope, then validate resource ownership
+again when loading canonical records for delivery. Never enqueue passwords, raw
+auth challenges or cookies. Auth delivery remains synchronous and separate.
+
+Worker settings live in nested `config.Config.Jobs`, initialized from the library's
+bounded defaults. Run it as its own process with DATABASE_URL. The Docker image
+contains both API/worker binaries; `docker compose --profile worker up --build`
+starts the opt-in worker after handlers have been implemented. `mise run worker`
+is also scaffolded. Migrations mount for fresh Compose databases only.
+
+Delivery is at least once. Handlers must honor cancellation, use a stable effect
+key such as job.ID, and tolerate acknowledgement loss. No heartbeat, external
+sender or production monitoring/retention policy is provided. Operators inspect
+fixed diagnostics and reconcile uncertain outcomes; never log job payloads.
+
+Migrating schema 5: compare a fresh schema-6 project, add the published pins/sums,
+005 migration, worker/config/background files and empty managed job registry.
+Preserve authored application logic; only then set schema_version=6. For earlier
+schemas, also complete the credential/Core migrations described above. Add/check
+never upgrades authored files automatically. PostgreSQL generator integration
+covers commit visibility, rollback and bounded retry/failure without fake success
+for both single- and multi-tenant apps.
+
+The mise sqlc pin uses the explicit Go backend instead of an unavailable registry
+alias. sqlc 1.31.1 needs Go 1.26+ for generation; Go can fetch that toolchain without
+changing the application's Go 1.25.5+ target or runtime dependency graph.

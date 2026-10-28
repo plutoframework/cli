@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/plutoframework/cli/internal/project"
 )
 
 func TestOldSchemaRejectedBeforeWrites(t *testing.T) {
@@ -34,8 +37,8 @@ func TestOldSchemaRejectedBeforeWrites(t *testing.T) {
 
 	old := strings.Replace(
 		string(data),
-		"schema_version = 5",
-		"schema_version = 4",
+		fmt.Sprintf("schema_version = %d", project.SchemaVersion),
+		fmt.Sprintf("schema_version = %d", project.SchemaVersion-1),
 		1,
 	)
 	if old == string(data) {
@@ -67,7 +70,11 @@ func TestOldSchemaRejectedBeforeWrites(t *testing.T) {
 	if err == nil ||
 		!strings.Contains(
 			err.Error(),
-			"unsupported schema_version 4 (need 5)",
+			fmt.Sprintf(
+				"unsupported schema_version %d (need %d)",
+				project.SchemaVersion-1,
+				project.SchemaVersion,
+			),
 		) {
 		t.Fatal(output, err)
 	}

@@ -23,6 +23,10 @@ github.com/plutoframework/pluto-core v0.1.2 h1:CKh+vu9jxd3o4A4hWPujffNepoK5mhe95
 github.com/plutoframework/pluto-core v0.1.2/go.mod h1:aU+OaFQxGmjf3simyHEJHxOZ/ja2dNnC5xyISaGkgVQ=
 github.com/plutoframework/pluto-core/stores/postgres v0.1.0 h1:qCTcfxBCutg+m/JC2c7FqeD6vEejLBSCEPsaqqSwH4Y=
 github.com/plutoframework/pluto-core/stores/postgres v0.1.0/go.mod h1:vXeYtitgQGS4cTClftO5AglxqqvWlFwdoB4kKUC5A7Q=
+github.com/plutoframework/pluto-jobs v0.1.1 h1:JTPldDRr1EshlepmdQKABsgGA3FQOEg7N7z7CE2Tejs=
+github.com/plutoframework/pluto-jobs v0.1.1/go.mod h1:ZsfBePMCtaD2XJonZAJ1V/A5UYnrBm3N763h1AjJKhQ=
+github.com/plutoframework/pluto-jobs/stores/postgres v0.1.0 h1:KZjPygjvqS6YlnNEV9vy9h6aqm6AUpXNybQeF6mRo54=
+github.com/plutoframework/pluto-jobs/stores/postgres v0.1.0/go.mod h1:D8ekZPPHk9ONvqb1vmmg8vXe2cvjzZENr3yie/UaFOw=
 github.com/plutoframework/pluto-rbac v0.1.0 h1:Q7d6c+neY8da65pViBYCb+uCn4EzbiOJhhj12r+BGA4=
 github.com/plutoframework/pluto-rbac v0.1.0/go.mod h1:3t1KayzQKiOQdeWeaE9oBYl9nPZsfQ0yvvvPA76edH8=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

@@ -104,14 +104,14 @@ endpoint additions do not enable omitted presets. Core lint/config/SQL files
 are always included and Git hooks remain opt-in.
 
 Commands discover pluto.toml in cwd/parents; saved tenancy/prefix are reused.
-`pluto.toml` is project metadata, never runtime settings/secrets. Schema 5 adds the explicit local_credentials choice to the Core/session contract.
+`pluto.toml` is project metadata, never runtime settings/secrets. Schema 6 includes typed job registrations and the shared Jobs worker foundation.
 Unknown fields/settings fail; no automatic schema migration is implied.
 For schema 2/3/4 apps, migrate authored app/config/main/transport wiring, module pins,
 static paths, session storage and migration manually before updating the manifest.
 The CLI refuses old schemas instead of overwriting authored authentication code.
 For schema 4, review the new published pins, choose local_credentials explicitly,
 compare the thin constructor/routes with a fresh scaffold, and apply 004 only if
-local credentials are enabled before changing schema_version to 5.
+local credentials are enabled before changing schema_version to 6.
 
 Authorization imports `github.com/plutoframework/pluto-rbac` at the exact version
 in go.mod/go.sum, with no sibling checkout or local replacement. Startup compiles
@@ -317,3 +317,67 @@ use core NewClaim/Store primitives and the Postgres adapter bound to the SAME pg
 transaction as typed application queries. See the published core README and
 transaction example. Keep domain policy separate from these transport adapters.
 For schema 3 migration review the CLI README; never overwrite authored source.
+
+## Background jobs and transactional outbox
+
+Pluto Jobs v0.1.1 / Postgres adapter v0.1.0 supply the runtime. Apply the explicit
+`db/migrations/005_jobs.sql` migration before producers or workers run. Never run
+DDL at startup. For session-only apps, migration 004 is intentionally absent.
+
+```sh
+pluto add job invoices Send --kind invoice.send
+pluto fmt
+pluto vet
+# Export DATABASE_URL with the app prefix, then:
+go run ./cmd/worker
+```
+
+Job payloads, handlers and unit/fuzz tests are authored files under
+`internal/jobs/<group>`; TOML and `internal/background/handlers_gen.go` record
+explicit registrations. Additional jobs preserve your existing handlers. Handler
+stubs return an error until implemented; change the scaffold's test to assert
+actual effects when implementing it. An empty worker refuses to claim any work.
+Inject consumer-sized sender/repository interfaces in authored worker composition.
+
+For transactional delivery, construct a typed request, then use the published
+adapter inside your repository's existing business transaction:
+
+```go
+request, err := invoices.NewSend(
+    invoices.SendPayload{ResourceID: invoice.ID},
+    jobs.Options{TenantID: &verifiedTenant},
+)
+if err != nil { return err }
+// tx is the SAME pgx transaction that writes the invoice and its audit event.
+if err := outbox.EnqueueTx(ctx, tx, request); err != nil { return err }
+return tx.Commit(ctx)
+```
+
+Construct outbox with `jobpostgres.New(pool)` at your composition boundary; import
+`jobs` from github.com/plutoframework/pluto-jobs and `jobpostgres` from its
+stores/postgres module. Application operations consume narrow repository
+interfaces and never import pgx. Independent Enqueue cannot make a separate
+business write atomic. Derive tenant metadata from verified scope; handlers must
+load canonical records with tenant predicates. Keep raw passwords, auth tokens,
+challenges and other secrets out of payloads. Credential delivery remains separate.
+
+Worker defaults are explicit in nested `config.Config.Jobs`. The dedicated process
+honors SIGTERM/interrupt and cooperative handler cancellation. Tune timeouts and
+lease bounds together. Delivery is at least once, with finite attempts and no
+heartbeat; make effects idempotent with job.ID or a stable domain event key.
+Inspect fixed database diagnostics; do not log payloads or raw provider errors.
+Applications own external senders, retention, monitoring and reconciliation.
+{{if .Docker}}
+The image includes api and worker. After implementing handlers, run
+`docker compose --profile worker up --build`. Worker is an explicit profile so a
+fresh app with no registrations does not start consuming/failing queued work.
+{{end}}{{if .Mise}}
+`mise run worker` runs the same entry point with your exported app environment.
+{{end}}
+Schema 5 migration is manual: compare a fresh schema-6 scaffold, add Jobs module
+pins/sums, migration 005, worker/config/background files and an empty managed
+registry before updating the manifest version. Preserve authored business code.
+
+The mise sqlc pin uses the explicit Go backend instead of an unavailable registry
+alias. sqlc 1.31.1 needs Go 1.26+ for generation; Go can fetch that toolchain without
+changing the application's Go 1.25.5+ target or runtime dependency graph.

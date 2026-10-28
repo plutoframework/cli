@@ -1,0 +1,91 @@
+package background
+
+import (
+    "context"
+    "errors"
+    "net/url"
+    "os"
+    "path/filepath"
+    "testing"
+    "time"
+
+    "example.com/jobs-test/internal/jobs/invoices"
+
+    "github.com/jackc/pgx/v5"
+    "github.com/jackc/pgx/v5/pgxpool"
+    jobs "github.com/plutoframework/pluto-jobs"
+    jobpostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
+)
+
+func TestPostgresGeneratedJobs(t *testing.T) {
+    address := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
+    if address == "" { t.Skip("SQL integration requires disposable PLUTO_CLI_TEST_DATABASE_URL") }
+    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+    defer cancel()
+    admin, err := pgxpool.New(ctx, address)
+    if err != nil { t.Fatal(err) }
+    defer admin.Close()
+    schema := "jobs_test_"+jobs.NewID()
+    identifier := pgx.Identifier{schema}.Sanitize()
+    if _, err := admin.Exec(ctx, "CREATE SCHEMA "+identifier); err != nil { t.Fatal(err) }
+    defer func() {
+        if _, err := admin.Exec(context.Background(), "DROP SCHEMA "+identifier+" CASCADE"); err != nil { t.Error(err) }
+    }()
+    parsed, err := url.Parse(address)
+    if err != nil { t.Fatal(err) }
+    parameters := parsed.Query()
+    parameters.Set("search_path", schema)
+    parsed.RawQuery = parameters.Encode()
+    pool, err := pgxpool.New(ctx, parsed.String())
+    if err != nil { t.Fatal(err) }
+    defer pool.Close()
+    migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "005_jobs.sql"))
+    if err != nil { t.Fatal(err) }
+    if _, err := pool.Exec(ctx, string(migration)); err != nil { t.Fatal(err) }
+    store, err := jobpostgres.New(pool)
+    if err != nil { t.Fatal(err) }
+    tenant := "tenant-one"
+    request, err := invoices.NewSend(invoices.SendPayload{ResourceID: "invoice-one"}, jobs.Options{TenantID: &tenant, MaxAttempts: 2})
+    if err != nil { t.Fatal(err) }
+    for _, commit := range []bool{false, true} {
+        tx, err := pool.Begin(ctx)
+        if err != nil { t.Fatal(err) }
+        if err := store.EnqueueTx(ctx, tx, request); err != nil { t.Fatal(err) }
+        if _, err := store.Claim(ctx, time.Minute); !errors.Is(err, jobs.ErrNoJob) { t.Fatal("uncommitted job visible", err) }
+        if commit {
+            if err := tx.Commit(ctx); err != nil { t.Fatal(err) }
+        } else {
+            if err := tx.Rollback(ctx); err != nil { t.Fatal(err) }
+            if _, err := store.Claim(ctx, time.Minute); !errors.Is(err, jobs.ErrNoJob) { t.Fatal("rollback left work", err) }
+        }
+    }
+    config := jobs.DefaultConfig()
+    config.Concurrency = 1
+    config.PollInterval = 5*time.Millisecond
+    config.RetryBase = 5*time.Millisecond
+    config.RetryMax = 20*time.Millisecond
+    worker, err := NewWorker(pool, config)
+    if err != nil { t.Fatal(err) }
+    workerContext, stop := context.WithCancel(ctx)
+    done := make(chan error, 1)
+    go func() { done <- worker.Run(workerContext) }()
+    defer func() {
+        stop()
+        if err := <-done; err != nil && !errors.Is(err, context.Canceled) { t.Error(err) }
+    }()
+    for {
+        var state, diagnostic string
+        var attempts int
+        err := pool.QueryRow(ctx, "SELECT state, attempts, diagnostic FROM pluto_jobs WHERE id=$1", request.ID).Scan(&state, &attempts, &diagnostic)
+        if err != nil { t.Fatal(err) }
+        if state == "failed" {
+            if attempts != 2 || diagnostic != "handler_error" { t.Fatal("wrong delivery accounting", attempts, diagnostic) }
+            break
+        }
+        if state == "succeeded" { t.Fatal("unimplemented handler acknowledged fake success") }
+        select {
+        case <-ctx.Done(): t.Fatal("worker never settled", state)
+        case <-time.After(5*time.Millisecond):
+        }
+    }
+}

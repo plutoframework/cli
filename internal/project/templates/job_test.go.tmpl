@@ -1,0 +1,45 @@
+package {{.Group}}
+
+import (
+    "context"
+    "errors"
+    "testing"
+
+    jobs "github.com/plutoframework/pluto-jobs"
+)
+
+func Test{{.Action}}HandlerBoundary(t *testing.T) {
+    tenant := "test-tenant"
+    request, err := New{{.Action}}({{.Action}}Payload{ResourceID: "resource"}, jobs.Options{TenantID: &tenant})
+    if err != nil { t.Fatal(err) }
+    job := jobs.Job{Request: request, Attempt: 1}
+    {{if .Multi}}
+    missingTenant := job
+    missingTenant.TenantID = nil
+    if err := Handle{{.Action}}(context.Background(), missingTenant); !errors.Is(err, jobs.ErrInvalid) {
+        t.Fatal("missing tenant accepted", err)
+    }
+    if _, err := New{{.Action}}({{.Action}}Payload{ResourceID: "resource"}, jobs.Options{}); !errors.Is(err, jobs.ErrInvalid) {
+        t.Fatal("unscoped producer accepted", err)
+    }
+    {{end}}
+    if err := Handle{{.Action}}(context.Background(), job); !errors.Is(err, Err{{.Action}}Unimplemented) {
+        t.Fatal("replace this expectation with your real effect assertion", err)
+    }
+    job.Payload = []byte("{}")
+    if err := Handle{{.Action}}(context.Background(), job); !errors.Is(err, jobs.ErrInvalid) {
+        t.Fatal("missing resource accepted", err)
+    }
+}
+
+func Fuzz{{.Action}}Payload(f *testing.F) {
+    f.Add([]byte("{}"))
+    f.Add([]byte("{\"resource_id\":\"example\"}"))
+    f.Fuzz(func(t *testing.T, payload []byte) {
+        tenant := "test-tenant"
+        request, err := New{{.Action}}({{.Action}}Payload{ResourceID: "resource"}, jobs.Options{TenantID: &tenant})
+        if err != nil { t.Fatal(err) }
+        request.Payload = payload
+        _ = Handle{{.Action}}(context.Background(), jobs.Job{Request: request, Attempt: 1})
+    })
+}

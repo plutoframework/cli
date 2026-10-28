@@ -1,7 +1,7 @@
 [tools]
 go = "1.25.5"
 golangci-lint = "2.15.0"
-sqlc = "1.31.1"
+"go:github.com/sqlc-dev/sqlc/cmd/sqlc" = "1.31.1"
 
 [tasks.fmt]
 run = "./scripts/fmt.sh"

@@ -3,7 +3,7 @@
 Read README.md first. Run pluto fmt and pluto vet before submitting changes.
 Keep every file <=1,000 lines; prefer expanded readable Go and 80 columns.
 
-pluto.toml schema 5 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
+pluto.toml schema 6 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
 Handlers, models, operations, composition root and transport helpers are authored
 and created once. Never add magic init registration. Add endpoints with the CLI.
 Do not import HTTP/storage from operations or database adapters from handlers,
@@ -36,3 +36,11 @@ and sessions. Never use direct Manager.Start/session-only issuance for local
 accounts. Keep delivery, shared account limits and trusted client/concurrency
 Ingress explicit; missing integrations fail startup. Auth responses never enter
 idempotency capture. Enrollment never grants membership or roles. No startup DDL.
+
+Jobs use the published Pluto Jobs runtime. EnqueueTx shares the exact business
+transaction; never silently split enqueue and commit. Handlers validate tenant
+ownership, honor cancellation and make effects idempotent. No auth challenge,
+password, cookie or token belongs in durable job payloads. Preserve authored job
+handlers and CLI-owned explicit registration. Run cmd/worker separately; no
+startup DDL or implicit goroutines. Empty/unimplemented workers must not fake
+successful delivery. Apply 005_jobs.sql explicitly to existing databases.

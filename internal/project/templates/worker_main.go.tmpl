@@ -1,0 +1,40 @@
+package main
+
+import (
+    "context"
+    "errors"
+    "log/slog"
+    "os"
+    "os/signal"
+    "syscall"
+
+    "{{.Module}}/internal/background"
+    "{{.Module}}/internal/config"
+    "{{.Module}}/internal/storage/postgres"
+
+)
+
+func run() error {
+    settings, err := config.Load()
+    if err != nil { return err }
+    if settings.Database.URL == "" { return errors.New("worker requires DATABASE_URL and migration 005_jobs.sql") }
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+    pool, err := postgres.Open(ctx, settings.Database.URL)
+    if err != nil { return errors.New("worker database unavailable") }
+    defer pool.Close()
+    // Tune these explicit defaults for your handlers and database latency.
+    worker, err := background.NewWorker(pool, settings.Jobs)
+    if err != nil { return err }
+    if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+        return errors.New("worker stopped; inspect sanitized job diagnostics")
+    }
+    return nil
+}
+
+func main() {
+    if err := run(); err != nil {
+        slog.Error("worker failed", "error", err)
+        os.Exit(1)
+    }
+}

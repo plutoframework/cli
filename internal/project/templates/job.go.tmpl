@@ -1,0 +1,38 @@
+package {{.Group}}
+
+import (
+    "context"
+    "errors"
+
+    jobs "github.com/plutoframework/pluto-jobs"
+)
+
+// {{.Action}}Payload is an authored contract. Keep secrets and raw auth challenges
+// out of durable payloads. Prefer scoped identifiers and load canonical records.
+type {{.Action}}Payload struct {
+    ResourceID string `json:"resource_id"`
+}
+
+var Err{{.Action}}Unimplemented = errors.New("job handler requires implementation")
+
+func New{{.Action}}(payload {{.Action}}Payload, options jobs.Options) (jobs.Request, error) {
+    {{if .Multi}}
+    if options.TenantID == nil || *options.TenantID == "" { return jobs.Request{}, jobs.ErrInvalid }
+    {{end}}
+    return jobs.NewRequest({{.Action}}Kind, payload, options)
+}
+
+// Handle{{.Action}} must honor context, validate tenant ownership and make effects
+// idempotent using job.ID. Add consumer-sized dependencies at the composition root.
+func Handle{{.Action}}(ctx context.Context, job jobs.Job) error {
+    if err := ctx.Err(); err != nil { return err }
+    if job.Kind != {{.Action}}Kind { return jobs.Permanent(jobs.ErrInvalid) }
+    payload, err := jobs.Decode[{{.Action}}Payload](job)
+    if err != nil || payload.ResourceID == "" { return jobs.Permanent(jobs.ErrInvalid) }
+    {{if .Multi}}
+    if job.TenantID == nil || *job.TenantID == "" { return jobs.Permanent(jobs.ErrInvalid) }
+    {{end}}
+    // Return nil only after the actual effect succeeds. An unfinished handler
+    // retries within the attempt budget; it never acknowledges a fake success.
+    return Err{{.Action}}Unimplemented
+}
