@@ -18,6 +18,8 @@ type Options struct {
 	Err       io.Writer
 	Directory string
 	Version   string
+	terminal  func(io.Reader, io.Writer) bool
+	wizard    wizardRun
 }
 
 // Execute returns 0 on success and 1 on all command/validation/tool errors.
@@ -42,6 +44,14 @@ func Execute(
 }
 
 func New(options Options) *cobra.Command {
+	if options.terminal == nil {
+		options.terminal = terminalStreams
+	}
+
+	if options.wizard == nil {
+		options.wizard = runTea
+	}
+
 	if options.In == nil {
 		options.In = os.Stdin
 	}
@@ -61,12 +71,16 @@ func New(options Options) *cobra.Command {
 	root := &cobra.Command{
 		Use:               "pluto",
 		Short:             "Generate and check small, explicit Go API applications",
-		Long:              "Pluto scaffolds app-local Chi APIs with explicit operations, config and metadata.\nUse init, add endpoint, fmt, vet and openapi. No published framework is required.",
+		Long:              "Pluto scaffolds Go/Chi APIs with explicit operations and shared Pluto libraries.\nRun pluto without arguments in a terminal for the guided wizard.\nUse explicit arguments and --no-input for agents and scripts.",
 		Version:           options.Version,
 		SilenceErrors:     true,
 		SilenceUsage:      true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return cmd.Context().Err() },
 	}
+	root.PersistentFlags().
+		Bool("interactive", false, "Open the terminal wizard (can prefill with arguments/flags)")
+	root.PersistentFlags().
+		Bool("no-input", false, "Never prompt; use explicit command arguments")
 	root.SetIn(options.In)
 	root.SetOut(options.Out)
 	root.SetErr(options.Err)
@@ -118,6 +132,27 @@ func New(options Options) *cobra.Command {
 		},
 	)
 	root.AddCommand(hook)
+
+	decorateWizard(root, options, "menu", 0, true)
+
+	for _, command := range root.Commands() {
+		switch command.Name() {
+		case "init":
+			decorateWizard(command, options, "init", 1, true)
+		case "add":
+			decorateWizard(command, options, "add", 0, true)
+
+			for _, child := range command.Commands() {
+				decorateWizard(child, options, child.Name(), 2, true)
+			}
+		case "fmt", "vet", "openapi":
+			decorateWizard(command, options, command.Name(), 0, false)
+		case "hook":
+			for _, child := range command.Commands() {
+				decorateWizard(child, options, "hook", 0, false)
+			}
+		}
+	}
 
 	return root
 }

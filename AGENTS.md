@@ -15,3 +15,9 @@ Templates are embedded, so edits require rebuilding pluto. Generated app-local
 primitives are provisional, not a published Pluto framework API. Keep endpoint
 metadata in pluto.toml and derive paths, feature declarations, registries and
 OpenAPI. Authored operation/model/handler files must never be overwritten.
+
+Interactive forms are a presentation layer over fresh Cobra dispatch. Keep raw
+commands deterministic; auto-prompt only on terminal input AND output, outside CI.
+Never open hidden /dev/tty prompts or write before wizard confirmation. Reuse
+project validators and saved capabilities. Pass argument slices, never a shell.
+Keep Bubble Tea and terminal dependencies confined to the CLI module.
