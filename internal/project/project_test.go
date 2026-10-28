@@ -202,7 +202,7 @@ func TestHookExecutionAndWorktree(t *testing.T) {
 func TestApplyAndContracts(t *testing.T) {
 	root := testRoot(t)
 	m := Manifest{
-		SchemaVersion: 2,
+		SchemaVersion: SchemaVersion,
 		Project: Project{
 			Name:      "demo",
 			Module:    "example.com/demo",

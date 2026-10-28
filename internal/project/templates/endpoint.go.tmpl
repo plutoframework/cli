@@ -1,7 +1,7 @@
 // Package paths owns the runtime catalog derived from pluto.toml.
 package paths
 
-import rbac "github.com/plutoframework/pluto-rbac"
+import (rbac "github.com/plutoframework/pluto-rbac";"time")
 
 type Endpoint struct {
 	ID            string
@@ -10,6 +10,7 @@ type Endpoint struct {
 	Method        string
 	Path          string
 	Authenticated bool
+ SessionOnly bool
 	Permission    rbac.PermissionID
 	Feature       string
 	Request       any
@@ -43,4 +44,27 @@ var Health = Endpoint{
 	Path:          "/healthz",
 	Response:      HealthResponse{},
 	SuccessStatus: 200,
+}
+
+type Session struct {
+    ID string `json:"id"`
+    ActorID string `json:"actor_id"`
+    ExpiresAt time.Time `json:"expires_at"`
+}
+
+type SessionResponse struct { Data Session `json:"data"` }
+type SignedOutResponse struct { Data bool `json:"data"` }
+
+var GetSession = Endpoint{
+    ID:"sessions.get",Name:"Read current session",
+    Description:"Read verified session metadata without selecting a tenant.",
+    Method:"GET",Path:"/auth/session",Authenticated:true,SessionOnly:true,
+    Response:SessionResponse{},SuccessStatus:200,
+}
+
+var DeleteSession = Endpoint{
+    ID:"sessions.delete",Name:"Sign out",
+    Description:"Revoke this session before clearing its cookie; no tenant membership is required.",
+    Method:"DELETE",Path:"/auth/session",Authenticated:true,SessionOnly:true,
+    Response:SignedOutResponse{},SuccessStatus:200,
 }

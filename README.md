@@ -210,3 +210,16 @@ choices. Change the operation constructor and this binding together when adding
 repositories. Add typed fields to app.Dependencies and construct/inject them in
 app.New. Generated group registries accept narrow Operations interfaces and never
 choose concrete implementations; additions preserve authored constructor wiring.
+
+## Session-enabled scaffolds
+
+New projects use manifest schema 3 and published Pluto Auth modules. Authenticated
+routes verify sessions, then resolve trusted memberships through the authored
+access.Memberships adapter (deny by default). Cookie/Origin protection, optional
+opaque bearer credentials, session metadata/logout endpoints, explicit Postgres
+migrations and local memory storage are included. No default users or login
+provider are created. See the generated README for credential-provider wiring.
+
+Schema 2 projects require manual migration of authored authentication/config/main
+files, module pins, paths and migrations before changing their manifest version.
+The CLI rejects old schemas without rewriting user code.

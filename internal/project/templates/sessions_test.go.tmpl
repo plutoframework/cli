@@ -1,0 +1,82 @@
+package transport
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"{{.Module}}/internal/config"
+	"{{.Module}}/internal/domain"
+	"{{.Module}}/internal/features"
+	"{{.Module}}/internal/paths"
+
+	"github.com/go-chi/chi/v5"
+	plutoauth "github.com/plutoframework/pluto-auth"
+	"github.com/plutoframework/pluto-auth/httpauth"
+	"github.com/plutoframework/pluto-auth/stores/memory"
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+type testMemberships struct { denied bool; mismatched bool }
+
+func (m *testMemberships) Resolve(_ context.Context, subject string{{if .Multi}}, _ string{{end}}) (domain.Principal,error) {
+	if m.denied { return domain.Principal{},domain.ErrUnauthenticated }
+	if m.mismatched { subject="different-subject" }
+	return domain.Principal{ActorID:subject,{{if .Multi}}TenantID:"member-tenant",{{end}}Roles:[]rbac.RoleID{"member"}},nil
+}
+
+func TestPublishedSessionBoundary(t *testing.T) {
+	ctx:=context.Background()
+	store,err:=memory.New(20)
+	if err != nil { t.Fatal(err) }
+	memberships:=&testMemberships{}
+	authentication,err:=NewAuthentication(config.Auth{
+		TrustedOrigins:[]string{"https://app.example.com"},SessionTTL:time.Hour,IdleTimeout:30*time.Minute,
+	},store,memberships)
+	if err != nil { t.Fatal(err) }
+	issued,err:=authentication.Manager.Start(ctx,"actor")
+	if err != nil { t.Fatal(err) }
+	policy,err:=rbac.New(rbac.Definition{
+		Permissions:[]rbac.Permission{ {ID:"test.read",Name:"Read",Description:"Test permission"}},
+		Roles:[]rbac.Role{ {ID:"member",Name:"Member",Description:"Test role",Permissions:[]rbac.PermissionID{"test.read"}}},
+	})
+	if err != nil { t.Fatal(err) }
+	router:=chi.NewRouter()
+	reg:=Registrar{Router:router,Auth:authentication.Verifier,Sessions:authentication.HTTP,
+		Features:features.New(nil),Policy:policy,Logger:slog.New(slog.NewTextHandler(io.Discard,nil))}
+	calls:=0
+	reg.Handle(paths.Endpoint{Method:"POST",Path:"/protected",Authenticated:true,Permission:"test.read"},func(w http.ResponseWriter,r *http.Request) {
+		calls++
+		if Principal(r.Context()).ActorID!="actor" { t.Error("subject lost") }
+		w.WriteHeader(204)
+	})
+	RegisterSessions(reg,authentication)
+	request:=func(method,path,origin string,bearer bool,tenant string) *httptest.ResponseRecorder {
+		r:=httptest.NewRequest(method,path,nil)
+		if bearer { r.Header.Set("Authorization","Bearer "+issued.Token) } else { r.AddCookie(&http.Cookie{Name:httpauth.CookieName,Value:issued.Token}) }
+		if origin!="" { r.Header.Set("Origin",origin) }
+		r.Header.Set("X-Tenant-ID",tenant)
+		w:=httptest.NewRecorder()
+		router.ServeHTTP(w,r)
+		return w
+	}
+	if got:=request("POST","/protected","",false,"member-tenant").Code;got!=403 || calls!=0 { t.Fatal("cookie CSRF guard not wired") }
+	if got:=request("POST","/protected","https://app.example.com",false,"member-tenant").Code;got!=204 { t.Fatalf("cookie auth failed: %d",got) }
+	if got:=request("POST","/protected","",true,"member-tenant").Code;got!=204 { t.Fatalf("bearer auth failed: %d",got) }
+	memberships.mismatched=true
+	if got:=request("POST","/protected","",true,"member-tenant").Code;got!=401 { t.Fatal("resolver changed the authenticated subject") }
+	memberships.mismatched=false
+{{if .Multi}}
+	if got:=request("POST","/protected","",true,"other-tenant").Code;got!=401 { t.Fatal("tenant selection bypassed exact membership") }
+{{end}}
+	memberships.denied=true
+	if got:=request("POST","/protected","",true,"member-tenant").Code;got!=401 { t.Fatal("revoked membership still authorized") }
+	if got:=request("GET","/auth/session","",false,"").Code;got!=200 { t.Fatal("session metadata required tenant membership") }
+	if got:=request("DELETE","/auth/session","https://app.example.com",false,"").Code;got!=200 { t.Fatalf("logout required membership: %d",got) }
+	if _,err:=authentication.Manager.Authenticate(ctx,issued.Token);!errors.Is(err,plutoauth.ErrUnauthenticated) { t.Fatal("logout did not revoke the server session") }
+}

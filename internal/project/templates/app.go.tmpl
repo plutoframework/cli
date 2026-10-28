@@ -16,7 +16,7 @@ import (
 
 func New(
 	cfg config.Config,
-	auth transport.Authenticator,
+	authentication transport.Authentication,
 	logger *slog.Logger,
 	policy *rbac.Policy,
 ) http.Handler {
@@ -38,7 +38,8 @@ func New(
 
 	reg := transport.Registrar{
 		Router:   router,
-		Auth:     auth,
+		Auth:     authentication.Verifier,
+ Sessions: authentication.HTTP,
 		Features: evaluator,
 		Logger:   logger,
 		Policy:   policy,
@@ -57,7 +58,8 @@ func New(
 			paths.FeaturesResponse{Data: evaluator.Visible()},
 		)
 	})
-	RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy})
+	transport.RegisterSessions(reg,authentication)
+ RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy})
 	router.NotFound(
 		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 404, "not_found") },
 	)

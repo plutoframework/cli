@@ -13,7 +13,7 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 type Manifest struct {
 	SchemaVersion int          `toml:"schema_version"`
@@ -117,7 +117,7 @@ func (m Manifest) Validate() error {
 
 		route := e.Method + " " + canonicalRoute(e.Path)
 		if seenID[id] || seenRoute[route] || e.Path == "/api/features" ||
-			e.Path == "/healthz" {
+			e.Path == "/healthz" || e.Path == "/auth/session" {
 			return fmt.Errorf("duplicate/reserved endpoint %s (%s)", id, route)
 		}
 

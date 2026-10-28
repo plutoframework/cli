@@ -1,0 +1,15 @@
+package access
+
+import (
+	"context"
+	"{{.Module}}/internal/domain"
+)
+
+// Memberships is the application-owned lookup boundary. Replace this body with
+// your trusted repository lookup; never copy roles from client headers. It denies
+// until implemented and does not create default users or automatic grants.
+type Memberships struct{}
+
+func (Memberships) Resolve(context.Context, string{{if .Multi}}, string{{end}}) (domain.Principal,error) {
+	return domain.Principal{},domain.ErrUnauthenticated
+}

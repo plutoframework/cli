@@ -96,7 +96,7 @@ func TestResolvedFlagsAndIncompleteOperation(t *testing.T) {
  enabled:=true
  cfg.Features["widgets-create"]=&enabled
  cfg.Features["private-report"]=&enabled
- router:=app.New(cfg,trustedAuth{permission:true},slog.New(slog.NewTextHandler(io.Discard,nil)),publishedPolicy(t))
+ router:=app.New(cfg,transport.Authentication{Verifier:trustedAuth{permission:true}},slog.New(slog.NewTextHandler(io.Discard,nil)),publishedPolicy(t))
  request:=httptest.NewRequest("GET","/api/features",nil)
  request.Header.Set("Authorization","Bearer trusted")
  request.Header.Set("X-Tenant-ID","member-tenant")

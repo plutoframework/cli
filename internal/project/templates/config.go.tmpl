@@ -18,7 +18,10 @@ type Config struct {
 	Database Database
 	Logging  Logging
 	Features map[string]*bool
+ Auth Auth
 }
+
+type Auth struct { TrustedOrigins []string; SessionTTL time.Duration; IdleTimeout time.Duration }
 
 type Server struct {
 	Address      string
@@ -45,7 +48,8 @@ func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 			IdleTimeout:  60 * time.Second,
 			BodyLimit:    16 * 1024,
 		},
-		Logging:  Logging{Level: "info"},
+		Auth: Auth{TrustedOrigins:[]string{"http://127.0.0.1:8080"},SessionTTL:24*time.Hour,IdleTimeout:30*time.Minute},
+Logging:  Logging{Level: "info"},
 		Features: map[string]*bool{},
 	}
 	for _, setting := range []struct {
@@ -70,6 +74,19 @@ func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 		cfg.Server.Gzip = parsed
 	}
 
+    if value,ok:=lookup(Prefix+"AUTH_TRUSTED_ORIGINS");ok { cfg.Auth.TrustedOrigins=strings.Split(value,",") }
+    for _,setting:=range []struct{name string;target *time.Duration}{
+        {"AUTH_SESSION_TTL",&cfg.Auth.SessionTTL},{"AUTH_IDLE_TIMEOUT",&cfg.Auth.IdleTimeout},
+    } {
+        if value,ok:=lookup(Prefix+setting.name);ok {
+            parsed,err:=time.ParseDuration(value)
+            if err != nil { return Config{},fmt.Errorf("%s%s must be a duration",Prefix,setting.name) }
+            *setting.target=parsed
+        }
+    }
+    if cfg.Auth.SessionTTL<=0 || cfg.Auth.IdleTimeout<0 || cfg.Auth.IdleTimeout>cfg.Auth.SessionTTL || len(cfg.Auth.TrustedOrigins)==0 {
+        return Config{},fmt.Errorf("invalid AUTH session configuration")
+    }
 	for _, definition := range features.Declarations() {
 		key := strings.NewReplacer(".", "_", "-", "_").
 			Replace(strings.ToUpper(definition.Key))
@@ -87,11 +104,15 @@ func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 		}
 	}
 
- _,port,err:=net.SplitHostPort(cfg.Server.Address)
+ host,port,err:=net.SplitHostPort(cfg.Server.Address)
  if err!=nil { return Config{},fmt.Errorf("%sSERVER_ADDRESS must be host:port",Prefix) }
  number,err:=strconv.Atoi(port)
  if err!=nil || number<1 || number>65535 { return Config{},fmt.Errorf("%sSERVER_ADDRESS requires a numeric port from 1 to 65535",Prefix) }
 
+    if cfg.Database.URL == "" {
+        address:=net.ParseIP(host)
+        if address==nil || !address.IsLoopback() { return Config{},fmt.Errorf("DATABASE_URL is required outside numeric loopback development") }
+    }
 	switch cfg.Logging.Level {
 	case "debug", "info", "warn", "error":
 	default:

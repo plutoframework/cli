@@ -111,7 +111,7 @@ func Managed(m Manifest) (map[string][]byte, error) {
 
 	var catalog, composition, definitions strings.Builder
 	catalog.WriteString(
-		"package paths\nfunc All() []Endpoint { return []Endpoint{Health, GetFeatures,",
+		"package paths\nfunc All() []Endpoint { return []Endpoint{Health, GetFeatures, GetSession, DeleteSession,",
 	)
 	composition.WriteString(
 		"package app\nimport (\n" + strconv.Quote(
@@ -303,6 +303,11 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 
 	layout := map[string]string{
 		"internal/access/policy.go":                  "policy.go",
+		"internal/access/memberships.go":             "memberships.go",
+		"internal/transport/sessions.go":             "sessions.go",
+		"internal/transport/session_routes.go":       "session_routes.go",
+		"internal/transport/sessions_test.go":        "sessions_test.go",
+		"db/migrations/002_auth_sessions.sql":        "auth_schema.sql",
 		"internal/access/roles.go":                   "roles.go",
 		"internal/domain/principal.go":               "domain.go",
 		"internal/features/features.go":              "features.go",

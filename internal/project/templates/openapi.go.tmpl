@@ -50,6 +50,7 @@ func Document() ([]byte, error) {
 		if endpoint.Authenticated {
 			operation["security"] = []any{
 				map[string]any{"bearerAuth": []string{}},
+map[string]any{"sessionCookie": []string{}},
 			}
 		}
 
@@ -96,7 +97,8 @@ func Document() ([]byte, error) {
 		"paths":   routes,
 		"components": map[string]any{
 			"securitySchemes": map[string]any{
-				"bearerAuth": map[string]any{
+				"sessionCookie":map[string]any{"type":"apiKey","in":"cookie","name":"__Host-pluto_session"},
+"bearerAuth": map[string]any{
 					"type":   "http",
 					"scheme": "bearer",
 				},

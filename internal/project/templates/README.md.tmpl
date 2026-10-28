@@ -1,8 +1,8 @@
 # {{.Name}}
 
 Generated with the provisional Pluto CLI. Requires Go 1.25.5+. These app-local
-primitives will be candidates for framework extraction; no published Pluto API
-is imported. Chi is the HTTP router, PostgreSQL/pgx + sqlc the database direction.
+primitives will be candidates for framework extraction; published Pluto Auth and RBAC libraries
+provide sessions and capability evaluation. Chi is the HTTP router, PostgreSQL/pgx + sqlc the database direction.
 
 ```sh
 go mod download
@@ -10,14 +10,32 @@ go run ./cmd/api
 # Another terminal: curl http://127.0.0.1:8080/healthz
 ```
 
-Authentication fails closed. `/healthz` is public. `/api/features` and newly
-scaffolded endpoints require authentication. Inject a real `transport.Authenticator`
-in cmd/api; an arbitrary tenant/identity header is never a verified identity.
-{{if .Multi}}This app requires verified ActorID AND TenantID. Authenticator verifies the
-selected X-Tenant-ID against bearer membership. Operations receive that principal.
-Public generated business endpoints are deliberately refused in multi tenancy.{{else}}This app uses single tenancy; no tenant header is used.{{end}}
-No demo tokens or cookie sessions are supplied; CSRF protection for cookie auth
-is not implemented. Incomplete operations return 501, never fabricated success.
+Authentication uses the pinned published pluto-auth module. `/healthz` is public.
+Protected routes verify an opaque session, then resolve a principal through
+`internal/access/memberships.go`. That authored resolver denies until implemented;
+there are no default users or automatic role grants.{{if .Multi}} It must resolve
+this exact subject and selected X-Tenant-ID; tenant headers never prove membership.{{else}}
+Single tenancy does not use tenant headers.{{end}}
+
+The composition root creates a shared session manager: bounded memory storage
+for numeric-loopback development without DATABASE_URL, or the published pgx/sqlc
+store with DATABASE_URL. Apply db/migrations explicitly; startup never creates
+schema. Compose mounts the migrations for a new development database; existing
+volumes need the new migration applied separately.
+
+GET /auth/session returns metadata and DELETE /auth/session revokes the server
+record before clearing its cookie. Neither requires tenant membership. A login
+provider is intentionally not invented: verify credentials before Manager.Start,
+wrap browser login in authentication.HTTP.Guard, and issue the result using
+HTTP.WriteCookie. Never send raw tokens in response JSON or log them.
+
+Cookies remain Secure, HttpOnly, SameSite=Lax and host-only; browsers need HTTPS.
+Unsafe cookie requests require an exact trusted Origin. Opaque bearer credentials
+are explicitly enabled for API clients. Mixed/duplicate credentials fail closed.
+AUTH_TRUSTED_ORIGINS, AUTH_SESSION_TTL and AUTH_IDLE_TIMEOUT use the saved app
+prefix. Defaults are the local development origin, 24h absolute and 30m idle.
+CORS, TLS termination, account recovery and production credential storage are
+application responsibilities. Incomplete operations return 501.
 
 ```sh
 pluto add endpoint widgets Create --method POST --path /api/widgets \
@@ -37,9 +55,11 @@ endpoint additions do not enable omitted presets. Core lint/config/SQL files
 are always included and Git hooks remain opt-in.
 
 Commands discover pluto.toml in cwd/parents; saved tenancy/prefix are reused.
-`pluto.toml` is project metadata, never runtime settings/secrets. Schema 2 extends
-the prototype schema 1 with developer presets and endpoint generation records.
+`pluto.toml` is project metadata, never runtime settings/secrets. Schema 3 records the session-enabled scaffold contract.
 Unknown fields/settings fail; no automatic schema migration is implied.
+For schema 2 apps, migrate authored app/config/main/transport wiring, module pins,
+static paths, session storage and migration manually before updating the manifest.
+The CLI refuses old schemas instead of overwriting authored authentication code.
 
 Authorization imports `github.com/plutoframework/pluto-rbac` at the exact version
 in go.mod/go.sum, with no sibling checkout or local replacement. Startup compiles

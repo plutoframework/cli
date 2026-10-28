@@ -1,0 +1,28 @@
+package transport
+
+import (
+	"net/http"
+	"{{.Module}}/internal/paths"
+	"github.com/plutoframework/pluto-auth/httpauth"
+)
+
+// RegisterSessions exposes metadata and revocation, never credential issuance.
+// A login handler must verify credentials before calling Manager.Start, protect
+// browser login with HTTP.Guard, and send the result using HTTP.WriteCookie.
+func RegisterSessions(reg Registrar, authentication Authentication) {
+	reg.Handle(paths.GetSession,func(w http.ResponseWriter,r *http.Request) {
+		session,ok:=httpauth.FromContext(r.Context())
+		if !ok { Error(w,r,401,"unauthenticated"); return }
+		JSON(w,200,paths.SessionResponse{Data:paths.Session{
+			ID:session.ID,ActorID:session.SubjectID,ExpiresAt:session.ExpiresAt,
+		}})
+	})
+	reg.Handle(paths.DeleteSession,func(w http.ResponseWriter,r *http.Request) {
+		if authentication.HTTP == nil || authentication.Manager == nil { Error(w,r,401,"unauthenticated"); return }
+		token,err:=authentication.HTTP.Token(r)
+		if err != nil { Error(w,r,401,"unauthenticated"); return }
+		if err:=authentication.Manager.Revoke(r.Context(),token); err != nil { Error(w,r,503,"authentication_unavailable"); return }
+		authentication.HTTP.ClearCookie(w)
+		JSON(w,200,paths.SignedOutResponse{Data:true})
+	})
+}

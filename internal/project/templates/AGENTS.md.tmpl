@@ -3,7 +3,7 @@
 Read README.md first. Run pluto fmt and pluto vet before submitting changes.
 Keep every file <=1,000 lines; prefer expanded readable Go and 80 columns.
 
-pluto.toml schema 2 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
+pluto.toml schema 3 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
 Handlers, models, operations, composition root and transport helpers are authored
 and created once. Never add magic init registration. Add endpoints with the CLI.
 Do not import HTTP/storage from operations or database adapters from handlers,
@@ -14,7 +14,8 @@ pluto-rbac module. Authored access.Roles starts empty; adding endpoints must nev
 grant roles automatically. Keep one compiled policy injected into route and
 operation checks through Dependencies.Policy. Resolve Principal.Roles from trusted
 membership; unknown roles and nil policies must deny capability checks.
-Supply a trusted authenticator;
+Use the published Pluto session manager and HTTP adapter; preserve exact Origin
+checks for cookie writes and reject ambiguous credentials. Supply a trusted credential provider;
 verify membership before creating a tenant principal. Preserve verified tenant
 scope in every domain-specific repository. Permissions do not prove resource
 ownership; flags never grant authorization. Never log bodies, tokens or secrets.

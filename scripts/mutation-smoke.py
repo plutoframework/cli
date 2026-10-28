@@ -25,8 +25,8 @@ mutations = [
     (
         "authentication guard",
         "internal/project/templates/register.go.tmpl",
-        "if endpoint.Authenticated {",
-        "if false && endpoint.Authenticated {",
+        "if endpoint.Authenticated && !endpoint.SessionOnly {",
+        "if false && endpoint.Authenticated && !endpoint.SessionOnly {",
         "TestGeneratedApplications/single",
     ),
     (

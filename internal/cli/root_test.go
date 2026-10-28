@@ -431,7 +431,7 @@ func TestGeneratedApplications(t *testing.T) {
 			if spec.ID != "widgets.Create" ||
 				spec.Feature != "widgets-create" ||
 				spec.Permission != "widgets.write" ||
-				len(spec.Security) != 1 ||
+				len(spec.Security) != 2 ||
 				len(spec.Parameters) != 1 ||
 				spec.Parameters[0].Name != "id" {
 				t.Fatalf("OpenAPI metadata lost: %+v", spec)

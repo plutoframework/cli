@@ -15,6 +15,9 @@ import (
 	"{{.Module}}/internal/config"
 	"{{.Module}}/internal/storage/postgres"
 	"{{.Module}}/internal/transport"
+plutoauth "github.com/plutoframework/pluto-auth"
+authmemory "github.com/plutoframework/pluto-auth/stores/memory"
+authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
 )
 
 func run() error {
@@ -44,17 +47,25 @@ func run() error {
 	)
 	defer stop()
 
-	if cfg.Database.URL != "" {
+	var sessionStore plutoauth.SessionStore
+ if cfg.Database.URL != "" {
 		pool, err := postgres.Open(ctx, cfg.Database.URL)
 		if err != nil {
 			return errors.New("postgres connectivity failed; verify DATABASE_URL and database availability")
 		}
 		defer pool.Close()
-	}
+        sessionStore,err=authpostgres.New(pool)
+        if err != nil { return err }
+    } else {
+        sessionStore,err=authmemory.New(1000)
+        if err != nil { return err }
+    }
+    authentication,err:=transport.NewAuthentication(cfg.Auth,sessionStore,access.Memberships{})
+    if err != nil { return err }
 
 	server := &http.Server{
 		Addr:              cfg.Server.Address,
-		Handler:           app.New(cfg, transport.DenyAll{}, logger, policy),
+		Handler:           app.New(cfg, authentication, logger, policy),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,
@@ -86,7 +97,7 @@ func run() error {
 		"address",
 		server.Addr,
 		"authentication",
-		"deny-all",
+		"pluto-sessions; membership denies until implemented",
 	)
 
 	err = server.ListenAndServe()

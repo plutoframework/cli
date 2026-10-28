@@ -23,7 +23,7 @@ func TestDefaultDenyAndLiveness(t *testing.T) {
 
 	router := New(
 		cfg,
-		transport.DenyAll{},
+		transport.Authentication{Verifier:transport.DenyAll{}},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
  testPolicy(t),
 	)
@@ -70,7 +70,7 @@ func TestSecurityHeadersOnPanic(t *testing.T) {
 
 	router := New(
 		cfg,
-		nil,
+		transport.Authentication{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
  testPolicy(t),
 	)

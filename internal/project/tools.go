@@ -6,6 +6,8 @@ import (
 )
 
 // RBACVersion pins the published package used by the CLI and generated apps.
+const AuthVersion = "v0.0.0-20261028021955-c1eabc6c680e"
+
 const RBACVersion = "v0.0.0-20261027065629-25c44e7fe21b"
 
 // ToolFiles contains module dependencies and optional development configuration.
@@ -17,19 +19,20 @@ go 1.25.5
 
 require (
  github.com/go-chi/chi/v5 v5.2.3
- github.com/jackc/pgx/v5 v5.7.6
+ github.com/jackc/pgx/v5 v5.11.0
  github.com/plutoframework/pluto-rbac %s
+ github.com/plutoframework/pluto-auth %s
+ github.com/plutoframework/pluto-auth/stores/postgres %s
 )
 
 require (
  github.com/jackc/pgpassfile v1.0.0 // indirect
  github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
  github.com/jackc/puddle/v2 v2.2.2 // indirect
- golang.org/x/crypto v0.37.0 // indirect
- golang.org/x/sync v0.13.0 // indirect
- golang.org/x/text v0.24.0 // indirect
+ golang.org/x/sync v0.17.0 // indirect
+ golang.org/x/text v0.29.0 // indirect
 )
-`, m.Project.Module, RBACVersion))
+`, m.Project.Module, RBACVersion, AuthVersion, AuthVersion))
 	files["go.sum"] = []byte(appGoSum)
 	files[".golangci.yml"] = []byte(
 		strings.ReplaceAll(lintConfig, "MODULE", m.Project.Module),
@@ -47,6 +50,12 @@ require (
 			m.Project.EnvPrefix,
 		),
 	)
+	files[".env.example"] = append(files[".env.example"], []byte(fmt.Sprintf(
+		"%sAUTH_TRUSTED_ORIGINS=http://127.0.0.1:8080\n%sAUTH_SESSION_TTL=24h\n%sAUTH_IDLE_TIMEOUT=30m\n",
+		m.Project.EnvPrefix,
+		m.Project.EnvPrefix,
+		m.Project.EnvPrefix,
+	))...)
 	files["scripts/check.sh"] = []byte(
 		"#!/bin/sh\nset -eu\ncd \"$(dirname \"$0\")/..\"\nexec pluto vet\n",
 	)
@@ -165,6 +174,7 @@ ENTRYPOINT ["/usr/local/bin/api"]
       - "127.0.0.1:55432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pluto -d pluto"]
       interval: 3s
