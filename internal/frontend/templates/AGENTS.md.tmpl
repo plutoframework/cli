@@ -1,0 +1,12 @@
+# Frontend conventions
+
+Read README.md first. UI profile: <%.UI%>. Keep the same library throughout generated features.
+
+- app/ composes routes, providers and pages. features/<name>/ owns queries, mutations, forms, components and types. Cross-feature imports use public.ts.
+- Components/forms use props and callbacks, never transport or query-cache internals. Only feature queries.ts/mutations.ts import api/client.ts. No data-fetching effects.
+- Use TanStack Query for server state and TanStack Router for URL state. Keep form/visual state local. Never persist credentials or tenant/auth state in browser storage.
+- Go owns permissions, membership, validation and state transitions. UI visibility never grants access. Scope business-query keys by verified actor/session/tenant.
+- Auth requests bypass idempotency caching. Cookies remain Secure and HttpOnly; never rewrite cookies or weaken Origin checks. Never put confirmation tokens in URLs.
+- Authored files and shared component source are application-owned. catalog.gen.ts and pluto-ui.toml are generator-owned; do not edit them.
+- Run npm run fmt and npm run check. Formatter preference is 80 columns; source/generated files stay <=1,000 lines. package-lock.json alone is exempt as machine-owned dependency resolution data. Do not compact code to evade limits.
+- Do not scan node_modules, dist, .cert, coverage or binary resources. Retain license notices with copied components.

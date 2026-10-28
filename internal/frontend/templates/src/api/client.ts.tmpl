@@ -1,0 +1,38 @@
+import createClient from "openapi-fetch";
+import type { paths } from "./generated/paths";
+import { ApiError } from "./errors";
+
+export const api = createClient<paths>({
+  baseUrl: window.location.origin,
+  credentials: "same-origin",
+  cache: "no-store",
+  fetch: (request) => globalThis.fetch(request),
+});
+api.use({
+  async onResponse({ response }) {
+    if (response.ok) return response;
+    const value: unknown = await response
+      .clone()
+      .json()
+      .catch(() => null);
+    let code = "request_failed";
+    if (value && typeof value === "object") {
+      const body = value as Record<string, unknown>;
+      const detail =
+        body.error && typeof body.error === "object"
+          ? (body.error as Record<string, unknown>)
+          : body;
+      if (typeof detail.code === "string") code = detail.code;
+    }
+    throw new ApiError(
+      response.status,
+      code,
+      response.headers.get("X-Request-ID") ?? undefined,
+    );
+  },
+});
+
+export function authHeaders(): Record<"Origin", string> {
+  // Browsers send their actual Origin; this also satisfies the API contract.
+  return { Origin: window.location.origin };
+}

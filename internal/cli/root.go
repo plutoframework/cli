@@ -70,7 +70,7 @@ func New(options Options) *cobra.Command {
 
 	root := &cobra.Command{
 		Use:               "pluto",
-		Short:             "Generate and check small, explicit Go API applications",
+		Short:             "Generate and check explicit Go APIs and React applications",
 		Long:              "Pluto scaffolds Go/Chi APIs with explicit operations and shared Pluto libraries.\nRun pluto without arguments in a terminal for the guided wizard.\nUse explicit arguments and --no-input for agents and scripts.",
 		Version:           options.Version,
 		SilenceErrors:     true,
@@ -111,6 +111,7 @@ func New(options Options) *cobra.Command {
 		),
 	)
 	root.AddCommand(openapiCommand(options))
+	root.AddCommand(frontendCommand(options))
 
 	hook := &cobra.Command{
 		Use:   "hook",
@@ -150,6 +151,32 @@ func New(options Options) *cobra.Command {
 		case "hook":
 			for _, child := range command.Commands() {
 				decorateWizard(child, options, "hook", 0, false)
+			}
+		case "frontend":
+			decorateWizard(command, options, "frontend", 0, true)
+
+			for _, child := range command.Commands() {
+				switch child.Name() {
+				case "init":
+					decorateWizard(child, options, "frontend-init", 0, true)
+				case "add":
+					decorateWizard(child, options, "frontend-add", 0, true)
+
+					for _, feature := range child.Commands() {
+						maxArgs := 0
+						if feature.Name() == "component" {
+							maxArgs = 1
+						}
+
+						decorateWizard(
+							feature,
+							options,
+							"frontend-"+feature.Name(),
+							maxArgs,
+							true,
+						)
+					}
+				}
 			}
 		}
 	}

@@ -1,0 +1,39 @@
+import { queryOptions } from "@tanstack/react-query";
+import { api } from "@/api/client";
+import { ApiError } from "@/api/errors";
+
+export function sessionOptions() {
+  return queryOptions({
+    queryKey: ["session"],
+    retry: false,
+    staleTime: 15_000,
+    gcTime: 0,
+    queryFn: async ({ signal, client }) => {
+      try {
+        const { data } = await api.GET("/auth/session", { signal });
+        if (!data?.data?.id || !data.data.actor_id || !data.data.expires_at)
+          throw new Error("Session response missing");
+        const previous = client.getQueryData<{
+          id: string;
+          actor_id: string;
+        } | null>(["session"]);
+        if (
+          previous &&
+          (previous.id !== data.data.id ||
+            previous.actor_id !== data.data.actor_id)
+        ) {
+          await client.cancelQueries({ queryKey: ["scope"] });
+          client.removeQueries({ queryKey: ["scope"] });
+        }
+        return data.data;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await client.cancelQueries({ queryKey: ["scope"] });
+          client.removeQueries({ queryKey: ["scope"] });
+          return null;
+        }
+        throw error;
+      }
+    },
+  });
+}

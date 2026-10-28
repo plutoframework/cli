@@ -23,6 +23,7 @@ type Manifest struct {
 	Development   Development  `toml:"development"`
 	Endpoints     []Endpoint   `toml:"endpoints,omitempty"`
 	Jobs          []Job        `toml:"jobs,omitempty"`
+	Frontend      *Frontend    `toml:"frontend,omitempty"`
 }
 
 type Project struct {
@@ -115,6 +116,10 @@ func (m Manifest) Validate() error {
 	}
 
 	if err := validateJobs(m.Jobs); err != nil {
+		return err
+	}
+
+	if err := m.ValidateFrontend(); err != nil {
 		return err
 	}
 

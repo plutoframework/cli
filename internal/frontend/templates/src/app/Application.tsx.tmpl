@@ -1,0 +1,125 @@
+import { Link, Outlet } from "@tanstack/react-router";
+import { AuthEntry, components } from "./catalog.gen";
+
+export function Application() {
+  return (
+    <div className="pluto-shell">
+      <header className="pluto-header">
+        <Link to="/" className="pluto-brand">
+          <span aria-hidden="true">◌</span> pluto
+        </Link>
+        <nav aria-label="Main navigation">
+          <Link
+            to="/"
+            activeOptions={{ exact: true }}
+            activeProps={{ className: "active" }}
+          >
+            Overview
+          </Link>
+          <Link to="/components" activeProps={{ className: "active" }}>
+            Components
+          </Link>
+          {AuthEntry && (
+            <Link to="/auth" activeProps={{ className: "active" }}>
+              Account
+            </Link>
+          )}
+        </nav>
+        <span className="pluto-eyebrow"><%.Name%></span>
+      </header>
+      <main id="main-content">
+        <Outlet />
+      </main>
+      <footer className="pluto-footer">
+        Built with intention. Powered by Pluto.<span>LOCAL WORKSPACE ↗</span>
+      </footer>
+    </div>
+  );
+}
+export function Home() {
+  return (
+    <section className="pluto-welcome">
+      <div>
+        <p className="pluto-eyebrow">YOUR NEXT CHAPTER / 01</p>
+        <h1>
+          A little structure.
+          <br />
+          <em>A world of possibility.</em>
+        </h1>
+        <p className="pluto-lead">
+          A clear home for your features, your team and what comes next.
+        </p>
+        <Link className="pluto-button" to="/components">
+          Explore your components ↗
+        </Link>
+      </div>
+      <div className="pluto-orbit" aria-hidden="true">
+        <span />
+        <i />
+        <b>p.</b>
+      </div>
+      <div className="pluto-foundations">
+        <article>
+          <span>01 / STRUCTURE</span>
+          <h2>A place for everything.</h2>
+          <p>
+            Features own their pages, forms and data. Shared controls stay
+            small.
+          </p>
+        </article>
+        <article>
+          <span>02 / CONTRACT</span>
+          <h2>One API. Clear boundaries.</h2>
+          <p>Typed requests come from Go. Permissions stay on the server.</p>
+        </article>
+        <article>
+          <span>03 / CRAFT</span>
+          <h2>Make it your own.</h2>
+          <p>
+            Your <%.UI%> components belong here. Shape them as your application
+            grows.
+          </p>
+        </article>
+      </div>
+    </section>
+  );
+}
+export function Components() {
+  return (
+    <section className="pluto-section">
+      <p className="pluto-eyebrow">WORKSPACE / COMPONENTS</p>
+      <h1>
+        Small pieces.
+        <br />
+        <em>Considered together.</em>
+      </h1>
+      {!components.length && (
+        <p>
+          Add your first feature with{" "}
+          <code>pluto frontend add component purchase-form --kind form</code>.
+        </p>
+      )}
+      <div className="pluto-component-grid">
+        {components.map(({ name, Component }) => (
+          <article className="pluto-panel" key={name}>
+            <h2>{name}</h2>
+            <Component />
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+export function Account() {
+  return AuthEntry ? (
+    <AuthEntry />
+  ) : (
+    <section className="pluto-section">
+      <h1>Your account.</h1>
+      <p>
+        Install the supported auth feature with{" "}
+        <code>pluto frontend add auth</code>.
+      </p>
+    </section>
+  );
+}

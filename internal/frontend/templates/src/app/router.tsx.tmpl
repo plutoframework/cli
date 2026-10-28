@@ -1,0 +1,31 @@
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
+import { Application, Home, Components, Account } from "./Application";
+
+const rootRoute = createRootRoute({ component: Application });
+const home = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  component: Home,
+});
+const components = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/components",
+  component: Components,
+});
+const account = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/auth",
+  component: Account,
+});
+export const router = createRouter({
+  routeTree: rootRoute.addChildren([home, components, account]),
+});
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}

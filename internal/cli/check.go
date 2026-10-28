@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"path/filepath"
+
+	"github.com/plutoframework/cli/internal/frontend"
 	"github.com/plutoframework/cli/internal/project"
 
 	"github.com/spf13/cobra"
@@ -33,21 +36,47 @@ func projectCommand(
 			}
 
 			if vet {
-				return project.Vet(
+				err = project.Vet(
 					cmd.Context(),
 					root,
 					m,
 					cmd.OutOrStdout(),
 					cmd.ErrOrStderr(),
 				)
+			} else {
+				err = project.Format(
+					cmd.Context(),
+					root,
+					cmd.OutOrStdout(),
+					cmd.ErrOrStderr(),
+				)
 			}
 
-			return project.Format(
-				cmd.Context(),
-				root,
-				cmd.OutOrStdout(),
-				cmd.ErrOrStderr(),
-			)
+			if err != nil {
+				return err
+			}
+
+			if m.Frontend != nil {
+				if err := frontend.Contracts(root, m); err != nil {
+					return err
+				}
+
+				task := "fmt"
+				if vet {
+					task = "check"
+				}
+
+				return frontend.NPM(
+					cmd.Context(),
+					filepath.Join(root, m.Frontend.Directory),
+					cmd.OutOrStdout(),
+					cmd.ErrOrStderr(),
+					"run",
+					task,
+				)
+			}
+
+			return nil
 		},
 	}
 	if vet {

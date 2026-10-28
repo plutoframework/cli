@@ -1,0 +1,7 @@
+import type { paths } from "@/api/generated/paths";
+export type Session = NonNullable<
+  paths["/auth/session"]["get"]["responses"][200]["content"]["application/json"]["data"]
+>;
+export type AuthMode =
+  "signin" | "enroll" | "verify" | "resend" | "recover" | "reset";
+export type AuthInput = { email: string; password: string; token: string };

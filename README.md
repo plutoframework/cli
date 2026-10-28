@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, **not an imaginary published Pluto framework**. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.4.0`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.5.0`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -438,3 +438,87 @@ schemas before writes and never overwrites authored application code.
 
 The disposable PostgreSQL check also starts Valkey and tests all three generated
 cache modes, including real authenticated reads, writes and deletes.
+
+
+## React frontend and UI libraries
+
+Initialize a backend first, then add a frontend using a saved component profile:
+
+```sh
+pluto init orbital --local-credentials
+cd orbital
+pluto frontend init --ui heroui-v3 --auth
+# Alternatives: --ui shadcn or --ui native (default).
+pluto frontend add component purchase-form --kind form
+pluto frontend add component review-dialog --kind dialog
+# If auth was omitted initially:
+pluto frontend add auth
+```
+
+`pluto frontend` and its init/add commands open the Bubble Tea wizard on terminal
+input/output when run without flags/arguments. Explicit commands remain scriptable
+with `--no-input`. Supported component kinds are button, input, card, dialog and
+form. Generated presentation components accept callbacks for business actions;
+the gallery does not pretend to save records. Feature business logic remains in
+feature-owned hooks and Go operations.
+
+The choice is persisted in the existing TOML manifest:
+
+```toml
+[frontend]
+framework = "react"
+directory = "web"
+ui = "heroui-v3"
+template_version = 1
+auth = true
+```
+
+This is an optional additive section in schema 7. API-only projects stay unchanged.
+The frontend has its own versioned template contract. Unknown profiles, unsafe or
+reserved directories and unsupported versions are refused before writes. Changing
+ui manually cannot migrate existing source; the saved profile marker catches drift.
+Frontend auth requires the backend's existing local-credential capability. It never
+turns on credential issuance, grants membership or supplies production auth seams.
+
+HeroUI v3 uses exact `@heroui/react` / `@heroui/styles` dependencies and direct
+library components. shadcn uses local application-owned component source and
+components.json aliases matching `shared/ui`; only primitives needed by each
+feature are added. Native controls add no component-library dependency. Auth
+queries/mutations are shared across profiles; presentation follows each library.
+
+New files are preflighted together. Existing authored features/UI primitives are
+never overwritten. Generator-owned catalog and dependency metadata are updated
+only after conflicts are checked. Custom package scripts and unrelated dependencies
+are preserved; conflicting newly required pins fail explicitly. No runtime registry
+URLs, arbitrary remote code or unpinned upstream CLIs are used by generation.
+
+By default, generation installs dependencies with lifecycle scripts disabled,
+generates types from local Go OpenAPI, formats and runs frontend checks. Use
+`--dry-run` for an offline no-write preview, or `--no-install` to generate readable
+source without Node/network access. Run `pluto frontend install` afterward to
+install, regenerate, format and check. Tool failures leave the scaffold in place
+with repair instructions. Commit the standard npm package-lock.json.
+
+Node 24.22.1 is pinned in the generated frontend mise.toml. Review/trust your new
+mise config before using mise. An active compatible Node 24 toolchain is used
+directly; otherwise the CLI tries mise's pinned toolchain. npm engine-strict rejects
+incompatible Node versions. No config is automatically trusted.
+
+The local browser runs at https://127.0.0.1:5173 and proxies /api and /auth to
+http://127.0.0.1:8080. A local OpenSSL certificate preserves Secure/HttpOnly cookies;
+no system trust or cookie attributes are changed. Explicitly configure the API's
+`<PREFIX>AUTH_TRUSTED_ORIGINS=https://127.0.0.1:5173`. Production must supply a
+proper HTTPS origin, SPA routing/CSP and the backend's required integrations.
+
+Generated checks enforce feature import boundaries, a single transport, no browser
+credential storage, 80-column formatting preference and <=1,000-line source files.
+The machine-owned package-lock.json resolution graph is the sole text exception.
+Dependencies, builds, local keys and binary resources are excluded from source
+limits. Go checks target cmd/internal so npm-bundled Go files are never executed.
+`pluto fmt` and `pluto vet` include the configured frontend after installation.
+
+Run `python3 scripts/frontend-matrix.py --keep` for fresh native/HeroUI/shadcn
+consumers, auth during init and later addition, all component kinds, later
+prerequisite installation and a frontend without auth. It runs the actual CLI,
+frontend checks/builds and backend compilation in disposable directories. Browser
+QA and upstream attribution are documented in docs/FRONTEND.md.

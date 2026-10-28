@@ -9,6 +9,13 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 mutations = [
     (
+        "frontend auth capability guard",
+        "internal/project/frontend.go",
+        "if f.Auth && !m.Capabilities.LocalCredentials {",
+        "if false {",
+        "TestFrontendPreflight/auth-capability",
+    ),
+    (
         "job kind uniqueness",
         "internal/project/jobs.go",
         "identifiers[identifier] || kinds[job.Kind]",

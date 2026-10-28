@@ -62,6 +62,10 @@ func wizardForm(
 	args []string,
 ) (wizardModel, error) {
 	model := wizardModel{kind: kind, width: 80, height: 24}
+	if kind == "frontend" || kind == "frontend-add" {
+		return frontendMenu(kind), nil
+	}
+
 	if kind == "menu" || kind == "add" {
 		return menuForm(kind, options), nil
 	}
@@ -83,6 +87,8 @@ func wizardForm(
 	)
 
 	switch kind {
+	case "frontend-init", "frontend-component", "frontend-auth":
+		model = frontendForm(model, manifest, cmd, args)
 	case "endpoint":
 		model = endpointForm(model, manifest, cmd, args)
 	case "job":
@@ -105,6 +111,7 @@ func menuForm(kind string, options Options) wizardModel {
 		{"Run project checks", "vet"},
 		{"Generate OpenAPI", "openapi"},
 		{"Install the optional Git hook", "hook"},
+		{"Build a React frontend", "frontend"},
 	}
 	value := "init"
 	context := "Opinionated Go APIs, ready for humans and agents."

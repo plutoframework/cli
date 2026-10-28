@@ -61,9 +61,9 @@ func Format(ctx context.Context, root string, out, errOut io.Writer) error {
 	}
 
 	for _, args := range [][]string{
-		{"fmt", "./..."},
-		{"run", "--enable-only", "wsl_v5", "--fix", "./..."},
-		{"fmt", "./..."},
+		{"fmt", "./cmd/...", "./internal/..."},
+		{"run", "--enable-only", "wsl_v5", "--fix", "./cmd/...", "./internal/..."},
+		{"fmt", "./cmd/...", "./internal/..."},
 	} {
 		if err := Run(ctx, root, out, errOut, tool, args...); err != nil {
 			return err
@@ -88,7 +88,14 @@ func Vet(
 		return err
 	}
 
-	command := exec.CommandContext(ctx, tool, "fmt", "--diff", "./...")
+	command := exec.CommandContext(
+		ctx,
+		tool,
+		"fmt",
+		"--diff",
+		"./cmd/...",
+		"./internal/...",
+	)
 	command.Dir = root
 	command.Stderr = errOut
 
@@ -106,9 +113,9 @@ func Vet(
 		name string
 		args []string
 	}{
-		{tool, []string{"run", "./..."}},
-		{"go", []string{"vet", "./..."}},
-		{"go", []string{"test", "./..."}},
+		{tool, []string{"run", "./cmd/...", "./internal/..."}},
+		{"go", []string{"vet", "./cmd/...", "./internal/..."}},
+		{"go", []string{"test", "./cmd/...", "./internal/..."}},
 		{"go", []string{"run", "./cmd/openapi", "-check"}},
 	} {
 		if err := Run(
@@ -191,11 +198,36 @@ func Contracts(root string, m Manifest) error {
 					return filepath.SkipDir
 				}
 
+				if m.Frontend != nil &&
+					strings.HasPrefix(
+						relative,
+						m.Frontend.Directory+string(filepath.Separator),
+					) {
+					switch entry.Name() {
+					case "node_modules",
+						"dist",
+						".cert",
+						"coverage",
+						"test-results",
+						"playwright-report":
+						return filepath.SkipDir
+					}
+				}
+
 				return nil
 			}
 
 			if entry.Type()&os.ModeSymlink != 0 {
 				return fmt.Errorf("project symlink refused: %s", relative)
+			}
+
+			// Keep npm's machine-owned resolution graph in its standard format.
+			if m.Frontend != nil &&
+				relative == filepath.Join(
+					m.Frontend.Directory,
+					"package-lock.json",
+				) {
+				return nil
 			}
 
 			data, err := os.ReadFile(path)

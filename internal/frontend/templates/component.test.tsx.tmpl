@@ -1,0 +1,32 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { expect, test, vi } from "vitest";
+import { <%.Symbol%> } from "./<%.Symbol%>";
+
+test("submits input through the feature callback and clears successful input", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  const user = userEvent.setup();
+  render(<<%.Symbol%> onSubmit={onSubmit} />);
+  await user.type(screen.getByLabelText("Title"), "  Field equipment  ");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() =>
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith({
+      title: "Field equipment",
+    }),
+  );
+  expect(screen.getByLabelText("Title")).toHaveValue("");
+});
+
+test("failed callbacks preserve input so the user can retry", async () => {
+  const onSubmit = vi.fn().mockRejectedValue(new Error("Synthetic failure"));
+  const user = userEvent.setup();
+  render(<<%.Symbol%> onSubmit={onSubmit} />);
+  await user.type(screen.getByLabelText("Title"), "Field equipment");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "could not be completed",
+    ),
+  );
+  expect(screen.getByLabelText("Title")).toHaveValue("Field equipment");
+});

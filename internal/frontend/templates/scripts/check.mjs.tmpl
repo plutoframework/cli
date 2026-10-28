@@ -1,0 +1,31 @@
+import { readdir, readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+const root = fileURLToPath(new URL("../", import.meta.url));
+const ignored = new Set([
+  "node_modules",
+  "dist",
+  ".git",
+  ".cert",
+  "coverage",
+  "test-results",
+  "playwright-report",
+]);
+async function walk(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isSymbolicLink())
+      throw new Error(`Source symlink refused: ${entry.name}`);
+    if (ignored.has(entry.name)) continue;
+    const name = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      await walk(name);
+      continue;
+    }
+    if (entry.name === "package-lock.json") continue;
+    const data = await readFile(name);
+    if (data.includes(0)) continue;
+    if (data.toString("utf8").split("\n").length > 1001)
+      throw new Error(`Source exceeds 1,000 lines: ${name}`);
+  }
+}
+await walk(root);

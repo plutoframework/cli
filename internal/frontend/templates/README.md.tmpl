@@ -1,0 +1,75 @@
+# <%.Name%> frontend
+
+React + TypeScript + TanStack Router/Query with the saved **<%.UI%>** profile.
+Generated features and component source belong to your application.
+
+## Local development
+
+Use Node 24.22.1 (mise is pinned in this directory):
+
+```sh
+mise trust
+mise install
+mise exec -- npm install --ignore-scripts
+mise exec -- npm run api:generate
+mise exec -- npm run fmt
+mise exec -- npm run check
+mise exec -- npm run dev
+```
+
+Start the Go API separately on http://127.0.0.1:8080. Open
+https://127.0.0.1:5173 and accept its local self-signed certificate warning.
+OpenSSL generates a 30-day certificate; .cert/ is ignored and its key is 0600.
+No OS trust changes are made. Never reuse this certificate in production.
+
+The HTTPS proxy preserves Origin and Secure/HttpOnly cookies. Explicitly set
+`<%.Prefix%>AUTH_TRUSTED_ORIGINS=https://127.0.0.1:5173` in the API environment.
+For another numeric-loopback API port set `<%.Prefix%>WEB_API_TARGET` in Vite's
+process. No wildcard CORS, cookie rewriting or JS token storage is generated.
+
+Auth UI requires the backend local-credential capability. It does not implement
+credential issuance, delivery, shared limits, trusted ingress or provider setup.
+Complete the backend's required integrations and migrations before using it.
+Account enrollment grants no business permissions or tenant membership.
+Verification/recovery responses stay generic. Tokens are pasted into a POST form,
+never consumed from a URL. Auth fields and mutation values are transient memory,
+not a secure-erasure guarantee.
+
+## Add features from the project root
+
+```sh
+pluto frontend add component purchase-form --kind form
+pluto frontend add component review-dialog --kind dialog
+pluto frontend add auth
+```
+
+Supported component kinds: button, input, card, dialog, form. These are usable
+presentation components: forms accept onSubmit, buttons accept onAction, dialogs
+provide accessible open/close behavior. Wire business logic through feature hooks.
+The component gallery demonstrates them without pretending to save server data.
+The CLI automatically adds required primitives and dependencies for the saved UI.
+
+Only catalog.gen.ts and manifest/package dependency metadata are updated later.
+Existing feature files and UI primitives are preserved. Conflicts abort before
+writes. `--dry-run` is offline and writes nothing; `--no-install` writes scaffolding
+without running npm. Default installation disables lifecycle scripts, generates
+API bindings, formats source and runs frontend checks. Tool failures leave the
+scaffold in place and report repair instructions. Commit package-lock.json.
+Changing ui in pluto.toml alone is refused; library migration is deliberate.
+
+## Structure and checks
+
+- app/: providers, routes, composition and generated feature catalog.
+- features/: feature-owned forms/components, queries/mutations and public.ts.
+- shared/ui/: application-owned shadcn source when selected; HeroUI imports its package.
+- api/: the single typed transport, generated from local Go OpenAPI.
+
+`npm run check` checks OpenAPI freshness, lint/format, import boundaries, types,
+behavior tests and production build. The static architecture checker is a
+convention guard, not a semantic proof or security sandbox. Source limits include
+generated API modules; npm's standard lockfile is the sole text exception.
+`pluto fmt` / `pluto vet` include the saved frontend after dependencies are installed.
+
+Deploy static assets and Go behind one HTTPS origin. Configure SPA fallback away
+from /api and /auth, trusted origins and a production HTML CSP. Vite's loopback
+proxy/certificate setup is for local development, not a production auth deployment.
