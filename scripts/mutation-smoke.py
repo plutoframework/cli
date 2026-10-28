@@ -9,6 +9,20 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 mutations = [
     (
+        "registry source confinement",
+        "internal/frontend/registry.go",
+        "if !project.RegistryPath(file.Source) {",
+        "if false {",
+        "TestFrontendRegistryPreflight/source-traversal",
+    ),
+    (
+        "registry strict manifest fields",
+        "internal/frontend/registry.go",
+        "DisallowUnknownFields().\n",
+        "",
+        "TestFrontendRegistryPreflight/hook",
+    ),
+    (
         "theme validation preflight",
         "internal/project/frontend.go",
         "if err := f.ValidateTheme(); err != nil {",

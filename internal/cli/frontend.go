@@ -81,14 +81,20 @@ func frontendCommand(options Options) *cobra.Command {
 			)
 		},
 	}
-	command.AddCommand(init, add, install, frontendThemeCommand(options))
+	command.AddCommand(
+		init,
+		add,
+		install,
+		frontendThemeCommand(options),
+		frontendComponentsCommand(options),
+	)
 
 	return command
 }
 
 func frontendAddCommand(options Options, auth bool) *cobra.Command {
 	var (
-		kind           string
+		kind, from     string
 		dry, noInstall bool
 	)
 
@@ -111,7 +117,20 @@ func frontendAddCommand(options Options, auth bool) *cobra.Command {
 				name = args[0]
 			}
 
-			plan, err := frontend.Add(root, m, name, selectedKind)
+			var plan frontend.Plan
+
+			if from != "" {
+				if cmd.Flags().Changed("kind") {
+					return fmt.Errorf(
+						"--from and --kind are mutually exclusive",
+					)
+				}
+
+				plan, err = frontend.AddRegistry(root, m, name, from)
+			} else {
+				plan, err = frontend.Add(root, m, name, selectedKind)
+			}
+
 			if err != nil {
 				return err
 			}
@@ -124,6 +143,8 @@ func frontendAddCommand(options Options, auth bool) *cobra.Command {
 		command.Short = "Add sign-in, enrollment, verification and recovery UI"
 		command.Args = cobra.NoArgs
 	} else {
+		command.Flags().
+			StringVar(&from, "from", "", "Local registry item, for example company/date-range-picker")
 		command.Flags().
 			StringVar(&kind, "kind", "form", "Component kind: button, input, card, dialog or form")
 	}

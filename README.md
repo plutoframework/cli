@@ -577,3 +577,25 @@ bootstrap, create the authored CSS file, and generate/check before enabling them
 settings. The pluto-example repository demonstrates an explicit adoption while
 retaining its original prototype manifest. No schema migration is required for
 current schema-7 CLI projects; older backend schemas remain unsupported by CLI.
+
+## Custom component registries
+
+Add local component templates without modifying Pluto's source:
+
+```toml
+[frontend.registries.company]
+path = ".pluto/components"
+```
+
+```sh
+pluto frontend components list
+pluto frontend add component purchase-review --from company/approval-panel --dry-run
+pluto frontend add component purchase-review --from company/approval-panel
+```
+
+See [the registry contract](docs/COMPONENT-REGISTRIES.md) and the runnable HeroUI
+registry in examples/component-registry. This first version supports local,
+declarative multi-file items, exact npm pins, dependency graphs, saved source
+digests and optional curated shadcn primitives. It preserves authored code and
+uses the same conflict-safe plan as built-in generators. Published packs, custom
+UI profiles and shadcn registry imports are outside this release.

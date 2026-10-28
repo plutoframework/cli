@@ -49,6 +49,15 @@ try:
             for kind in ("button", "input", "card", "form"):
                 run(app, str(binary), "frontend", "add", "component", f"sample-{kind}",
                     "--kind", kind, "--no-install", "--no-input")
+        if profile == "heroui-v3":
+            shutil.copytree(checkout / "examples/component-registry", app / ".pluto/components")
+            with (app / "pluto.toml").open("a") as manifest:
+                manifest.write('\n[frontend.registries.company]\npath=".pluto/components"\n')
+            run(app, str(binary), "frontend", "components", "list", "--no-input")
+            run(app, str(binary), "frontend", "add", "component", "approval-review",
+                "--from", "company/approval-panel", "--dry-run", "--no-input")
+            run(app, str(binary), "frontend", "add", "component", "approval-review",
+                "--from", "company/approval-panel", "--no-install", "--no-input")
         run(app, str(binary), "frontend", "install", "--no-input")
         if profile != "native-bare":
             # Exercises dependency installation and checks after a later add.

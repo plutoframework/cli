@@ -62,3 +62,46 @@ func TestFrontendWizardReusesRawCommands(t *testing.T) {
 		t.Fatal(output.String())
 	}
 }
+
+func TestFrontendWizardPreservesRegistry(t *testing.T) {
+	t.Setenv("CI", "")
+
+	root := registryApp(t)
+
+	var output bytes.Buffer
+
+	command := New(Options{
+		Directory: root,
+		In:        strings.NewReader(""),
+		Out:       &output,
+		Err:       &output,
+		terminal:  func(io.Reader, io.Writer) bool { return true },
+		wizard: func(_ context.Context, _ io.Reader, _ io.Writer, model wizardModel) (wizardModel, error) {
+			return acceptWizard(
+				t,
+				model,
+				map[string]string{"name": "review", "no-install": "true"},
+			), nil
+		},
+	})
+	command.SetArgs(
+		[]string{
+			"frontend",
+			"add",
+			"component",
+			"--from",
+			"company/panel",
+			"--interactive",
+		},
+	)
+
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err, output.String())
+	}
+
+	_, manifest, err := project.Discover(root)
+	if err != nil || len(manifest.Frontend.Components) != 1 ||
+		manifest.Frontend.Components[0].From != "company/panel" {
+		t.Fatalf("lost registry: %v", err)
+	}
+}

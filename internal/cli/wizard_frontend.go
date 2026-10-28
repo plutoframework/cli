@@ -117,6 +117,11 @@ func frontendForm(
 		}
 	}
 
+	if model.kind == "frontend-component" && seed(cmd, "from", "") != "" {
+		model.fields = model.fields[:1]
+		model.context += " / registry: " + seed(cmd, "from", "")
+	}
+
 	model.fields = append(
 		model.fields,
 		boolField(
@@ -162,25 +167,41 @@ func frontendForm(
 				return nil, fmt.Errorf("run pluto frontend init first")
 			}
 
-			candidate := m
-			f := *m.Frontend
-			f.Components = append(
-				append([]project.FrontendComponent(nil), f.Components...),
-				project.FrontendComponent{Name: v["name"], Kind: v["kind"]},
-			)
+			if source := seed(cmd, "from", ""); source != "" {
+				if !project.FrontendName(v["name"]) {
+					return nil, fmt.Errorf(
+						"component name must be lowercase kebab-case",
+					)
+				}
 
-			candidate.Frontend = &f
-			if err := candidate.Validate(); err != nil {
-				return nil, err
+				result = append(
+					result,
+					"add",
+					"component",
+					v["name"],
+					"--from="+source,
+				)
+			} else {
+				candidate := m
+				f := *m.Frontend
+				f.Components = append(
+					append([]project.FrontendComponent(nil), f.Components...),
+					project.FrontendComponent{Name: v["name"], Kind: v["kind"]},
+				)
+
+				candidate.Frontend = &f
+				if err := candidate.Validate(); err != nil {
+					return nil, err
+				}
+
+				result = append(
+					result,
+					"add",
+					"component",
+					v["name"],
+					"--kind="+v["kind"],
+				)
 			}
-
-			result = append(
-				result,
-				"add",
-				"component",
-				v["name"],
-				"--kind="+v["kind"],
-			)
 		default:
 			result = append(result, "add", "auth")
 		}

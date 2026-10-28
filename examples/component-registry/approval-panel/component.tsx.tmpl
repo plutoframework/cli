@@ -1,0 +1,24 @@
+import { Button, Card, Chip } from "@heroui/react";
+import { useState } from "react";
+
+// Presentation only: connect real decisions through feature-owned mutations.
+export function <%.Symbol%>() {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <Card>
+      <Card.Header>
+        <Card.Title>Approval summary</Card.Title>
+        <Chip color="warning" variant="soft">Awaiting review</Chip>
+      </Card.Header>
+      <Card.Content>
+        <p>A reusable component from your local registry.</p>
+        {expanded && <p>Server authorization remains authoritative.</p>}
+      </Card.Content>
+      <Card.Footer>
+        <Button onPress={() => setExpanded(!expanded)}>
+          {expanded ? "Hide details" : "Show details"}
+        </Button>
+      </Card.Footer>
+    </Card>
+  );
+}

@@ -26,6 +26,10 @@ func requiredPrimitives(m project.Manifest) []string {
 
 	for _, c := range m.Frontend.Components {
 		names := []string{c.Kind}
+		if c.Kind == "registry" {
+			names = c.Primitives
+		}
+
 		switch c.Kind {
 		case "form":
 			names = []string{"button", "input", "label"}

@@ -1,0 +1,10 @@
+schema_version = 1
+
+[[items]]
+name = "approval-panel"
+description = "An application-owned approval summary, using HeroUI controls."
+profiles = ["heroui-v3"]
+files = [
+  { source = "approval-panel/component.tsx.tmpl", target = "components/<%.Symbol%>.tsx" },
+  { source = "approval-panel/component.test.tsx.tmpl", target = "components/<%.Symbol%>.test.tsx" },
+]

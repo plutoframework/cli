@@ -1,0 +1,14 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { expect, test } from "vitest";
+import { <%.Symbol%> } from "./<%.Symbol%>";
+
+test("reveals and hides the approval details", async () => {
+  const user = userEvent.setup();
+  render(<<%.Symbol%> />);
+  expect(screen.queryByText("Server authorization remains authoritative.")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Show details" }));
+  expect(screen.getByText("Server authorization remains authoritative.")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Hide details" }));
+  expect(screen.queryByText("Server authorization remains authoritative.")).not.toBeInTheDocument();
+});

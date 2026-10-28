@@ -5,18 +5,24 @@ import "fmt"
 // Frontend is optional, additive metadata in schema 7. Version identifies the
 // template contract; changing UI libraries requires an explicit migration.
 type Frontend struct {
-	Theme      *Theme              `toml:"theme,omitempty"`
-	Framework  string              `toml:"framework"`
-	Directory  string              `toml:"directory"`
-	UI         string              `toml:"ui"`
-	Version    int                 `toml:"template_version"`
-	Auth       bool                `toml:"auth"`
-	Components []FrontendComponent `toml:"components,omitempty"`
+	Registries map[string]ComponentRegistry `toml:"registries,omitempty"`
+	Theme      *Theme                       `toml:"theme,omitempty"`
+	Framework  string                       `toml:"framework"`
+	Directory  string                       `toml:"directory"`
+	UI         string                       `toml:"ui"`
+	Version    int                          `toml:"template_version"`
+	Auth       bool                         `toml:"auth"`
+	Components []FrontendComponent          `toml:"components,omitempty"`
 }
 
 type FrontendComponent struct {
-	Name string `toml:"name"`
-	Kind string `toml:"kind"`
+	Primitives  []string          `toml:"primitives,omitempty"`
+	From        string            `toml:"from,omitempty"`
+	Digest      string            `toml:"digest,omitempty"`
+	Packages    map[string]string `toml:"dependencies,omitempty"`
+	DevPackages map[string]string `toml:"dev_dependencies,omitempty"`
+	Name        string            `toml:"name"`
+	Kind        string            `toml:"kind"`
 }
 
 func (m Manifest) ValidateFrontend() error {
@@ -74,7 +80,7 @@ func (m Manifest) ValidateFrontend() error {
 		}
 
 		switch component.Kind {
-		case "button", "input", "card", "dialog", "form":
+		case "button", "input", "card", "dialog", "form", "registry":
 		default:
 			return fmt.Errorf(
 				"component kind must be button, input, card, dialog or form",
@@ -84,5 +90,5 @@ func (m Manifest) ValidateFrontend() error {
 		seen[component.Name] = true
 	}
 
-	return nil
+	return f.ValidateRegistries()
 }

@@ -62,6 +62,20 @@ func dependencies(m project.Manifest) map[string]map[string]string {
 		}
 	}
 
+	for _, component := range f.Components {
+		for name, pin := range component.Packages {
+			if _, exists := runtime[name]; !exists {
+				runtime[name] = pin
+			}
+		}
+
+		for name, pin := range component.DevPackages {
+			if _, exists := dev[name]; !exists {
+				dev[name] = pin
+			}
+		}
+	}
+
 	return map[string]map[string]string{
 		"dependencies":    runtime,
 		"devDependencies": dev,
