@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestSchemaThreeRejectedBeforeWrites(t *testing.T) {
+func TestOldSchemaRejectedBeforeWrites(t *testing.T) {
 	root := temporary(t)
 	mustInvoke(
 		t,
@@ -34,8 +34,8 @@ func TestSchemaThreeRejectedBeforeWrites(t *testing.T) {
 
 	old := strings.Replace(
 		string(data),
+		"schema_version = 5",
 		"schema_version = 4",
-		"schema_version = 3",
 		1,
 	)
 	if old == string(data) {
@@ -67,7 +67,7 @@ func TestSchemaThreeRejectedBeforeWrites(t *testing.T) {
 	if err == nil ||
 		!strings.Contains(
 			err.Error(),
-			"unsupported schema_version 3 (need 4)",
+			"unsupported schema_version 4 (need 5)",
 		) {
 		t.Fatal(output, err)
 	}

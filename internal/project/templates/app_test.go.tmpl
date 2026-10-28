@@ -15,7 +15,7 @@ rbac "github.com/plutoframework/pluto-rbac"
 
 func TestDefaultDenyAndLiveness(t *testing.T) {
 	cfg, err := config.LoadFrom(
-		func(string) (string, bool) { return "", false },
+		func(key string) (string, bool) { {{if .LocalCredentials}}return "postgres://localhost/test",key==config.Prefix+"DATABASE_URL"{{else}}return "",false{{end}} },
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestDefaultDenyAndLiveness(t *testing.T) {
 
 func TestSecurityHeadersOnPanic(t *testing.T) {
 	cfg, err := config.LoadFrom(
-		func(string) (string, bool) { return "", false },
+		func(key string) (string, bool) { {{if .LocalCredentials}}return "postgres://localhost/test",key==config.Prefix+"DATABASE_URL"{{else}}return "",false{{end}} },
 	)
 	if err != nil {
 		t.Fatal(err)

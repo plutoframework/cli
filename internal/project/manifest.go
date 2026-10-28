@@ -13,7 +13,7 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 type Manifest struct {
 	SchemaVersion int          `toml:"schema_version"`
@@ -31,7 +31,8 @@ type Project struct {
 }
 
 type Capabilities struct {
-	Tenancy string `toml:"tenancy"`
+	LocalCredentials bool   `toml:"local_credentials"`
+	Tenancy          string `toml:"tenancy"`
 }
 type Database struct {
 	Engine  string `toml:"engine"`
@@ -119,7 +120,7 @@ func (m Manifest) Validate() error {
 
 		route := e.Method + " " + canonicalRoute(e.Path)
 		if seenID[id] || seenRoute[route] || e.Path == "/api/features" ||
-			e.Path == "/healthz" || e.Path == "/auth/session" {
+			e.Path == "/healthz" || e.Path == "/auth" || strings.HasPrefix(e.Path, "/auth/") {
 			return fmt.Errorf("duplicate/reserved endpoint %s (%s)", id, route)
 		}
 

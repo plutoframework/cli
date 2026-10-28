@@ -9,6 +9,13 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 mutations = [
     (
+        "auth route namespace reservation",
+        "internal/project/manifest.go",
+        'strings.HasPrefix(e.Path, "/auth/")',
+        "false",
+        "TestGeneratedLocalApplications/single",
+    ),
+    (
         "app-name traversal validation",
         "internal/project/manifest.go",
         "if !appName.MatchString(m.Project.Name) {",

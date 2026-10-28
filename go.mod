@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/plutoframework/pluto-rbac v0.0.0-20261027065629-25c44e7fe21b
+	github.com/plutoframework/pluto-rbac v0.1.0
 	github.com/spf13/cobra v1.10.2
 )
 

@@ -3,7 +3,7 @@
 Read README.md first. Run pluto fmt and pluto vet before submitting changes.
 Keep every file <=1,000 lines; prefer expanded readable Go and 80 columns.
 
-pluto.toml schema 4 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
+pluto.toml schema 5 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
 Handlers, models, operations, composition root and transport helpers are authored
 and created once. Never add magic init registration. Add endpoints with the CLI.
 Do not import HTTP/storage from operations or database adapters from handlers,
@@ -30,3 +30,9 @@ choices. Change the operation constructor and this binding together when adding
 repositories. Add typed fields to app.Dependencies and construct/inject them in
 app.New. Generated group registries accept narrow Operations interfaces and never
 choose concrete implementations; additions preserve authored constructor wiring.
+
+Local-password apps use password.Service with postgres.NewLocal for both accounts
+and sessions. Never use direct Manager.Start/session-only issuance for local
+accounts. Keep delivery, shared account limits and trusted client/concurrency
+Ingress explicit; missing integrations fail startup. Auth responses never enter
+idempotency capture. Enrollment never grants membership or roles. No startup DDL.

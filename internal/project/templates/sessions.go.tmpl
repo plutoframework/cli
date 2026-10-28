@@ -13,8 +13,16 @@ import (
  "github.com/plutoframework/pluto-core/httpidem"
 )
 
+// AccountDisabler is for trusted application administration after its own
+// authorization check, never an unauthenticated HTTP bootstrap endpoint.
+type AccountDisabler interface {
+    Disable(context.Context,string) error
+}
+
 // Authentication is explicit wiring shared by protected routes and logout.
 type Authentication struct {
+    Accounts AccountDisabler
+    Credentials http.Handler
  Idempotency *httpidem.Handler
 	Verifier Authenticator
 	HTTP *httpauth.Transport

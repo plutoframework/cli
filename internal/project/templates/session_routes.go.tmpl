@@ -7,8 +7,8 @@ import (
 )
 
 // RegisterSessions exposes metadata and revocation, never credential issuance.
-// A login handler must verify credentials before calling Manager.Start, protect
-// browser login with HTTP.Guard, and send the result using HTTP.WriteCookie.
+// External session-only providers must verify credentials before issuance.
+// Local credentials MUST use NewLocalAuthentication and its fenced service.
 func RegisterSessions(reg Registrar, authentication Authentication) {
 	reg.Handle(paths.GetSession,func(w http.ResponseWriter,r *http.Request) {
 		session,ok:=httpauth.FromContext(r.Context())

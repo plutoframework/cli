@@ -18,6 +18,7 @@ var templates embed.FS
 type templateData struct {
 	Module, Name, Prefix string
 	Multi                bool
+	LocalCredentials     bool
 	Development
 	Endpoint
 	Symbol   string
@@ -38,14 +39,15 @@ func dataFor(m Manifest, e Endpoint) templateData {
 	}
 
 	return templateData{
-		Module:      m.Project.Module,
-		Name:        m.Project.Name,
-		Prefix:      m.Project.EnvPrefix,
-		Multi:       m.Capabilities.Tenancy == "multi",
-		Development: m.Development,
-		Endpoint:    e,
-		Symbol:      symbol(e),
-		Params:      params,
+		Module:           m.Project.Module,
+		Name:             m.Project.Name,
+		Prefix:           m.Project.EnvPrefix,
+		Multi:            m.Capabilities.Tenancy == "multi",
+		LocalCredentials: m.Capabilities.LocalCredentials,
+		Development:      m.Development,
+		Endpoint:         e,
+		Symbol:           symbol(e),
+		Params:           params,
 		Body: e.Method == "POST" || e.Method == "PUT" ||
 			e.Method == "PATCH",
 		TestPath: testPath,
@@ -220,6 +222,12 @@ func Managed(m Manifest) (map[string][]byte, error) {
 		composition.WriteString("},dependencies.Config.Server.BodyLimit)\n")
 	}
 
+	if m.Capabilities.LocalCredentials {
+		catalog.WriteString(
+			"Enroll,RequestVerification,VerifyEmail,SignIn,RequestRecovery,ResetPassword,Logout,\n",
+		)
+	}
+
 	catalog.WriteString("}\n}\n")
 	composition.WriteString("}\n")
 	definitions.WriteString(
@@ -341,6 +349,13 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		"README.md":                                  "README.md",
 		"AGENTS.md":                                  "AGENTS.md",
 	}
+	if m.Capabilities.LocalCredentials {
+		layout["internal/transport/credentials.go"] = "credentials.go"
+		layout["internal/paths/credentials.go"] = "credentials_paths.go"
+		layout["cmd/api/credentials.go"] = "credentials_main.go"
+		layout["db/migrations/004_local_credentials.sql"] = "credentials_schema.sql"
+	}
+
 	for path, name := range layout {
 		data, err := render(name, dataFor(m, Endpoint{}))
 		if err != nil {

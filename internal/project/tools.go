@@ -5,14 +5,24 @@ import (
 	"strings"
 )
 
-// RBACVersion pins the published package used by the CLI and generated apps.
-const AuthVersion = "v0.0.0-20261028021955-c1eabc6c680e"
+// AuthVersion pins the published root, password and PostgreSQL modules.
+const AuthVersion = "v0.3.0"
 
 const CoreVersion = "v0.1.2"
 
 const CorePostgresVersion = "v0.1.0"
 
-const RBACVersion = "v0.0.0-20261027065629-25c44e7fe21b"
+const RBACVersion = "v0.1.0"
+
+// The published pgx adapter imports the local store in its package, so its
+// password/crypto dependencies are transitive even in session-only PG apps.
+func passwordRequirement(m Manifest) string {
+	if m.Capabilities.LocalCredentials {
+		return AuthVersion
+	}
+
+	return AuthVersion + " // indirect"
+}
 
 // ToolFiles contains module dependencies and optional development configuration.
 func ToolFiles(m Manifest) map[string][]byte {
@@ -32,13 +42,16 @@ require (
 )
 
 require (
+ github.com/plutoframework/pluto-auth/methods/password %s
+ golang.org/x/crypto v0.55.0 // indirect
+ golang.org/x/sys v0.47.0 // indirect
  github.com/jackc/pgpassfile v1.0.0 // indirect
  github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
  github.com/jackc/puddle/v2 v2.2.2 // indirect
- golang.org/x/sync v0.17.0 // indirect
- golang.org/x/text v0.29.0 // indirect
+ golang.org/x/sync v0.22.0 // indirect
+ golang.org/x/text v0.41.0 // indirect
 )
-`, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthVersion))
+`, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthVersion, passwordRequirement(m)))
 	files["go.sum"] = []byte(appGoSum)
 	files[".golangci.yml"] = []byte(
 		strings.ReplaceAll(lintConfig, "MODULE", m.Project.Module),
@@ -56,12 +69,19 @@ require (
 			m.Project.EnvPrefix,
 		),
 	)
+
 	files[".env.example"] = append(files[".env.example"], []byte(fmt.Sprintf(
 		"%sAUTH_TRUSTED_ORIGINS=http://127.0.0.1:8080\n%sAUTH_SESSION_TTL=24h\n%sAUTH_IDLE_TIMEOUT=30m\n",
 		m.Project.EnvPrefix,
 		m.Project.EnvPrefix,
 		m.Project.EnvPrefix,
 	))...)
+	if m.Capabilities.LocalCredentials {
+		files[".env.example"] = append(files[".env.example"], []byte(
+			"# Local credentials require DATABASE_URL and explicit app-owned Sender,\n# shared AttemptLimiter and trusted-client Ingress in cmd/api/credentials.go.\n# No credential defaults or delivery secrets are included.\n",
+		)...)
+	}
+
 	files["scripts/check.sh"] = []byte(
 		"#!/bin/sh\nset -eu\ncd \"$(dirname \"$0\")/..\"\nexec pluto vet\n",
 	)

@@ -3,7 +3,7 @@ package config
 import "testing"
 
 func TestLoadValidation(t *testing.T) {
-	cfg, err := LoadFrom(func(string) (string, bool) { return "", false })
+	cfg, err := LoadFrom(func(key string) (string, bool) { {{if .LocalCredentials}}return "postgres://localhost/test", key == Prefix+"DATABASE_URL"{{else}}return "", false{{end}} })
 	if err != nil || !cfg.Server.Gzip ||
 		cfg.Server.Address != "127.0.0.1:8080" {
 		t.Fatalf("defaults: %#v %v", cfg, err)
@@ -17,7 +17,10 @@ func TestLoadValidation(t *testing.T) {
 	}
 
 	cfg, err = LoadFrom(
-		func(key string) (string, bool) { return "false", key == Prefix+"SERVER_GZIP" },
+		func(key string) (string, bool) {
+            {{if .LocalCredentials}}if key == Prefix+"DATABASE_URL" { return "postgres://localhost/test",true }{{end}}
+            return "false", key == Prefix+"SERVER_GZIP"
+        },
 	)
 	if err != nil || cfg.Server.Gzip {
 		t.Fatal("explicit false lost")

@@ -14,6 +14,7 @@ import (
 func initCommand(options Options) *cobra.Command {
 	var (
 		name, module, prefix                       string
+		localCredentials                           bool
 		multi, noMise, noFnox, noDocker, hook, dry bool
 	)
 
@@ -63,7 +64,10 @@ func initCommand(options Options) *cobra.Command {
 					Module:    module,
 					EnvPrefix: prefix,
 				},
-				Capabilities: project.Capabilities{Tenancy: tenancy},
+				Capabilities: project.Capabilities{
+					Tenancy:          tenancy,
+					LocalCredentials: localCredentials,
+				},
 				Database: project.Database{
 					Engine:  "postgres",
 					Queries: "sqlc",
@@ -172,6 +176,12 @@ func initCommand(options Options) *cobra.Command {
 		"env-prefix",
 		"",
 		"Uppercase environment prefix ending in underscore",
+	)
+	flags.BoolVar(
+		&localCredentials,
+		"local-credentials",
+		false,
+		"Scaffold password lifecycle with required delivery/limit/ingress seams (saved in TOML)",
 	)
 	flags.BoolVar(
 		&multi,

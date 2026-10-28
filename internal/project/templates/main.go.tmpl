@@ -15,9 +15,9 @@ import (
 	"{{.Module}}/internal/config"
 	"{{.Module}}/internal/storage/postgres"
 	"{{.Module}}/internal/transport"
-plutoauth "github.com/plutoframework/pluto-auth"
-authmemory "github.com/plutoframework/pluto-auth/stores/memory"
-authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+{{if not .LocalCredentials}}plutoauth "github.com/plutoframework/pluto-auth"{{end}}
+{{if not .LocalCredentials}}authmemory "github.com/plutoframework/pluto-auth/stores/memory"{{end}}
+{{if not .LocalCredentials}}authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"{{end}}
  "github.com/plutoframework/pluto-core/idempotency"
  "github.com/plutoframework/pluto-core/httpidem"
  idempostgres "github.com/plutoframework/pluto-core/stores/postgres"
@@ -50,26 +50,39 @@ func run() error {
 	)
 	defer stop()
 
-	var sessionStore plutoauth.SessionStore
- var idempotencyStore idempotency.Store
+	{{if .LocalCredentials}}
+    var authentication transport.Authentication
+    {{else}}
+    var sessionStore plutoauth.SessionStore
+    {{end}}
+ startup,cancelStartup:=context.WithTimeout(ctx,10*time.Second)
+    defer cancelStartup()
+    var idempotencyStore idempotency.Store
  if cfg.Database.URL != "" {
-		pool, err := postgres.Open(ctx, cfg.Database.URL)
+		pool, err := postgres.Open(startup, cfg.Database.URL)
 		if err != nil {
 			return errors.New("postgres connectivity failed; verify DATABASE_URL and database availability")
 		}
 		defer pool.Close()
         idempotencyStore,err=idempostgres.New(pool)
  if err!=nil {return err}
- sessionStore,err=authpostgres.New(pool)
+ {{if .LocalCredentials}}
+        authentication,err=newLocalAuthentication(startup,cfg,pool)
+        {{else}}
+        sessionStore,err=authpostgres.New(pool)
+        {{end}}
         if err != nil { return err }
-    } else {
+    }{{if not .LocalCredentials}} else {
         sessionStore,err=authmemory.New(1000)
         if err != nil { return err }
     }
+    {{end}}
     var idempotent *httpidem.Handler
  if idempotencyStore!=nil { idempotent,err=transport.NewIdempotency(idempotencyStore,cfg.Server.BodyLimit);if err!=nil{return err} }
- authentication,err:=transport.NewAuthentication(cfg.Auth,sessionStore,access.Memberships{})
+ {{if not .LocalCredentials}}
+    authentication,err:=transport.NewAuthentication(cfg.Auth,sessionStore,access.Memberships{})
     if err != nil { return err }
+    {{end}}
  authentication.Idempotency=idempotent
 
 	server := &http.Server{

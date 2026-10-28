@@ -17,25 +17,74 @@ there are no default users or automatic role grants.{{if .Multi}} It must resolv
 this exact subject and selected X-Tenant-ID; tenant headers never prove membership.{{else}}
 Single tenancy does not use tenant headers.{{end}}
 
+{{if .LocalCredentials}}
+This project opted into local credentials (`capabilities.local_credentials=true`).
+Startup requires DATABASE_URL and stops until you implement `localIntegrations`
+in cmd/api/credentials.go. That authored function must supply a real Sender,
+shared AttemptLimiter, trusted-client/concurrency Ingress and optional local
+PasswordPolicy. There is no production no-op sender, demo password, admin
+bootstrap, memory credential fallback or placeholder success.
+
+Apply migrations 001 through 004 explicitly. `postgres.NewLocal` is the single
+account/session backend and `transport.NewLocalAuthentication` builds the published
+password.Service/passwordhttp adapter around it. Always use service.Sessions()
+for local authentication, revocation and rotation; never issue local accounts
+through session-only postgres.New or Manager.Start. Reset/disable fence stale
+issuance and revoke existing sessions. authentication.Accounts exposes only trusted
+Disable administration after application authorization; it is never a public route. Existing session-only providers can retain
+the separate NewAuthentication path when intentionally configured.
+
+POST /auth/enroll, /verification, /verify, /signin, /recovery, /reset and /logout
+mount before tenant/membership and idempotency handling. Each requires an exact
+trusted Origin, including unauthenticated flows and bearer logout. JSON is bounded
+to 8 KiB and rejects duplicate/unknown fields and trailing JSON. Responses contain
+only an opaque code; sign-in additionally sets a secure cookie. Enrollment,
+verification resend and recovery return 202 without eligibility details; reset
+requires reauthentication. Invalid credentials return 401, challenges 400, limits
+429, dependencies 503. GET never consumes a challenge. Delivery failures accept
+without an existence oracle; observe only the redacted DeliveryError callback and
+ask for an explicit resend. Duplicate enrollment never resends or changes a hash.
+
+The Sender must honor deadlines, build links only from fixed trusted HTTPS
+confirmation destinations (prefer token fragments), and never log Notification or
+persist plaintext challenge/outbox data. Provide real TLS/auth/config/timeouts at
+the delivery boundary. Ingress must enforce authenticated proxy/client identity,
+network limits, bounded concurrency/queueing and request deadlines before JSON/KDF;
+never trust arbitrary X-Forwarded-For. Account limits must be bounded and shared
+across replicas, with dependency failure denying requests. The library WindowLimiter
+is process-local only. Active Argon2 work cannot be interrupted. Configure storage
+abuse limits, abandoned-account retention, session/challenge pruning, DML-only DB
+credentials and a maintained password blocklist if required. No production provider
+or operational scheduler is bundled. Tests use bounded in-process delivery only;
+the Pluto purchasing example demonstrates disposable loopback Mailpit delivery.
+
+Enrollment owns only credentials; app membership resolution still denies until
+you explicitly implement trusted provisioning. Never grant roles/tenant membership
+from enrollment fields or email matching. There is no public admin bootstrap.
+{{else}}
 The composition root creates a shared session manager: bounded memory storage
 for numeric-loopback development without DATABASE_URL, or the published pgx/sqlc
 store with DATABASE_URL. Apply db/migrations explicitly; startup never creates
-schema. Compose mounts the migrations for a new development database; existing
-volumes need the new migration applied separately.
+schema. Compose mounts migrations for a new development database; existing volumes
+need new migrations separately. No credential verification/login route is mounted.
+For external credential providers, verify credentials before Manager.Start, guard
+browser login with HTTP.Guard, and use HTTP.WriteCookie. For local passwords use
+`pluto init --local-credentials` and its fenced lifecycle instead.
+{{end}}
 
 GET /auth/session returns metadata and DELETE /auth/session revokes the server
-record before clearing its cookie. Neither requires tenant membership. A login
-provider is intentionally not invented: verify credentials before Manager.Start,
-wrap browser login in authentication.HTTP.Guard, and issue the result using
-HTTP.WriteCookie. Never send raw tokens in response JSON or log them.
-
-Cookies remain Secure, HttpOnly, SameSite=Lax and host-only; browsers need HTTPS.
-Unsafe cookie requests require an exact trusted Origin. Opaque bearer credentials
-are explicitly enabled for API clients. Mixed/duplicate credentials fail closed.
-AUTH_TRUSTED_ORIGINS, AUTH_SESSION_TTL and AUTH_IDLE_TIMEOUT use the saved app
-prefix. Defaults are the local development origin, 24h absolute and 30m idle.
-CORS, TLS termination, account recovery and production credential storage are
-application responsibilities. Incomplete operations return 501.
+record before clearing its cookie. Neither requires tenant membership. Cookies
+remain Secure, HttpOnly, SameSite=Lax and host-only; browsers need HTTPS. Unsafe
+cookie requests require an exact trusted Origin. Opaque bearer sessions are
+explicitly enabled; mixed/duplicate credentials fail closed. Auth endpoints never
+cache cookies/tokens through idempotency. Never log credentials or bodies.
+AUTH_TRUSTED_ORIGINS, AUTH_SESSION_TTL and AUTH_IDLE_TIMEOUT use the saved prefix;
+defaults are the local development origin, 24h absolute and 30m idle. CORS, TLS,
+trusted proxies and production integrations remain application responsibilities.
+Incomplete business operations return 501. The root Auth module is stdlib-only;
+password uses x/crypto. The current published PostgreSQL adapter contains the local
+store in its package, so password/crypto are transitive dependencies even for a
+session-only PG app. The CLI itself imports neither adapter nor password module.
 
 ```sh
 pluto add endpoint widgets Create --method POST --path /api/widgets \
@@ -55,11 +104,14 @@ endpoint additions do not enable omitted presets. Core lint/config/SQL files
 are always included and Git hooks remain opt-in.
 
 Commands discover pluto.toml in cwd/parents; saved tenancy/prefix are reused.
-`pluto.toml` is project metadata, never runtime settings/secrets. Schema 4 records shared Core pagination/idempotency and session contracts.
+`pluto.toml` is project metadata, never runtime settings/secrets. Schema 5 adds the explicit local_credentials choice to the Core/session contract.
 Unknown fields/settings fail; no automatic schema migration is implied.
-For schema 2/3 apps, migrate authored app/config/main/transport wiring, module pins,
+For schema 2/3/4 apps, migrate authored app/config/main/transport wiring, module pins,
 static paths, session storage and migration manually before updating the manifest.
 The CLI refuses old schemas instead of overwriting authored authentication code.
+For schema 4, review the new published pins, choose local_credentials explicitly,
+compare the thin constructor/routes with a fresh scaffold, and apply 004 only if
+local credentials are enabled before changing schema_version to 5.
 
 Authorization imports `github.com/plutoframework/pluto-rbac` at the exact version
 in go.mod/go.sum, with no sibling checkout or local replacement. Startup compiles
@@ -217,7 +269,7 @@ no domain SQL integration is implied. `docker compose down -v` discards local
 state. Docker images use version tags, not immutable digests; review/pin digests
 for deployment. Container checks require a running Docker daemon.{{end}}
 
-Prototype boundaries: no identity provider, RBAC role management, durable audit,
+Prototype boundaries: no external identity/delivery provider, RBAC management, durable audit,
 domain SQL generator, distributed flags, production deployment, complete OpenAPI
 schema inference (recursive types unsupported), or automatic migrations. No
 network-free/offline promise: Go modules and optional tools may need downloads.

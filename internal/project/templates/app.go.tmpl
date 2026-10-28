@@ -59,7 +59,15 @@ func New(
 			paths.FeaturesResponse{Data: evaluator.Visible()},
 		)
 	})
-	transport.RegisterSessions(reg,authentication)
+	{{if .LocalCredentials}}
+    if authentication.Credentials != nil {
+        for _, endpoint := range paths.LocalCredentials() {
+            router.Method(endpoint.Method, endpoint.Path,
+                http.StripPrefix("/auth", authentication.Credentials))
+        }
+    }
+    {{end}}
+    transport.RegisterSessions(reg,authentication)
  RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy})
 	router.NotFound(
 		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 404, "not_found") },

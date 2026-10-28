@@ -1,0 +1,170 @@
+package app_test
+
+import (
+    "bytes"
+    "context"
+    "crypto/rand"
+    "encoding/json"
+    "errors"
+    "log/slog"
+    "net/http"
+    "net/http/httptest"
+    "os"
+    "path/filepath"
+    "strings"
+    "sync"
+    "testing"
+    "time"
+
+    "example.com/local-test/internal/access"
+    "example.com/local-test/internal/app"
+    "example.com/local-test/internal/config"
+    "example.com/local-test/internal/domain"
+    "example.com/local-test/internal/transport"
+
+    "github.com/jackc/pgx/v5"
+    "github.com/jackc/pgx/v5/pgxpool"
+    "github.com/plutoframework/pluto-auth/httpauth"
+    "github.com/plutoframework/pluto-auth/methods/password"
+    authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+)
+
+// Strictly bounded recorder, used only by this test; no network delivery.
+type recorder struct { items []password.Notification; fail bool; failures int }
+func (s *recorder) Send(ctx context.Context,n password.Notification) error {
+    if err:=ctx.Err();err!=nil{return err}
+    if s.fail || len(s.items)>=20 {return errors.New("private provider failure")}
+    s.items=append(s.items,n)
+    return nil
+}
+func (s *recorder) token(t *testing.T,purpose password.Purpose) string {
+    t.Helper()
+    for i:=len(s.items)-1;i>=0;i-- {if s.items[i].Purpose==purpose {return s.items[i].Token}}
+    t.Fatal("missing delivery")
+    return ""
+}
+
+type memberships struct { allowed bool }
+func (m *memberships) Resolve(_ context.Context,subject string{{if .Multi}},tenant string{{end}}) (domain.Principal,error) {
+    if !m.allowed{{if .Multi}} || tenant!="test-tenant"{{end}} {return domain.Principal{},domain.ErrUnauthenticated}
+    return domain.Principal{ActorID:subject,{{if .Multi}}TenantID:tenant,{{end}}},nil
+}
+
+func TestLocalPublishedLifecycle(t *testing.T) {
+    raw:=os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
+    if raw=="" {t.Skip("requires disposable PostgreSQL")}
+    ctx:=context.Background()
+    pool,err:=pgxpool.New(ctx,raw)
+    if err!=nil {t.Fatal(err)}
+    defer pool.Close()
+    schema:="generated_"+strings.ToLower(rand.Text())
+    identifier:=pgx.Identifier{schema}.Sanitize()
+    if _,err:=pool.Exec(ctx,"CREATE SCHEMA "+identifier);err!=nil {t.Fatal(err)}
+    defer func(){if _,err:=pool.Exec(ctx,"DROP SCHEMA "+identifier+" CASCADE");err!=nil {t.Error("cleanup failed")}}()
+    pc,err:=pgxpool.ParseConfig(raw)
+    if err!=nil {t.Fatal(err)}
+    pc.ConnConfig.RuntimeParams["search_path"]=schema
+    localPool,err:=pgxpool.NewWithConfig(ctx,pc)
+    if err!=nil {t.Fatal(err)}
+    defer localPool.Close()
+    for _,name:=range []string{"001_initial.sql","002_auth_sessions.sql","003_idempotency.sql","004_local_credentials.sql"} {
+        data,err:=os.ReadFile(filepath.Join("../../db/migrations",name))
+        if err!=nil {t.Fatal(err)}
+        if _,err:=localPool.Exec(ctx,string(data));err!=nil {t.Fatal(err)}
+    }
+    store,err:=authpostgres.NewLocal(localPool)
+    if err!=nil {t.Fatal(err)}
+    cfg,err:=config.LoadFrom(func(key string)(string,bool){return raw,key==config.Prefix+"DATABASE_URL"})
+    if err!=nil {t.Fatal(err)}
+    if _,err:=transport.NewLocalAuthentication(ctx,cfg.Auth,&memberships{},transport.LocalDependencies{});err==nil {t.Fatal("missing integrations accepted")}
+    sender:=&recorder{}
+    accounts,err:=password.NewWindowLimiter(100,40,time.Minute,time.Now)
+    if err!=nil {t.Fatal(err)}
+    // The test ingress admits one request at a time with no queue and a timeout.
+    // Production must additionally bound authenticated client/network identity.
+    var active sync.Mutex
+    ingress:=func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+            if !active.TryLock(){w.WriteHeader(429);return}
+            defer active.Unlock()
+            bounded,cancel:=context.WithTimeout(r.Context(),5*time.Second)
+            defer cancel()
+            next.ServeHTTP(w,r.WithContext(bounded))
+        })
+    }
+    members:=&memberships{}
+    authentication,err:=transport.NewLocalAuthentication(ctx,cfg.Auth,members,transport.LocalDependencies{
+        Store:store,Sender:sender,Limiter:accounts,Ingress:ingress,
+        DeliveryError:func(_ context.Context,err error){if !errors.Is(err,password.ErrDelivery){t.Error("provider error leaked")};sender.failures++},
+    })
+    if err!=nil {t.Fatal(err)}
+    policy,err:=access.NewPolicy()
+    if err!=nil {t.Fatal(err)}
+    logs:=&bytes.Buffer{}
+    router:=app.New(cfg,authentication,slog.New(slog.NewJSONHandler(logs,nil)),policy)
+    request:=func(method,path,cookie,origin,body string,want int)*httptest.ResponseRecorder {
+        r:=httptest.NewRequest(method,path,strings.NewReader(body))
+        r.Header.Set("Content-Type","application/json")
+        r.Header.Set("Origin",origin)
+        r.Header.Set("X-Tenant-ID","test-tenant")
+        r.Header.Set("Idempotency-Key","same-auth-key")
+        if cookie!="" {r.AddCookie(&http.Cookie{Name:httpauth.CookieName,Value:cookie})}
+        w:=httptest.NewRecorder()
+        router.ServeHTTP(w,r)
+        if w.Code!=want {t.Fatalf("%s %s status=%d want=%d",method,path,w.Code,want)}
+        if w.Header().Get("Cache-Control")!="no-store" || w.Header().Get("X-Content-Type-Options")!="nosniff" {t.Fatal("missing auth security headers")}
+        return w
+    }
+    const origin="http://127.0.0.1:8080"
+    const input=`{"email":"synthetic@example.test","password":"synthetic long passphrase"}`
+    request("POST","/auth/enroll","","",input,403)
+    request("POST","/auth/enroll","","https://evil.example.test",input,403)
+    sender.fail=true
+    request("POST","/auth/enroll","",origin,input,202)
+    if sender.failures!=1 {t.Fatal("delivery failure lost")}
+    sender.fail=false
+    request("POST","/auth/enroll","",origin,input,202)
+    if len(sender.items)!=0 {t.Fatal("duplicate enrollment resent")}
+    request("POST","/auth/signin","",origin,input,401)
+    request("POST","/auth/verification","",origin,`{"email":"synthetic@example.test"}`,202)
+    old:=sender.token(t,password.VerifyEmail)
+    request("POST","/auth/verification","",origin,`{"email":"synthetic@example.test"}`,202)
+    verification:=sender.token(t,password.VerifyEmail)
+    tokenInput:=func(token string)string{data,_:=json.Marshal(map[string]string{"token":token});return string(data)}
+    request("POST","/auth/verify","",origin,tokenInput(old),400)
+    request("GET","/auth/verify","","","",405)
+    request("POST","/auth/verify","",origin,tokenInput(verification),200)
+    request("POST","/auth/verify","",origin,tokenInput(verification),400)
+    login:=request("POST","/auth/signin","",origin,input,200)
+    cookie:=login.Result().Cookies()[0]
+    if !cookie.Secure || !cookie.HttpOnly || strings.Contains(login.Body.String(),cookie.Value){t.Fatal("cookie contract")}
+    another:=request("POST","/auth/signin","",origin,input,200).Result().Cookies()[0].Value
+    if cookie.Value==another {t.Fatal("sensitive response replayed")}
+    request("GET","/api/records",cookie.Value,"","",401)
+    request("GET","/auth/session",cookie.Value,"","",200)
+    members.allowed=true // Explicit trusted test binding; never enrollment.
+    request("GET","/api/records",cookie.Value,"","",501)
+    request("POST","/auth/recovery","",origin,`{"email":"synthetic@example.test"}`,202)
+    recovery:=sender.token(t,password.RecoverPassword)
+    reset,_:=json.Marshal(map[string]string{"token":recovery,"password":"new synthetic passphrase"})
+    request("POST","/auth/reset","",origin,string(reset),200)
+    request("POST","/auth/reset","",origin,string(reset),400)
+    request("GET","/api/records",cookie.Value,"","",401)
+    request("GET","/auth/session",another,"","",401)
+    request("POST","/auth/signin","",origin,input,401)
+    const replacement=`{"email":"synthetic@example.test","password":"new synthetic passphrase"}`
+    fresh:=request("POST","/auth/signin","",origin,replacement,200).Result().Cookies()[0].Value
+    request("POST","/auth/logout",fresh,"","",403)
+    request("POST","/auth/logout",fresh,origin,"",200)
+    request("GET","/auth/session",fresh,"","",401)
+    fresh=request("POST","/auth/signin","",origin,replacement,200).Result().Cookies()[0].Value
+    account,err:=store.LookupAccount(ctx,"synthetic@example.test")
+    if err!=nil {t.Fatal(err)}
+    if err:=authentication.Accounts.Disable(ctx,account.ID);err!=nil {t.Fatal(err)}
+    request("POST","/auth/signin","",origin,replacement,401)
+    request("GET","/api/records",fresh,"","",401)
+    for _,item:=range sender.items {if strings.Contains(logs.String(),item.Token){t.Fatal("challenge logged")}}
+    for _,secret:=range []string{cookie.Value,another,fresh,"synthetic long passphrase","new synthetic passphrase"} {
+        if strings.Contains(logs.String(),secret){t.Fatal("credential logged")}
+    }
+}

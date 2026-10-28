@@ -109,6 +109,9 @@ Logging:  Logging{Level: "info"},
  number,err:=strconv.Atoi(port)
  if err!=nil || number<1 || number>65535 { return Config{},fmt.Errorf("%sSERVER_ADDRESS requires a numeric port from 1 to 65535",Prefix) }
 
+    {{if .LocalCredentials}}
+    if cfg.Database.URL == "" { return Config{},fmt.Errorf("local credentials require DATABASE_URL; no memory fallback") }
+    {{end}}
     if cfg.Database.URL == "" {
         address:=net.ParseIP(host)
         if address==nil || !address.IsLoopback() { return Config{},fmt.Errorf("DATABASE_URL is required outside numeric loopback development") }

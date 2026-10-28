@@ -54,7 +54,18 @@ map[string]any{"sessionCookie": []string{}},
 			}
 		}
 
-		if endpoint.Request != nil {
+		{{if .LocalCredentials}}
+        if strings.HasPrefix(endpoint.ID,"credentials.") {
+            operation["responses"].(map[string]any)["default"]=map[string]any{
+                "description":"Opaque authentication code; no credential or challenge data.",
+                "content":map[string]any{"application/json":map[string]any{"schema":map[string]any{
+                    "type":"object","properties":map[string]any{"code":map[string]any{"type":"string"}},
+                    "required":[]string{"code"},"additionalProperties":false,
+                }}},
+            }
+        }
+        {{end}}
+        if endpoint.Request != nil {
  requestSchema,err:=modelSchema(endpoint.Request)
  if err!=nil { return nil,fmt.Errorf("%s request: %w",endpoint.ID,err) }
 
@@ -69,6 +80,11 @@ map[string]any{"sessionCookie": []string{}},
 		}
 
 		parameters := []any{}
+        {{if .LocalCredentials}}
+        if strings.HasPrefix(endpoint.ID,"credentials.") {
+            parameters=append(parameters,map[string]any{"name":"Origin","in":"header","required":true,"schema":map[string]any{"type":"string"}})
+        }
+        {{end}}
 
 		for _, part := range strings.Split(endpoint.Path, "/") {
 			if strings.HasPrefix(part, "{") {

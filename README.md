@@ -3,8 +3,8 @@
 A working Cobra generator for small Go/Chi APIs. The application uses provisional
 app-local primitives, **not an imaginary published Pluto framework**. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
-The executable is named `pluto`; install the current development version with
-`go install github.com/plutoframework/cli/cmd/pluto@latest`.
+The executable is named `pluto`; install the release with
+`go install github.com/plutoframework/cli/cmd/pluto@v0.1.1`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -58,7 +58,7 @@ incomplete operations never claim success. Resource authorization remains author
 business logic, separate from route permissions and feature gates.
 
 Authorization uses the published `github.com/plutoframework/pluto-rbac` module,
-pinned to `v0.0.0-20261027065629-25c44e7fe21b` in the CLI and generated apps.
+pinned to `v0.1.0` in the CLI and generated apps.
 The CLI validates permission IDs with that library, including `resource:action`
 IDs. No local `replace` or sibling checkout is required.
 
@@ -213,7 +213,7 @@ choose concrete implementations; additions preserve authored constructor wiring.
 
 ## Session-enabled scaffolds
 
-New projects use manifest schema 4 and published Pluto Auth modules. Authenticated
+New projects use manifest schema 5 and published Pluto Auth modules. Authenticated
 routes verify sessions, then resolve trusted memberships through the authored
 access.Memberships adapter (deny by default). Cookie/Origin protection, optional
 opaque bearer credentials, session metadata/logout endpoints, explicit Postgres
@@ -260,5 +260,48 @@ transport adapters, Registrar/authentication/main wiring, and eligible endpoint
 metadata. Convert authored collection inputs/results/handlers to the shared page
 contracts and use bounded repository queries. Copy the new thin adapters from a
 fresh scaffold and review them; do not replace authored business logic. Only then
-set schema_version=4 and regenerate CLI-owned files. Older manifests are rejected
+set schema_version=5 and regenerate CLI-owned files. Older manifests are rejected
 before writes; regeneration never edits authored models/handlers/operations.
+
+## Optional local credentials (schema 5)
+
+`pluto init --local-credentials` saves `capabilities.local_credentials=true`.
+The default remains session-only external credential integration with no public
+login/bootstrap route. Local apps import the published password lifecycle and
+mount seven POST routes: /auth/enroll, /verification, /verify, /signin, /recovery,
+/reset and /logout. GET/DELETE /auth/session remain tenant-free metadata/revocation.
+The entire /auth namespace is reserved so generated business writes cannot shadow
+credential routes or accidentally cache their sensitive responses.
+
+The local starter compiles but deliberately refuses startup until DATABASE_URL and
+app-owned delivery, shared AttemptLimiter and trustworthy HTTP Ingress are supplied
+in authored cmd/api/credentials.go. Constructors reject missing dependencies.
+Production never silently uses a recorder, no-op sender, in-memory credential store,
+hardcoded password or automatic role grant. The member resolver still denies until
+trusted app provisioning is implemented; enrollment never grants business access.
+The generated README describes Origin, bounded JSON, cookie and opaque response
+contracts, post-commit delivery/resend behavior and operational responsibilities.
+
+Apply explicit 004_local_credentials.sql after 001/002/003; no startup DDL. Local
+issuance/rotation MUST use password.Service.Sessions() with the SAME NewLocal store.
+The library owns hashing, challenges, password reset/disable fencing and sessions;
+templates only wire its adapters. Auth root is stdlib-only, password uses x/crypto,
+and the optional published pgx adapter currently imports password transitively in
+its package even for session-only consumers. The CLI's own dependencies stay small.
+
+Schema 4 and earlier manifests are rejected before writes. Compare a fresh schema-5
+scaffold, review published module pins and authored auth/config/main/path/transport
+changes, explicitly choose local_credentials=false (external sessions) or true,
+apply 004 only for local credentials, then set schema_version=5. Preserve existing
+models/handlers/operations; add/check never migrates or overwrites authored code.
+An existing session-only app can retain its original schema and binary until it
+chooses a manual migration. No implicit generation upgrade is provided.
+
+`mise exec golangci-lint@2.15.0 -- ./scripts/postgres-check.sh` runs disposable real
+PostgreSQL HTTP lifecycle tests in generated single/multi apps, then removes the
+container/schemas. Without PLUTO_CLI_TEST_DATABASE_URL the persisted test reports
+SKIP. It covers missing dependencies, unverified/unknown membership, explicit trusted
+binding, Origin, challenge supersession/replay, delivery failure/resend, secure
+cookie/no-cache, reset/disable revocation, protected routes and logout. Existing
+single/multi generator tests retain pagination, idempotency, RBAC/flags and session
+compatibility checks. No messages leave test-process memory.
