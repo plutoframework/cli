@@ -61,6 +61,18 @@ func projectCommand(
 					return err
 				}
 
+				if vet && m.Frontend.Theme != nil {
+					if err := frontend.NPM(
+						cmd.Context(),
+						filepath.Join(root, m.Frontend.Directory),
+						cmd.OutOrStdout(),
+						cmd.ErrOrStderr(),
+						"run", "theme:check",
+					); err != nil {
+						return err
+					}
+				}
+
 				task := "fmt"
 				if vet {
 					task = "check"

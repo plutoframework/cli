@@ -70,6 +70,7 @@ func Install(
 	for _, args := range [][]string{
 		{"install", "--ignore-scripts", "--save-exact"},
 		{"run", "api:generate"},
+		{"run", "theme:generate"},
 		{"run", "fmt"},
 		{"run", "check"},
 	} {

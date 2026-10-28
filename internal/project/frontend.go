@@ -5,6 +5,7 @@ import "fmt"
 // Frontend is optional, additive metadata in schema 7. Version identifies the
 // template contract; changing UI libraries requires an explicit migration.
 type Frontend struct {
+	Theme      *Theme              `toml:"theme,omitempty"`
 	Framework  string              `toml:"framework"`
 	Directory  string              `toml:"directory"`
 	UI         string              `toml:"ui"`
@@ -58,6 +59,10 @@ func (m Manifest) ValidateFrontend() error {
 		return fmt.Errorf(
 			"frontend auth requires a backend initialized with --local-credentials; frontend generation never enables credential issuance",
 		)
+	}
+
+	if err := f.ValidateTheme(); err != nil {
+		return err
 	}
 
 	seen := map[string]bool{}

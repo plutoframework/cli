@@ -10,3 +10,8 @@ Read README.md first. UI profile: <%.UI%>. Keep the same library throughout gene
 - Authored files and shared component source are application-owned. catalog.gen.ts and pluto-ui.toml are generator-owned; do not edit them.
 - Run npm run fmt and npm run check. Formatter preference is 80 columns; source/generated files stay <=1,000 lines. package-lock.json alone is exempt as machine-owned dependency resolution data. Do not compact code to evade limits.
 - Do not scan node_modules, dist, .cert, coverage or binary resources. Retain license notices with copied components.
+
+Theme tokens and mode live in pluto.toml. Never edit src/generated/theme*.css or
+public/pluto-theme.js; run npm run theme:generate. Custom selectors belong in the
+configured application-owned overrides CSS. Preserve the import precedence and
+external prepaint bootstrap. Never bundle the TOML document into browser code.

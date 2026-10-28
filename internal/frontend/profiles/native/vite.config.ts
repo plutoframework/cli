@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
+import { plutoTheme } from "./scripts/theme-vite.mjs";
 import react from "@vitejs/plugin-react";
 
 const target = new URL(
@@ -36,6 +37,7 @@ export default defineConfig(({ command, isPreview }) => ({
   html: { cspNonce: command === "serve" && !isPreview ? nonce : undefined },
   plugins: [
     react(),
+    plutoTheme(),
 
     {
       name: "local-development-csp",

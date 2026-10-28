@@ -73,3 +73,20 @@ generated API modules; npm's standard lockfile is the sole text exception.
 Deploy static assets and Go behind one HTTPS origin. Configure SPA fallback away
 from /api and /auth, trusted origins and a production HTML CSP. Vite's loopback
 proxy/certificate setup is for local development, not a production auth deployment.
+
+## Theme ownership
+
+Edit `[frontend.theme]` in the parent pluto.toml for mode (system/light/dark),
+radius, font_family, overrides path and optional light/dark token tables. Tokens
+use #RRGGBB or #RRGGBBAA: accent, accent_foreground, background, foreground,
+surface, surface_foreground, muted (text), border, success, warning and danger.
+Unspecified tokens retain the selected UI library's defaults. Font settings select
+an installed/local font; they never download assets. Advanced CSS belongs in the
+application-owned src/styles/overrides.css or the configured safe src path.
+
+`npm run theme:generate` compiles theme.css, theme-overrides.css and the public
+pluto-theme.js bootstrap. These generated files are committed and never hand-edited.
+Vite regenerates on start/build and TOML changes; `npm run theme:check` detects
+drift without writing, and participates in npm check and pluto vet. Authored
+CSS loads last and is never regenerated. A new override path must already exist.
+Only the public mode goes into the bootstrap; never place runtime secrets here.

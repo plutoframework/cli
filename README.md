@@ -522,3 +522,58 @@ consumers, auth during init and later addition, all component kinds, later
 prerequisite installation and a frontend without auth. It runs the actual CLI,
 frontend checks/builds and backend compilation in disposable directories. Browser
 QA and upstream attribution are documented in docs/FRONTEND.md.
+
+## Frontend themes
+
+The optional `[frontend.theme]` table is build-time project configuration:
+
+```toml
+[frontend.theme]
+mode = "system" # light, dark or system; defaults to system
+radius = "0.75rem"
+font_family = "Manrope, sans-serif"
+overrides = "web/src/styles/overrides.css"
+
+[frontend.theme.light]
+accent = "#006FEE"
+accent_foreground = "#FFFFFF"
+
+[frontend.theme.dark]
+accent = "#338EF7"
+background = "#09090B"
+```
+
+Only configured tokens override profile defaults. Supported colors are `accent`,
+`accent_foreground`, `background`, `foreground`, `surface`, `surface_foreground`,
+`muted` (secondary text), `border`, `success`, `warning` and `danger`, using
+`#RRGGBB` or `#RRGGBBAA`. The shadcn adapter maps accent to primary, surface to
+card, muted to muted-foreground and danger to destructive. Arbitrary selectors,
+OKLCH values, component sizes and effects belong in authored CSS. Radius accepts
+0 or nonnegative px/rem lengths up to 99.999; font_family accepts a plain family
+list and does not download fonts. Applications supply licensed local font assets.
+
+New frontends include the compiler, Vite integration and an empty authored CSS
+file. Run `pluto frontend theme` (or `npm run theme:generate` inside web) to refresh
+`src/generated/theme.css`, `src/generated/theme-overrides.css` and
+`public/pluto-theme.js`. `pluto frontend theme --check`, `npm run theme:check` and
+`pluto vet` detect invalid config and stale output without repairing it. Vite
+build/start and TOML edits during development regenerate the assets. Preview
+serves the existing build. Commit generated assets; never edit them by hand.
+
+Library defaults and application layout come first, generated tokens follow, and
+the authored overrides import wins last. The compiler never writes authored CSS;
+changing its configured path requires creating that file first. The path must
+stay below the configured frontend's src directory, outside generated directories;
+symlinks and traversal are rejected. The public bootstrap selects light/dark
+before React mounts and follows OS changes in system mode without browser storage.
+Only the theme mode is emitted as JavaScript: the TOML file, backend configuration
+and secrets never become browser assets. The three theme outputs have separate
+ownership from feature generators; generating a component does not rewrite them.
+
+Existing frontends are application-owned: this release does not silently rewrite
+Vite, styles, package scripts or HTML. Adopt the documented generated theme
+compiler/plugin, add the pinned smol-toml dev dependency, wire the imports and
+bootstrap, create the authored CSS file, and generate/check before enabling theme
+settings. The pluto-example repository demonstrates an explicit adoption while
+retaining its original prototype manifest. No schema migration is required for
+current schema-7 CLI projects; older backend schemas remain unsupported by CLI.

@@ -9,6 +9,13 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 mutations = [
     (
+        "theme validation preflight",
+        "internal/project/frontend.go",
+        "if err := f.ValidateTheme(); err != nil {",
+        "if err := f.ValidateTheme(); false {",
+        "TestFrontendThemePreflight",
+    ),
+    (
         "frontend auth capability guard",
         "internal/project/frontend.go",
         "if f.Auth && !m.Capabilities.LocalCredentials {",

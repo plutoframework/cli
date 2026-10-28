@@ -81,7 +81,7 @@ func frontendCommand(options Options) *cobra.Command {
 			)
 		},
 	}
-	command.AddCommand(init, add, install)
+	command.AddCommand(init, add, install, frontendThemeCommand(options))
 
 	return command
 }

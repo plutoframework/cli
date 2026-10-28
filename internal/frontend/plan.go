@@ -90,6 +90,10 @@ func Init(
 		UI:        ui,
 		Version:   1,
 		Auth:      auth,
+		Theme: &project.Theme{
+			Mode:      "system",
+			Overrides: directory + "/src/styles/overrides.css",
+		},
 	}
 	if err := next.Validate(); err != nil {
 		return Plan{}, err
@@ -311,6 +315,11 @@ var initialTemplates = []string{
 	"scripts/certificate.mjs.tmpl",
 	"scripts/generate-api.mjs.tmpl",
 	"scripts/check.mjs.tmpl",
+	"scripts/theme.mjs.tmpl",
+	"scripts/theme-vite.mjs.tmpl",
+	"scripts/theme-vite.d.mts.tmpl",
+	"scripts/theme.test.mjs.tmpl",
+	"src/styles/overrides.css.tmpl",
 	"scripts/architecture.mjs.tmpl",
 	"scripts/architecture.test.mjs.tmpl",
 	"src/test/setup.ts.tmpl",
