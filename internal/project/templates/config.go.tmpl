@@ -20,10 +20,18 @@ type Config struct {
 	Logging  Logging
 	Features map[string]*bool
 	Jobs jobs.Config
+	Cache Cache
  Auth Auth
 }
 
 type Auth struct { TrustedOrigins []string; SessionTTL time.Duration; IdleTimeout time.Duration }
+
+type Cache struct {
+    Backend string
+    Environment string
+    URL string
+    AllowInsecure bool
+}
 
 type Server struct {
 	Address      string
@@ -54,6 +62,7 @@ func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 Logging:  Logging{Level: "info"},
 		Features: map[string]*bool{},
 		Jobs: jobs.DefaultConfig(),
+		Cache: Cache{Backend: {{q .CacheBackend}}, Environment: "development"},
 	}
 	for _, setting := range []struct {
 		name   string
@@ -62,6 +71,9 @@ Logging:  Logging{Level: "info"},
 		{"SERVER_ADDRESS", &cfg.Server.Address},
 		{"DATABASE_URL", &cfg.Database.URL},
 		{"LOG_LEVEL", &cfg.Logging.Level},
+		{"CACHE_BACKEND", &cfg.Cache.Backend},
+		{"CACHE_ENVIRONMENT", &cfg.Cache.Environment},
+		{"CACHE_URL", &cfg.Cache.URL},
 	} {
 		if value, ok := lookup(Prefix + setting.name); ok {
 			*setting.target = value
@@ -76,6 +88,17 @@ Logging:  Logging{Level: "info"},
 
 		cfg.Server.Gzip = parsed
 	}
+	if value, ok := lookup(Prefix+"CACHE_ALLOW_INSECURE"); ok {
+        parsed, err := strconv.ParseBool(value)
+        if err != nil { return Config{}, fmt.Errorf("CACHE_ALLOW_INSECURE must be boolean") }
+        cfg.Cache.AllowInsecure = parsed
+    }
+    switch cfg.Cache.Backend {
+    case "none", "memory":
+    {{if .Valkey}}case "valkey":{{end}}
+    default: return Config{}, fmt.Errorf("cache backend is not included in this scaffold")
+    }
+    if strings.TrimSpace(cfg.Cache.Environment) == "" { return Config{},fmt.Errorf("CACHE_ENVIRONMENT is required") }
 
     if value,ok:=lookup(Prefix+"AUTH_TRUSTED_ORIGINS");ok { cfg.Auth.TrustedOrigins=strings.Split(value,",") }
     for _,setting:=range []struct{name string;target *time.Duration}{

@@ -8,7 +8,9 @@ import (
 // AuthVersion pins the published root, password and PostgreSQL modules.
 const AuthVersion = "v0.3.0"
 
-const CoreVersion = "v0.1.2"
+const CoreVersion = "v0.2.1"
+
+const ValkeyVersion = "v0.1.0"
 
 const CorePostgresVersion = "v0.1.0"
 
@@ -58,7 +60,22 @@ require (
  golang.org/x/text v0.41.0 // indirect
 )
 `, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthVersion, JobsVersion, JobsPostgresVersion, passwordRequirement(m)))
+
 	files["go.sum"] = []byte(appGoSum)
+	if m.Capabilities.Cache == "valkey" {
+		module := string(files["go.mod"])
+		module = strings.Replace(
+			module,
+			"require (",
+			fmt.Sprintf(
+				"require (\n github.com/plutoframework/pluto-core/stores/valkey %s\n github.com/valkey-io/valkey-go v1.0.79 // indirect",
+				ValkeyVersion,
+			),
+			1,
+		)
+		files["go.mod"] = []byte(module)
+	}
+
 	files[".golangci.yml"] = []byte(
 		strings.ReplaceAll(lintConfig, "MODULE", m.Project.Module),
 	)
@@ -75,6 +92,13 @@ require (
 			m.Project.EnvPrefix,
 		),
 	)
+
+	files[".env.example"] = append(files[".env.example"], []byte(fmt.Sprintf(
+		"%sCACHE_ENVIRONMENT=development\n# %sCACHE_URL=redis://:local_only@127.0.0.1:6379/0\n%sCACHE_ALLOW_INSECURE=false\n",
+		m.Project.EnvPrefix,
+		m.Project.EnvPrefix,
+		m.Project.EnvPrefix,
+	))...)
 
 	files[".env.example"] = append(files[".env.example"], []byte(fmt.Sprintf(
 		"%sAUTH_TRUSTED_ORIGINS=http://127.0.0.1:8080\n%sAUTH_SESSION_TTL=24h\n%sAUTH_IDLE_TIMEOUT=30m\n",
@@ -235,6 +259,39 @@ ENTRYPOINT ["/usr/local/bin/api"]
 volumes:
   postgres-data:
 `, m.Project.EnvPrefix, m.Project.EnvPrefix, m.Project.EnvPrefix))
+	}
+
+	if m.Development.Docker && m.Capabilities.Cache == "valkey" {
+		compose := string(files["compose.yaml"])
+		compose = strings.Replace(
+			compose,
+			"      "+m.Project.EnvPrefix+"SERVER_ADDRESS:",
+			"      "+m.Project.EnvPrefix+"CACHE_URL: redis://:local_only@valkey:6379/0\n      "+m.Project.EnvPrefix+"CACHE_ALLOW_INSECURE: \"true\"\n      "+m.Project.EnvPrefix+"SERVER_ADDRESS:",
+			1,
+		)
+		compose = strings.Replace(
+			compose,
+			"    depends_on:\n",
+			"    depends_on:\n      valkey:\n        condition: service_healthy\n",
+			1,
+		)
+		compose = strings.Replace(
+			compose,
+			"volumes:\n  postgres-data:",
+			`  valkey:
+    image: valkey/valkey:9.1.3-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--requirepass", "local_only", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD-SHELL", "VALKEYCLI_AUTH=local_only valkey-cli ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  postgres-data:`,
+			1,
+		)
+		files["compose.yaml"] = []byte(compose)
 	}
 
 	return files

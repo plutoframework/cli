@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	rbac "github.com/plutoframework/pluto-rbac"
+	"github.com/plutoframework/pluto-core/cache"
 )
 
 func New(
@@ -19,6 +20,16 @@ func New(
 	authentication transport.Authentication,
 	logger *slog.Logger,
 	policy *rbac.Policy,
+) http.Handler {
+    return NewWithCache(cfg, authentication, logger, policy, cache.Disabled{})
+}
+
+func NewWithCache(
+    cfg config.Config,
+    authentication transport.Authentication,
+    logger *slog.Logger,
+    policy *rbac.Policy,
+    dataCache cache.Store,
 ) http.Handler {
 	evaluator := features.New(cfg.Features)
 	router := chi.NewRouter()
@@ -68,7 +79,7 @@ func New(
     }
     {{end}}
     transport.RegisterSessions(reg,authentication)
- RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy})
+ RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy, Cache: dataCache})
 	router.NotFound(
 		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 404, "not_found") },
 	)

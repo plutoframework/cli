@@ -1,0 +1,28 @@
+// Package caching composes optional stores. No HTTP responses or auth decisions
+// are cached automatically; operations choose typed data and verified scope.
+package caching
+
+import (
+    "{{.Module}}/internal/config"
+    "github.com/plutoframework/pluto-core/cache"
+    "github.com/plutoframework/pluto-core/cache/memory"
+    {{if .Valkey}}valkey "github.com/plutoframework/pluto-core/stores/valkey"{{end}}
+)
+
+func New(settings config.Cache) (cache.Store, func(), error) {
+    switch settings.Backend {
+    case "none": return cache.Disabled{}, func(){}, nil
+    case "memory":
+        store, err := memory.New(memory.DefaultConfig())
+        return store, func(){}, err
+    {{if .Valkey}}
+    case "valkey":
+        options := valkey.DefaultConfig()
+        options.URL, options.AllowInsecure = settings.URL, settings.AllowInsecure
+        store, err := valkey.New(options)
+        if err != nil { return nil, nil, err }
+        return store, store.Close, nil
+    {{end}}
+    default: return nil, nil, cache.ErrInvalid
+    }
+}

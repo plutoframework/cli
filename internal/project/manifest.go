@@ -13,7 +13,7 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 type Manifest struct {
 	SchemaVersion int          `toml:"schema_version"`
@@ -32,6 +32,7 @@ type Project struct {
 }
 
 type Capabilities struct {
+	Cache            string `toml:"cache"`
 	LocalCredentials bool   `toml:"local_credentials"`
 	Tenancy          string `toml:"tenancy"`
 }
@@ -101,6 +102,12 @@ func (m Manifest) Validate() error {
 
 	if m.Capabilities.Tenancy != "single" && m.Capabilities.Tenancy != "multi" {
 		return fmt.Errorf("tenancy must be single or multi")
+	}
+
+	switch m.Capabilities.Cache {
+	case "", "none", "memory", "valkey":
+	default:
+		return fmt.Errorf("cache must be none, memory or valkey")
 	}
 
 	if m.Database.Engine != "postgres" || m.Database.Queries != "sqlc" {

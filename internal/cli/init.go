@@ -15,6 +15,7 @@ func initCommand(options Options) *cobra.Command {
 	var (
 		name, module, prefix                       string
 		localCredentials                           bool
+		cacheBackend                               string
 		multi, noMise, noFnox, noDocker, hook, dry bool
 	)
 
@@ -65,6 +66,7 @@ func initCommand(options Options) *cobra.Command {
 					EnvPrefix: prefix,
 				},
 				Capabilities: project.Capabilities{
+					Cache:            cacheBackend,
 					Tenancy:          tenancy,
 					LocalCredentials: localCredentials,
 				},
@@ -159,6 +161,12 @@ func initCommand(options Options) *cobra.Command {
 		},
 	}
 	flags := command.Flags()
+	flags.StringVar(
+		&cacheBackend,
+		"cache",
+		"none",
+		"Data cache: none, memory or valkey (saved in TOML)",
+	)
 	flags.StringVar(
 		&name,
 		"name",

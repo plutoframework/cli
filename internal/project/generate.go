@@ -19,6 +19,8 @@ type templateData struct {
 	Module, Name, Prefix string
 	Multi                bool
 	LocalCredentials     bool
+	CacheBackend         string
+	Valkey               bool
 	Development
 	Endpoint
 	Symbol   string
@@ -29,6 +31,11 @@ type templateData struct {
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {
+	cacheBackend := m.Capabilities.Cache
+	if cacheBackend == "" {
+		cacheBackend = "none"
+	}
+
 	params := []string{}
 
 	testPath := e.Path
@@ -45,6 +52,8 @@ func dataFor(m Manifest, e Endpoint) templateData {
 		Prefix:           m.Project.EnvPrefix,
 		Multi:            m.Capabilities.Tenancy == "multi",
 		LocalCredentials: m.Capabilities.LocalCredentials,
+		CacheBackend:     cacheBackend,
+		Valkey:           cacheBackend == "valkey",
 		Development:      m.Development,
 		Endpoint:         e,
 		Symbol:           symbol(e),
@@ -323,6 +332,7 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	layout := map[string]string{
+		"internal/caching/cache.go":                  "cache.go",
 		"cmd/worker/main.go":                         "worker_main.go",
 		"internal/background/worker.go":              "worker.go",
 		"db/migrations/005_jobs.sql":                 "jobs_schema.sql",

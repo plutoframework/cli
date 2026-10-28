@@ -13,6 +13,7 @@ import (
 	"{{.Module}}/internal/app"
 	"{{.Module}}/internal/access"
 	"{{.Module}}/internal/config"
+	"{{.Module}}/internal/caching"
 	"{{.Module}}/internal/storage/postgres"
 	"{{.Module}}/internal/transport"
 {{if not .LocalCredentials}}plutoauth "github.com/plutoframework/pluto-auth"{{end}}
@@ -42,6 +43,9 @@ func run() error {
 	logger := slog.New(
 		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}),
 	)
+    dataCache, closeCache, err := caching.New(cfg.Cache)
+    if err != nil { return errors.New("invalid cache configuration") }
+    defer closeCache()
 
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
@@ -87,7 +91,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              cfg.Server.Address,
-		Handler:           app.New(cfg, authentication, logger, policy),
+		Handler:           app.NewWithCache(cfg, authentication, logger, policy, dataCache),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,

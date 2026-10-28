@@ -3,6 +3,7 @@ package app
 import (
  "{{.Module}}/internal/config"
  rbac "github.com/plutoframework/pluto-rbac"
+ "github.com/plutoframework/pluto-core/cache"
 )
 
 // Dependencies is an explicit composition-root value. Add typed adapters here
@@ -11,4 +12,5 @@ import (
 type Dependencies struct {
  Config config.Config
  Policy *rbac.Policy
+ Cache cache.Store
 }

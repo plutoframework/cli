@@ -104,14 +104,14 @@ endpoint additions do not enable omitted presets. Core lint/config/SQL files
 are always included and Git hooks remain opt-in.
 
 Commands discover pluto.toml in cwd/parents; saved tenancy/prefix are reused.
-`pluto.toml` is project metadata, never runtime settings/secrets. Schema 6 includes typed job registrations and the shared Jobs worker foundation.
+`pluto.toml` is project metadata, never runtime settings/secrets. Schema 7 includes typed jobs and optional data cache configuration.
 Unknown fields/settings fail; no automatic schema migration is implied.
 For schema 2/3/4 apps, migrate authored app/config/main/transport wiring, module pins,
 static paths, session storage and migration manually before updating the manifest.
 The CLI refuses old schemas instead of overwriting authored authentication code.
 For schema 4, review the new published pins, choose local_credentials explicitly,
 compare the thin constructor/routes with a fresh scaffold, and apply 004 only if
-local credentials are enabled before changing schema_version to 6.
+local credentials are enabled before changing schema_version to 7.
 
 Authorization imports `github.com/plutoframework/pluto-rbac` at the exact version
 in go.mod/go.sum, with no sibling checkout or local replacement. Startup compiles
@@ -381,3 +381,44 @@ registry before updating the manifest version. Preserve authored business code.
 The mise sqlc pin uses the explicit Go backend instead of an unavailable registry
 alias. sqlc 1.31.1 needs Go 1.26+ for generation; Go can fetch that toolchain without
 changing the application's Go 1.25.5+ target or runtime dependency graph.
+
+
+## Optional data cache
+
+This scaffold selected `{{.CacheBackend}}` in `capabilities.cache`. Core's shared
+cache contract is exposed as `app.Dependencies.Cache`; inject it into operations
+that need non-authoritative data caching. `internal/caching` owns construction,
+and the API closes the store on shutdown. No responses are cached automatically.
+
+Memory uses a bounded expiring LRU; none bypasses storage. Only scaffolds created
+with `--cache valkey` include the optional Valkey/Redis adapter and client. Re-init
+never upgrades authored code. Runtime CACHE_BACKEND can select only included
+backends. All environment variables use the `{{.Prefix}}` prefix.
+
+{{if .Valkey}}Set `{{.Prefix}}CACHE_URL` to your authenticated endpoint. With
+Docker enabled, Compose supplies a local authenticated, memory-bounded Valkey
+service automatically. For a host process use the loopback address in .env.example.
+External endpoints should use `rediss://` with verified TLS. Plaintext beyond
+loopback requires explicit `{{.Prefix}}CACHE_ALLOW_INSECURE=true`, which local
+Compose sets for its private development network. Do not use local credentials
+in production or commit real cache URLs/secrets. URL query options are rejected.
+{{end}}
+Set CACHE_ENVIRONMENT separately for each deployment. Build keys with `cache.Key`
+using application/environment/namespace/version plus verified tenant/subject scope.
+Use `cache.Loader[T].Remember` for bounded JSON cache-aside reads; defaults bypass
+backend failures and reload from the repository. Use fixed error hooks for metrics,
+never raw credentials, keys, values or backend errors. Bound TTLs and invalidate
+relevant keys after writes. TTL/delete does not provide transactional consistency
+or eliminate concurrent refill races. Capacity/encoding/loader errors still fail.
+
+Live authentication, membership and permission checks must run before every cache
+access. Never use this best-effort data cache for sessions, credentials, roles,
+authorization decisions, idempotency, locks or rate limiting. See the published
+Core README for guarantees, explicit strict mode and tested server versions.
+
+Schema 6 migration is manual: compare a fresh schema-7 scaffold, upgrade Core and
+add the cache factory/config plus authored constructor/cleanup wiring. Explicitly
+set capabilities.cache to none, memory or valkey, include the adapter/service only
+for valkey, then change schema_version to 7. No cache SQL migration is required.
+Preserve authored handlers, operations and composition; old schemas fail before
+writes. Complete earlier manual migrations first.

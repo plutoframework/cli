@@ -48,4 +48,10 @@ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8
 gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+github.com/plutoframework/pluto-core v0.2.1 h1:AhnfVIBpexiKnnXJtj9J/ZUupzxugeQgEeLmHn5GUy8=
+github.com/plutoframework/pluto-core v0.2.1/go.mod h1:aU+OaFQxGmjf3simyHEJHxOZ/ja2dNnC5xyISaGkgVQ=
+github.com/plutoframework/pluto-core/stores/valkey v0.1.0 h1:2dgTKQHK/LE+KQxvYjRC1Z8AQsjPjJ1bKwGTb53+QVY=
+github.com/plutoframework/pluto-core/stores/valkey v0.1.0/go.mod h1:yT8RBGfMG8+4CuJrxcnlj8+e1e2Sblnb9uL4m8wdCUY=
+github.com/valkey-io/valkey-go v1.0.79 h1:dryzYka/oOkSMOcNmOTjQI8zfu/4bUzDZNnFW9NlqNM=
+github.com/valkey-io/valkey-go v1.0.79/go.mod h1:gvC/r2m3eW4Hbj0YnjogTzNtFdPSM/D+NCqen+5OABM=
 `

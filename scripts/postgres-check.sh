@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 container="pluto-cli-check-$$"
-cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
+cache_container="pluto-cli-cache-$$"
+cleanup() { docker rm -f "$container" "$cache_container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 docker info >/dev/null
 docker run -d --rm --name "$container" \
@@ -22,5 +23,10 @@ if [[ "$ready" != true ]]; then
   exit 1
 fi
 port=$(docker port "$container" 5432/tcp | awk -F: '{print $NF}')
+docker run -d --rm --name "$cache_container" -p 127.0.0.1::6379 \
+  valkey/valkey:9.1.3-alpine valkey-server --save '' --appendonly no \
+  --requirepass synthetic_only >/dev/null
+cache_port=$(docker port "$cache_container" 6379/tcp | awk -F: '{print $NF}')
+PLUTO_CLI_CACHE_TEST_URL="redis://:synthetic_only@127.0.0.1:${cache_port}" \
 PLUTO_CLI_TEST_DATABASE_URL="postgres://pluto_demo:local_only@127.0.0.1:${port}/pluto_demo?sslmode=disable" \
-  go test -race -count=1 ./internal/cli -run 'TestGeneratedLocalApplications|TestGeneratedJobs' -v
+  go test -race -count=1 ./internal/cli -run 'TestGeneratedLocalApplications|TestGeneratedJobs|TestGeneratedCaches' -v

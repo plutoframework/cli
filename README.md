@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, **not an imaginary published Pluto framework**. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.2.0`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.3.0`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -96,7 +96,7 @@ at the HTTPS terminator. No Fiber dependency or automatic HSTS/preload is added.
 Rebuild the CLI before generating an app; existing authored app middleware is
 preserved and must be updated deliberately.
 
-`pluto.toml` schema **6** records project/capability/database/development settings,
+`pluto.toml` schema **7** records project/capability/database/development settings,
 endpoint definitions and typed job registrations. Unknown fields, incompatible
 versions, conflicting routes, job kinds and feature environment aliases fail
 validation. Older schemas require a deliberate manual migration.
@@ -211,7 +211,7 @@ choose concrete implementations; additions preserve authored constructor wiring.
 
 ## Session-enabled scaffolds
 
-New projects use manifest schema 6 and published Pluto Auth modules. Authenticated
+New projects use manifest schema 7 and published Pluto Auth modules. Authenticated
 routes verify sessions, then resolve trusted memberships through the authored
 access.Memberships adapter (deny by default). Cookie/Origin protection, optional
 opaque bearer credentials, session metadata/logout endpoints, explicit Postgres
@@ -357,3 +357,41 @@ for both single- and multi-tenant apps.
 The mise sqlc pin uses the explicit Go backend instead of an unavailable registry
 alias. sqlc 1.31.1 needs Go 1.26+ for generation; Go can fetch that toolchain without
 changing the application's Go 1.25.5+ target or runtime dependency graph.
+
+
+## Optional data cache (schema 7)
+
+```sh
+pluto init my-api --cache valkey
+# Alternatives: --cache memory, or --cache none (the default).
+```
+
+The choice persists as `capabilities.cache` in `pluto.toml`. Every scaffold uses
+published Core v0.2.1 cache contracts and exposes `app.Dependencies.Cache`. The
+Valkey option alone adds `pluto-core/stores/valkey` v0.1.0, its pure Go client,
+and an authenticated, memory-bounded Valkey Compose service. Memory/none apps
+have no Valkey client dependency or service. No response caching is automatic.
+
+`internal/caching` constructs the store; the API owns its close function. Configure
+prefixed CACHE_ENVIRONMENT, CACHE_URL and CACHE_ALLOW_INSECURE settings in the
+usual nested config. Local Compose explicitly permits plaintext on its development
+network; external deployments should use verified TLS (`rediss://`). Credentials
+belong in the secret environment, never committed config. Avoid URL query options.
+The adapter is lazy: outages are returned to the cache-aside loader for fallback.
+
+Use `cache.Key` with application/environment/namespace/version and verified
+resource scope, and `cache.Loader[T].Remember` for bounded JSON cache-aside reads.
+Check live authentication, membership and permission before every access.
+Sessions, credentials, authorization, idempotency and locks must not use this
+best-effort data cache. It may serve stale data until TTL/invalidation; it is not
+transactional consistency. See Core's cache guarantees and failure policies.
+
+Migrating schema 6 is manual: compare a fresh schema-7 scaffold, upgrade Core,
+add the cache config/factory and authored API dependency/cleanup wiring, explicitly
+choose `capabilities.cache = "none"`, `"memory"` or `"valkey"`, then set
+`schema_version = 7`. Add the optional adapter/service only for Valkey. No cache
+SQL migration is needed. Complete earlier migrations first; the CLI rejects older
+schemas before writes and never overwrites authored application code.
+
+The disposable PostgreSQL check also starts Valkey and tests all three generated
+cache modes, including real authenticated reads, writes and deletes.
