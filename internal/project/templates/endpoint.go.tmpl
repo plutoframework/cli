@@ -4,6 +4,8 @@ package paths
 import (rbac "github.com/plutoframework/pluto-rbac";"time")
 
 type Endpoint struct {
+ Collection bool
+ Idempotent bool
 	ID            string
 	Name          string
 	Description   string

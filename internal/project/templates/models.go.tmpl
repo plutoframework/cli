@@ -1,15 +1,23 @@
 package {{.Group}}
+{{if .Collection}}import "github.com/plutoframework/pluto-core/pagination"{{end}}
 
 // {{.Action}}Request is intentionally small. Add domain input deliberately.
 // Path contains decoded Chi parameters and is never decoded from JSON.
 type {{.Action}}Request struct {
+ {{if .Collection}}Page pagination.Request `json:"-"`{{end}}
 	Value string            `json:"value"`
 	Path  map[string]string `json:"-"`
 }
 
-type {{.Action}}Data struct {
+{{if .Collection}}type {{.Action}}Data = pagination.Page[{{.Action}}Item]
+ type {{.Action}}Item struct {
+ Value string `json:"value"`
+ }
+{{else}}type {{.Action}}Data struct {
 	Value string `json:"value"`
 }
-type {{.Action}}Response struct {
-	Data {{.Action}}Data `json:"data"`
+{{end}}
+ type {{.Action}}Response struct {
+	{{if .Collection}}Data []{{.Action}}Item `json:"data"`
+ Page pagination.Metadata `json:"page"`{{else}}Data {{.Action}}Data `json:"data"`{{end}}
 }

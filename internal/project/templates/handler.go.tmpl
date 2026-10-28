@@ -29,6 +29,10 @@ func Register{{.Action}}(
 		paths.{{.Symbol}},
 		func(w http.ResponseWriter, r *http.Request) {
 			input := {{.Group}}.{{.Action}}Request{}
+ {{if .Collection}}page,err:=transport.Pagination(r,paths.{{.Symbol}}.ID)
+ if err!=nil {transport.Error(w,r,400,"invalid_pagination");return}
+ input.Page=page
+ {{end}}
 {{if .Body}}			if !transport.Decode(w, r, &input, bodyLimit) {
 				return
 			}
@@ -52,7 +56,7 @@ func Register{{.Action}}(
 			transport.JSON(
 				w,
 				paths.{{.Symbol}}.SuccessStatus,
-				{{.Group}}.{{.Action}}Response{Data: output},
+				{{.Group}}.{{.Action}}Response{Data: output{{if .Collection}}.Data,Page:output.Page{{end}}},
 			)
 		},
 	)

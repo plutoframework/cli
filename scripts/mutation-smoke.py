@@ -30,10 +30,10 @@ mutations = [
         "TestGeneratedApplications/single",
     ),
     (
-        "body limit",
-        "internal/project/templates/http.go.tmpl",
-        "http.MaxBytesReader(w, r.Body, limit)",
-        "io.NopCloser(r.Body)",
+        "idempotency registration",
+        "internal/project/templates/register.go.tmpl",
+        "if endpoint.Idempotent {",
+        "if false && endpoint.Idempotent {",
         "TestGeneratedApplications/single",
     ),
     (

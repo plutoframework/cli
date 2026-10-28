@@ -213,7 +213,7 @@ choose concrete implementations; additions preserve authored constructor wiring.
 
 ## Session-enabled scaffolds
 
-New projects use manifest schema 3 and published Pluto Auth modules. Authenticated
+New projects use manifest schema 4 and published Pluto Auth modules. Authenticated
 routes verify sessions, then resolve trusted memberships through the authored
 access.Memberships adapter (deny by default). Cookie/Origin protection, optional
 opaque bearer credentials, session metadata/logout endpoints, explicit Postgres
@@ -223,3 +223,42 @@ provider are created. See the generated README for credential-provider wiring.
 Schema 2 projects require manual migration of authored authentication/config/main
 files, module pins, paths and migrations before changing their manifest version.
 The CLI rejects old schemas without rewriting user code.
+
+## Shared pagination and idempotency
+
+New scaffolds import published `pluto-core` and its separate PostgreSQL adapter;
+reusable parsing/cursor/claim/replay code is not copied into applications.
+`GET List` explicitly saves `collection = true`; `--collection` opts other names
+in, and `--collection=false` opts out. Other GETs remain details. Collections
+receive `pagination.Request` through their input and return a shared typed page.
+Thin handlers parse/encode it; implement repositories with verified visibility
+predicates, immutable deterministic order, a unique tie-breaker and SQL
+`LIMIT input.Page.FetchLimit()`. Use `pagination.Finish` after the bounded query.
+Default 25/max 100, opaque unsigned scope/filter-bound cursors, no COUNT query.
+Cursor boundaries never authorize access. OpenAPI records parameters and metadata.
+
+Authenticated business POST/PUT/PATCH/DELETE routes default to
+`idempotency = "auto"` (required); `--idempotency=exempt` is the explicit override
+for streaming/sensitive/unsupported routes. Public writes and session lifecycle
+are exempt; public idempotency needs an authored verified application scope, never
+an anonymous shared cache. Clients supply a 1–128 byte Idempotency-Key per action.
+Auth, trusted membership, RBAC and feature gates precede every replay. The default
+wiring uses the published Postgres store plus explicit 003_idempotency migration;
+without DATABASE_URL business writes return 503 until a durable adapter is wired.
+There is no implicit production memory fallback. Tests inject bounded memory.
+
+Completed results retain 24h; pending/uncertain requests block without automatic
+lease stealing or retries. JSON capture does not guarantee exactly-once effects:
+complete in the same pgx transaction as business/audit writes when required. See
+[core guarantees and transaction API](https://github.com/plutoframework/pluto-core).
+Only Content-Type and bounded JSON bytes/status are recorded, never Set-Cookie or
+arbitrary security headers. Token/credential responses must remain exempt.
+
+Schema 3 migration is manual: update published module pins/go.sum, add the
+reference 003 migration, endpoint Collection/Idempotent fields, shared-runtime
+transport adapters, Registrar/authentication/main wiring, and eligible endpoint
+metadata. Convert authored collection inputs/results/handlers to the shared page
+contracts and use bounded repository queries. Copy the new thin adapters from a
+fresh scaffold and review them; do not replace authored business logic. Only then
+set schema_version=4 and regenerate CLI-owned files. Older manifests are rejected
+before writes; regeneration never edits authored models/handlers/operations.

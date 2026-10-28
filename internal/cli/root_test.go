@@ -392,7 +392,7 @@ func TestGeneratedApplications(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			external(t, root, "go", "test", "./...")
+			external(t, root, "go", "test", "-race", "./...")
 			external(t, root, "go", "vet", "./...")
 			external(
 				t,
@@ -432,9 +432,21 @@ func TestGeneratedApplications(t *testing.T) {
 				spec.Feature != "widgets-create" ||
 				spec.Permission != "widgets.write" ||
 				len(spec.Security) != 2 ||
-				len(spec.Parameters) != 1 ||
+				len(spec.Parameters) != 2 ||
+				spec.Parameters[1].Name != "Idempotency-Key" ||
 				spec.Parameters[0].Name != "id" {
 				t.Fatalf("OpenAPI metadata lost: %+v", spec)
+			}
+
+			list := openapi.Paths["/api/reports"]["get"]
+			if len(list.Parameters) != 2 ||
+				list.Parameters[0].Name != "limit" ||
+				list.Parameters[1].Name != "cursor" {
+				t.Fatal("collection pagination missing", list)
+			}
+
+			if len(openapi.Paths["/api/reports/{id}"]["get"].Parameters) != 1 {
+				t.Fatal("detail unexpectedly paginated")
 			}
 
 			if openapi.Paths["/api/reports/{id}"]["get"].Permission != "reports:read" {

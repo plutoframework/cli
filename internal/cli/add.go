@@ -44,7 +44,12 @@ func addCommand(options Options) *cobra.Command {
 			}
 
 			old := m
+
 			endpoint.Group, endpoint.Action = args[0], args[1]
+			if !cmd.Flags().Changed("collection") {
+				endpoint.Collection = endpoint.Method == "GET" &&
+					endpoint.Action == "List"
+			}
 
 			m.Endpoints = append(
 				append([]project.Endpoint(nil), m.Endpoints...),
@@ -123,6 +128,18 @@ func addCommand(options Options) *cobra.Command {
 		},
 	}
 	flags := command.Flags()
+	flags.BoolVar(
+		&endpoint.Collection,
+		"collection",
+		false,
+		"Paginated collection (defaults on for GET List; use --collection=false for details)",
+	)
+	flags.StringVar(
+		&endpoint.Idempotency,
+		"idempotency",
+		"auto",
+		"auto requires keys on authenticated business writes; exempt for sensitive/streaming routes",
+	)
 	flags.StringVar(
 		&endpoint.Method,
 		"method",

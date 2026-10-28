@@ -18,6 +18,9 @@ import (
 plutoauth "github.com/plutoframework/pluto-auth"
 authmemory "github.com/plutoframework/pluto-auth/stores/memory"
 authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+ "github.com/plutoframework/pluto-core/idempotency"
+ "github.com/plutoframework/pluto-core/httpidem"
+ idempostgres "github.com/plutoframework/pluto-core/stores/postgres"
 )
 
 func run() error {
@@ -48,20 +51,26 @@ func run() error {
 	defer stop()
 
 	var sessionStore plutoauth.SessionStore
+ var idempotencyStore idempotency.Store
  if cfg.Database.URL != "" {
 		pool, err := postgres.Open(ctx, cfg.Database.URL)
 		if err != nil {
 			return errors.New("postgres connectivity failed; verify DATABASE_URL and database availability")
 		}
 		defer pool.Close()
-        sessionStore,err=authpostgres.New(pool)
+        idempotencyStore,err=idempostgres.New(pool)
+ if err!=nil {return err}
+ sessionStore,err=authpostgres.New(pool)
         if err != nil { return err }
     } else {
         sessionStore,err=authmemory.New(1000)
         if err != nil { return err }
     }
-    authentication,err:=transport.NewAuthentication(cfg.Auth,sessionStore,access.Memberships{})
+    var idempotent *httpidem.Handler
+ if idempotencyStore!=nil { idempotent,err=transport.NewIdempotency(idempotencyStore,cfg.Server.BodyLimit);if err!=nil{return err} }
+ authentication,err:=transport.NewAuthentication(cfg.Auth,sessionStore,access.Memberships{})
     if err != nil { return err }
+ authentication.Idempotency=idempotent
 
 	server := &http.Server{
 		Addr:              cfg.Server.Address,

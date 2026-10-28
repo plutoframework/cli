@@ -16,11 +16,16 @@ import (
  "{{.Module}}/internal/domain"
  "{{.Module}}/internal/features"
  "{{.Module}}/internal/handlers/widgets"
+ "{{.Module}}/internal/handlers/reports"
+ reportmodels "{{.Module}}/internal/models/reports"
+ "github.com/plutoframework/pluto-core/pagination"
  widgetmodels "{{.Module}}/internal/models/widgets"
  "{{.Module}}/internal/paths"
  "{{.Module}}/internal/transport"
 
  "github.com/go-chi/chi/v5"
+ "github.com/plutoframework/pluto-core/httpidem"
+ "github.com/plutoframework/pluto-core/idempotency/memory"
 rbac "github.com/plutoframework/pluto-rbac"
 )
 
@@ -69,9 +74,11 @@ func TestIndependentPolicyMatrix(t *testing.T) {
    operation:=&recordingOperation{}
    evaluator:=features.New(map[string]*bool{"widgets-create":&test.enabled})
    reg:=transport.Registrar{Router:router,Auth:trustedAuth{permission:test.permission},Features:evaluator,Policy:publishedPolicy(t),Logger:slog.New(slog.NewTextHandler(io.Discard,nil))}
-   widgets.RegisterCreate(reg,operation,16*1024)
+   reg.Idempotency=localIdempotency(t)
+ widgets.RegisterCreate(reg,operation,16*1024)
    request:=httptest.NewRequest("POST","/api/widgets/item-1",strings.NewReader(test.body))
    request.Header.Set("Authorization","Bearer "+test.token)
+ request.Header.Set("Idempotency-Key","fixture-key")
    request.Header.Set("X-Tenant-ID",test.tenant)
    response:=httptest.NewRecorder()
    router.ServeHTTP(response,request)
@@ -96,9 +103,10 @@ func TestResolvedFlagsAndIncompleteOperation(t *testing.T) {
  enabled:=true
  cfg.Features["widgets-create"]=&enabled
  cfg.Features["private-report"]=&enabled
- router:=app.New(cfg,transport.Authentication{Verifier:trustedAuth{permission:true}},slog.New(slog.NewTextHandler(io.Discard,nil)),publishedPolicy(t))
+ router:=app.New(cfg,transport.Authentication{Verifier:trustedAuth{permission:true},Idempotency:localIdempotency(t)},slog.New(slog.NewTextHandler(io.Discard,nil)),publishedPolicy(t))
  request:=httptest.NewRequest("GET","/api/features",nil)
  request.Header.Set("Authorization","Bearer trusted")
+ request.Header.Set("Idempotency-Key","fixture-key")
  request.Header.Set("X-Tenant-ID","member-tenant")
  response:=httptest.NewRecorder()
  router.ServeHTTP(response,request)
@@ -107,6 +115,7 @@ func TestResolvedFlagsAndIncompleteOperation(t *testing.T) {
  if response.Code!=200 || !envelope.Data["widgets-create"] || len(envelope.Data)!=1 || response.Header().Get("Cache-Control")!="no-store" { t.Fatalf("visible flags: %s",response.Body) }
  request=httptest.NewRequest(paths.WidgetsCreate.Method,"/api/widgets/item-1",strings.NewReader(`{"value":"input"}`))
  request.Header.Set("Authorization","Bearer trusted")
+ request.Header.Set("Idempotency-Key","fixture-key")
  request.Header.Set("X-Tenant-ID","member-tenant")
  response=httptest.NewRecorder()
  router.ServeHTTP(response,request)
@@ -132,9 +141,11 @@ func TestUnknownRolesDoNotRetainGrants(t *testing.T) {
    Logger:slog.New(slog.NewTextHandler(io.Discard,nil)),
    Policy:policy,
   }
-  widgets.RegisterCreate(reg,operation,16*1024)
+  reg.Idempotency=localIdempotency(t)
+ widgets.RegisterCreate(reg,operation,16*1024)
   request:=httptest.NewRequest("POST","/api/widgets/item-1",strings.NewReader(`{}`))
   request.Header.Set("Authorization","Bearer trusted")
+ request.Header.Set("Idempotency-Key","fixture-key")
   request.Header.Set("X-Tenant-ID","member-tenant")
   response:=httptest.NewRecorder()
   router.ServeHTTP(response,request)
@@ -142,4 +153,84 @@ func TestUnknownRolesDoNotRetainGrants(t *testing.T) {
    t.Fatalf("unknown role/nil policy retained grants: status=%d calls=%d",response.Code,operation.calls)
   }
  }
+}
+
+func localIdempotency(t testing.TB) *httpidem.Handler {
+ t.Helper()
+ store,_:=memory.New(100)
+ handler,err:=transport.NewIdempotency(store,16*1024)
+ if err!=nil{t.Fatal(err)}
+ return handler
+}
+
+func TestWriteReplayAndCurrentGates(t *testing.T) {
+ idempotent:=localIdempotency(t)
+ operation:=&recordingOperation{}
+ send:=func(token,key,body string,permission,enabled bool)*httptest.ResponseRecorder{
+  router:=chi.NewRouter()
+  reg:=transport.Registrar{Router:router,Auth:trustedAuth{permission:permission},Features:features.New(map[string]*bool{"widgets-create":&enabled}),Policy:publishedPolicy(t),Logger:slog.New(slog.NewTextHandler(io.Discard,nil)),Idempotency:idempotent}
+  widgets.RegisterCreate(reg,operation,16*1024)
+  r:=httptest.NewRequest("POST","/api/widgets/item-1",strings.NewReader(body))
+  r.Header.Set("Authorization","Bearer "+token)
+  r.Header.Set("X-Tenant-ID","member-tenant")
+  r.Header.Set("Idempotency-Key",key)
+  r.Header.Set("Content-Type","application/json")
+  w:=httptest.NewRecorder();router.ServeHTTP(w,r);return w
+ }
+ first:=send("trusted","retry",`{"value":"input"}`,true,true)
+ replay:=send("trusted","retry",`{"value":"input"}`,true,true)
+ if first.Code!=200||replay.Code!=200||first.Body.String()!=replay.Body.String()||operation.calls!=1{t.Fatal(first,replay,operation.calls)}
+ for _,test:=range []struct{token,key,body string;permission,enabled bool;status int}{
+  {"trusted","retry",`{"value":"changed"}`,true,true,409},
+  {"trusted","",`{"value":"input"}`,true,true,400},
+  {"bad","retry",`{"value":"input"}`,true,true,401},
+  {"trusted","retry",`{"value":"input"}`,false,true,403},
+  {"trusted","retry",`{"value":"input"}`,true,false,403},
+ }{
+  w:=send(test.token,test.key,test.body,test.permission,test.enabled)
+  if w.Code!=test.status||operation.calls!=1{t.Fatal(w,operation.calls)}
+ }
+}
+
+type listReports struct{calls int}
+func (f *listReports) Execute(_ context.Context,_ domain.Principal,input reportmodels.ListRequest) (reportmodels.ListData,error) {
+ f.calls++
+ rows:=[]reportmodels.ListItem{ {Value:"a"},{Value:"b"},{Value:"c"}}
+ return pagination.Finish(input.Page,rows,func(v reportmodels.ListItem)pagination.Key{return pagination.Key{ID:v.Value}})
+}
+
+func TestCollectionParsingAndDetailIntent(t *testing.T) {
+ if !paths.ReportsList.Collection || paths.ReportsGet.Collection || paths.WidgetsGet.Collection {t.Fatal("collection intent lost")}
+ router:=chi.NewRouter()
+ enabled:=true
+ reg:=transport.Registrar{Router:router,Auth:trustedAuth{permission:true},Features:features.New(map[string]*bool{"private-report":&enabled}),Policy:publishedPolicy(t),Logger:slog.New(slog.NewTextHandler(io.Discard,nil))}
+ operation:=&listReports{}
+ reports.RegisterList(reg,operation,16*1024)
+ send:=func(query string)*httptest.ResponseRecorder{
+  r:=httptest.NewRequest("GET","/api/reports"+query,nil)
+  r.Header.Set("Authorization","Bearer trusted")
+  r.Header.Set("X-Tenant-ID","member-tenant")
+  w:=httptest.NewRecorder();router.ServeHTTP(w,r);return w
+ }
+ first:=send("?limit=2")
+ var body reportmodels.ListResponse
+ if err:=json.Unmarshal(first.Body.Bytes(),&body);err!=nil{t.Fatal(err)}
+ if first.Code!=200||len(body.Data)!=2||!body.Page.HasMore||body.Page.NextCursor==""||operation.calls!=1{t.Fatal(first,body,operation.calls)}
+ for _,query:=range []string{"?limit=101","?limit=1&limit=2","?cursor=bad"}{
+  if w:=send(query);w.Code!=400||operation.calls!=1{t.Fatal(w,operation.calls)}
+ }
+}
+
+func TestMissingDurableIdempotencyFailsClosed(t *testing.T) {
+ router:=chi.NewRouter()
+ enabled:=true
+ operation:=&recordingOperation{}
+ reg:=transport.Registrar{Router:router,Auth:trustedAuth{permission:true},Features:features.New(map[string]*bool{"widgets-create":&enabled}),Policy:publishedPolicy(t),Logger:slog.New(slog.NewTextHandler(io.Discard,nil))}
+ widgets.RegisterCreate(reg,operation,16*1024)
+ r:=httptest.NewRequest("POST","/api/widgets/item-1",strings.NewReader(`{"value":"input"}`))
+ r.Header.Set("Authorization","Bearer trusted")
+ r.Header.Set("X-Tenant-ID","member-tenant")
+ r.Header.Set("Idempotency-Key","new-action")
+ w:=httptest.NewRecorder();router.ServeHTTP(w,r)
+ if w.Code!=503||operation.calls!=0{t.Fatal("silently bypassed durable idempotency",w,operation.calls)}
 }

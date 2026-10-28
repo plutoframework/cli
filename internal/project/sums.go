@@ -17,6 +17,10 @@ github.com/plutoframework/pluto-auth v0.0.0-20261028021955-c1eabc6c680e h1:edNx8
 github.com/plutoframework/pluto-auth v0.0.0-20261028021955-c1eabc6c680e/go.mod h1:HQZU04XbBCfkfALpO4twiunihATxfNdH7jIrzpBAyDA=
 github.com/plutoframework/pluto-auth/stores/postgres v0.0.0-20261028021955-c1eabc6c680e h1:D4Ir3iD+efF2OuIMvcPdD/Ncq3Mh+dXl3GW/vmXfTas=
 github.com/plutoframework/pluto-auth/stores/postgres v0.0.0-20261028021955-c1eabc6c680e/go.mod h1:Cv9SuzLZTdJFRsLECPEUWj79xPsXGS5rJz4tPV4w0Tg=
+github.com/plutoframework/pluto-core v0.1.2 h1:CKh+vu9jxd3o4A4hWPujffNepoK5mhe957HcRTEx4Dc=
+github.com/plutoframework/pluto-core v0.1.2/go.mod h1:aU+OaFQxGmjf3simyHEJHxOZ/ja2dNnC5xyISaGkgVQ=
+github.com/plutoframework/pluto-core/stores/postgres v0.1.0 h1:qCTcfxBCutg+m/JC2c7FqeD6vEejLBSCEPsaqqSwH4Y=
+github.com/plutoframework/pluto-core/stores/postgres v0.1.0/go.mod h1:vXeYtitgQGS4cTClftO5AglxqqvWlFwdoB4kKUC5A7Q=
 github.com/plutoframework/pluto-rbac v0.0.0-20261027065629-25c44e7fe21b h1:HYuzhPnMzdORzUklM5aN4M6YB2pHxTrZEXYM7J2PF4Y=
 github.com/plutoframework/pluto-rbac v0.0.0-20261027065629-25c44e7fe21b/go.mod h1:3t1KayzQKiOQdeWeaE9oBYl9nPZsfQ0yvvvPA76edH8=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

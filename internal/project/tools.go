@@ -8,6 +8,10 @@ import (
 // RBACVersion pins the published package used by the CLI and generated apps.
 const AuthVersion = "v0.0.0-20261028021955-c1eabc6c680e"
 
+const CoreVersion = "v0.1.2"
+
+const CorePostgresVersion = "v0.1.0"
+
 const RBACVersion = "v0.0.0-20261027065629-25c44e7fe21b"
 
 // ToolFiles contains module dependencies and optional development configuration.
@@ -20,6 +24,8 @@ go 1.25.5
 require (
  github.com/go-chi/chi/v5 v5.2.3
  github.com/jackc/pgx/v5 v5.11.0
+ github.com/plutoframework/pluto-core %s
+ github.com/plutoframework/pluto-core/stores/postgres %s
  github.com/plutoframework/pluto-rbac %s
  github.com/plutoframework/pluto-auth %s
  github.com/plutoframework/pluto-auth/stores/postgres %s
@@ -32,7 +38,7 @@ require (
  golang.org/x/sync v0.17.0 // indirect
  golang.org/x/text v0.29.0 // indirect
 )
-`, m.Project.Module, RBACVersion, AuthVersion, AuthVersion))
+`, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthVersion))
 	files["go.sum"] = []byte(appGoSum)
 	files[".golangci.yml"] = []byte(
 		strings.ReplaceAll(lintConfig, "MODULE", m.Project.Module),

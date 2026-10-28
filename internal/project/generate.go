@@ -175,7 +175,7 @@ func Managed(m Manifest) (map[string][]byte, error) {
 
 			fmt.Fprintf(
 				&paths,
-				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\nMethod:%q,\nPath:%q,\nAuthenticated:%t,\nPermission:access.%sPermission,\nFeature:%q,\nRequest:%s,\nResponse:%s.%sResponse{},\nSuccessStatus:200,\n}\n",
+				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\nMethod:%q,\nPath:%q,\nAuthenticated:%t,\nPermission:access.%sPermission,\nFeature:%q,\nRequest:%s,\nResponse:%s.%sResponse{},\nSuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n}\n",
 				d.Symbol,
 				e.Group+"."+e.Action,
 				e.Name,
@@ -188,6 +188,8 @@ func Managed(m Manifest) (map[string][]byte, error) {
 				request,
 				e.Group,
 				e.Action,
+				e.Collection,
+				e.RequiresIdempotency(),
 			)
 			fmt.Fprintf(&catalog, "%s,\n", d.Symbol)
 			fmt.Fprintf(
@@ -304,6 +306,9 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	layout := map[string]string{
 		"internal/access/policy.go":                  "policy.go",
 		"internal/access/memberships.go":             "memberships.go",
+		"internal/transport/pagination.go":           "pagination.go",
+		"internal/transport/idempotency.go":          "idempotency.go",
+		"db/migrations/003_idempotency.sql":          "idempotency_schema.sql",
 		"internal/transport/sessions.go":             "sessions.go",
 		"internal/transport/session_routes.go":       "session_routes.go",
 		"internal/transport/sessions_test.go":        "sessions_test.go",

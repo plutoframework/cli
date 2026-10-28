@@ -40,6 +40,7 @@ func New(
 		Router:   router,
 		Auth:     authentication.Verifier,
  Sessions: authentication.HTTP,
+ Idempotency: authentication.Idempotency,
 		Features: evaluator,
 		Logger:   logger,
 		Policy:   policy,

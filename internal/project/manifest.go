@@ -13,7 +13,7 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 type Manifest struct {
 	SchemaVersion int          `toml:"schema_version"`
@@ -43,6 +43,8 @@ type Development struct {
 	Docker bool `toml:"docker"`
 }
 type Endpoint struct {
+	Collection    bool   `toml:"collection"`
+	Idempotency   string `toml:"idempotency"`
 	Group         string `toml:"group"`
 	Action        string `toml:"action"`
 	Name          string `toml:"name"`
@@ -160,7 +162,38 @@ func (m Manifest) Validate() error {
 	return nil
 }
 
+func (e Endpoint) isWrite() bool {
+	switch e.Method {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	default:
+		return false
+	}
+}
+
+func (e Endpoint) RequiresIdempotency() bool {
+	return !e.Public && e.Idempotency != "exempt" &&
+		e.isWrite()
+}
+
 func (e Endpoint) Validate(multi bool) error {
+	if e.Collection && e.Method != "GET" {
+		return fmt.Errorf("collection requires GET")
+	}
+
+	switch e.Idempotency {
+	case "", "auto", "required", "exempt":
+	default:
+		return fmt.Errorf("idempotency must be auto, required or exempt")
+	}
+
+	if e.Idempotency == "required" &&
+		(e.Public || !e.isWrite()) {
+		return fmt.Errorf(
+			"required idempotency needs an authenticated business write; public writes require explicit app policy",
+		)
+	}
+
 	reserved := " break default func interface select case defer go map struct chan else goto package switch const fallthrough if range type continue for import return var init main internal paths app operations models features config domain transport context http strings testing io slog chi errors time fmt bytes json reflect "
 	if !packageName.MatchString(e.Group) ||
 		strings.Contains(reserved, " "+e.Group+" ") {

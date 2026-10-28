@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 rbac "github.com/plutoframework/pluto-rbac"
+ {{if not .Public}}"github.com/plutoframework/pluto-core/idempotency/memory"{{end}}
 )
 
 type fake{{.Action}} struct{ calls int }
@@ -24,10 +25,10 @@ type fake{{.Action}} struct{ calls int }
 func (f *fake{{.Action}}) Execute(
 	_ context.Context,
 	_ domain.Principal,
-	input {{.Group}}.{{.Action}}Request,
+	{{if .Collection}}_{{else}}input{{end}} {{.Group}}.{{.Action}}Request,
 ) ({{.Group}}.{{.Action}}Data, error) {
 	f.calls++
-	return {{.Group}}.{{.Action}}Data{Value: input.Value}, nil
+	{{if .Collection}}return {{.Group}}.{{.Action}}Data{Data:[]{{.Group}}.{{.Action}}Item{}},nil{{else}}return {{.Group}}.{{.Action}}Data{Value: input.Value}, nil{{end}}
 }
 
 type auth{{.Action}} struct{}
@@ -71,7 +72,10 @@ func Test{{.Action}}HTTP(t *testing.T) {
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
  Policy: policy,
 	}
-	Register{{.Action}}(reg, operation, 16*1024)
+	{{if not .Public}}store,_:=memory.New(100)
+ reg.Idempotency,err=transport.NewIdempotency(store,16*1024)
+ if err!=nil{t.Fatal(err)}{{end}}
+ Register{{.Action}}(reg, operation, 16*1024)
 
 	request := httptest.NewRequest(
 		paths.{{.Symbol}}.Method,
@@ -79,6 +83,7 @@ func Test{{.Action}}HTTP(t *testing.T) {
 		strings.NewReader(`{"value":"verified"}`),
 	)
 	request.Header.Set("Authorization", "Bearer verified")
+ request.Header.Set("Idempotency-Key","test-action")
 
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)

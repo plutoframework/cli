@@ -3,7 +3,7 @@
 Read README.md first. Run pluto fmt and pluto vet before submitting changes.
 Keep every file <=1,000 lines; prefer expanded readable Go and 80 columns.
 
-pluto.toml schema 3 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
+pluto.toml schema 4 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
 Handlers, models, operations, composition root and transport helpers are authored
 and created once. Never add magic init registration. Add endpoints with the CLI.
 Do not import HTTP/storage from operations or database adapters from handlers,

@@ -1,7 +1,7 @@
 # {{.Name}}
 
 Generated with the provisional Pluto CLI. Requires Go 1.25.5+. These app-local
-primitives will be candidates for framework extraction; published Pluto Auth and RBAC libraries
+primitives will be candidates for framework extraction; published Pluto Core, Auth and RBAC libraries
 provide sessions and capability evaluation. Chi is the HTTP router, PostgreSQL/pgx + sqlc the database direction.
 
 ```sh
@@ -55,9 +55,9 @@ endpoint additions do not enable omitted presets. Core lint/config/SQL files
 are always included and Git hooks remain opt-in.
 
 Commands discover pluto.toml in cwd/parents; saved tenancy/prefix are reused.
-`pluto.toml` is project metadata, never runtime settings/secrets. Schema 3 records the session-enabled scaffold contract.
+`pluto.toml` is project metadata, never runtime settings/secrets. Schema 4 records shared Core pagination/idempotency and session contracts.
 Unknown fields/settings fail; no automatic schema migration is implied.
-For schema 2 apps, migrate authored app/config/main/transport wiring, module pins,
+For schema 2/3 apps, migrate authored app/config/main/transport wiring, module pins,
 static paths, session storage and migration manually before updating the manifest.
 The CLI refuses old schemas instead of overwriting authored authentication code.
 
@@ -230,3 +230,38 @@ choices. Change the operation constructor and this binding together when adding
 repositories. Add typed fields to app.Dependencies and construct/inject them in
 app.New. Generated group registries accept narrow Operations interfaces and never
 choose concrete implementations; additions preserve authored constructor wiring.
+
+## Pagination and idempotency defaults
+
+GET List endpoints save collection intent and receive `pagination.Request` in
+input.Page. Other GETs are not inferred as collections; use --collection or
+--collection=false deliberately. Implement a tenant/ownership-filtered keyset
+query with deterministic immutable sort and unique ID tie-breaker, SQL LIMIT
+input.Page.FetchLimit(), then pagination.Finish. Return that shared page; the
+handler encodes data/page metadata. Defaults are 25/max 100, no COUNT query.
+Cursors are unsigned opaque/versioned boundaries bound to the verified actor,
+{{if .Multi}}tenant,{{end}} operation and filters; they never authorize access.
+If visibility depends on additional policy state, include it in the binding.
+
+Authenticated business writes require Idempotency-Key (1–128 ASCII letters,
+digits or -_.:) per intended action; reuse it for retries. Stable endpoint IDs
+namespace verified subject{{if .Multi}}/tenant{{end}} keys after current auth,
+RBAC and feature gates. Add --idempotency=exempt for sensitive/streaming responses.
+Public writes and session lifecycle are exempt: public deduplication requires
+an explicit authored safe application scope. Never wrap login/token responses.
+
+DATABASE_URL wires durable pluto-core Postgres storage; explicitly apply
+003_idempotency.sql. Without it protected writes return 503 until durable storage
+is supplied. Tests inject bounded process-local memory; production never silently
+falls back to it. Completed responses retain 24h; conflicts and pending claims
+return 409. Uncertain requests remain blocked for operator reconciliation, even
+past expiry; no automatic lease stealing. JSON responses are bounded to 256 KiB;
+only Content-Type, bytes and status are replayed. Set-Cookie/auth/security headers
+are not cached. Application 401/403/5xx remain uncached and leave pending claims.
+
+The generic helper records completion after the operation and cannot guarantee
+exactly-once external effects. To make database mutation/audit/completion atomic,
+use core NewClaim/Store primitives and the Postgres adapter bound to the SAME pgx
+transaction as typed application queries. See the published core README and
+transaction example. Keep domain policy separate from these transport adapters.
+For schema 3 migration review the CLI README; never overwrite authored source.

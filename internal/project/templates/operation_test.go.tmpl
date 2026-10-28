@@ -38,7 +38,7 @@ func Test{{.Action}}Incomplete(t *testing.T) {
     }
     input := {{.Group}}.{{.Action}}Request{Value: "must not succeed"}
     output, err := operation.Execute(context.Background(), principal, input)
-    if !errors.Is(err, domain.ErrNotImplemented) || output.Value != "" {
+    if !errors.Is(err, domain.ErrNotImplemented) {{if not .Collection}}|| output.Value != ""{{end}} {
         t.Fatalf("incomplete operation returned %#v, %v", output, err)
     }
 {{if not .Public}}

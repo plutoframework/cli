@@ -84,6 +84,12 @@ map[string]any{"sessionCookie": []string{}},
 			}
 		}
 
+  if endpoint.Collection {
+   parameters=append(parameters,map[string]any{"name":"limit","in":"query","schema":map[string]any{"type":"integer","default":25,"minimum":1,"maximum":100}},map[string]any{"name":"cursor","in":"query","schema":map[string]any{"type":"string","maxLength":2048}})
+  }
+  if endpoint.Idempotent {
+   parameters=append(parameters,map[string]any{"name":"Idempotency-Key","in":"header","required":true,"description":"Client retry key; 409 means conflict or pending reconciliation. 24h completed retention.","schema":map[string]any{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.:-]+$"}})
+  }
 		if len(parameters) > 0 {
 			operation["parameters"] = parameters
 		}

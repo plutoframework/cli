@@ -10,10 +10,12 @@ import (
 
 	plutoauth "github.com/plutoframework/pluto-auth"
 	"github.com/plutoframework/pluto-auth/httpauth"
+ "github.com/plutoframework/pluto-core/httpidem"
 )
 
 // Authentication is explicit wiring shared by protected routes and logout.
 type Authentication struct {
+ Idempotency *httpidem.Handler
 	Verifier Authenticator
 	HTTP *httpauth.Transport
 	Manager *plutoauth.Manager
