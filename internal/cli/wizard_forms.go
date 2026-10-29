@@ -91,6 +91,8 @@ func wizardForm(
 		model = frontendForm(model, manifest, cmd, args)
 	case "endpoint":
 		model = endpointForm(model, manifest, cmd, args)
+	case "agent":
+		model = agentForm(model, manifest, cmd, args)
 	case "job":
 		model = jobForm(model, manifest, cmd, args)
 	default:
@@ -107,6 +109,7 @@ func menuForm(kind string, options Options) wizardModel {
 		{"Initialize an API application", "init"},
 		{"Add an API endpoint", "endpoint"},
 		{"Add a background job", "job"},
+		{"Add a read-only AI agent", "agent"},
 		{"Format this project", "fmt"},
 		{"Run project checks", "vet"},
 		{"Generate OpenAPI", "openapi"},
@@ -122,7 +125,7 @@ func menuForm(kind string, options Options) wizardModel {
 	}
 
 	if kind == "add" {
-		choices = choices[1:3]
+		choices = choices[1:4]
 		value = "endpoint"
 	}
 

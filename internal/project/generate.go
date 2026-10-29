@@ -23,11 +23,12 @@ type templateData struct {
 	Valkey               bool
 	Development
 	Endpoint
-	Symbol   string
-	JobKind  string
-	Params   []string
-	Body     bool
-	TestPath string
+	Symbol        string
+	JobKind       string
+	AgentProvider string
+	Params        []string
+	Body          bool
+	TestPath      string
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {

@@ -30,6 +30,10 @@ func permissionDeclarations(m Manifest) ([]byte, error) {
 		}
 	}
 
+	for _, a := range m.Agents {
+		permissions[a.Permission] = true
+	}
+
 	keys := make([]string, 0, len(permissions))
 	for permission := range permissions {
 		keys = append(keys, permission)

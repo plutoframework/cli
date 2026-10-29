@@ -13,9 +13,10 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 type Manifest struct {
+	Agents        []Agent      `toml:"agents,omitempty"`
 	SchemaVersion int          `toml:"schema_version"`
 	Project       Project      `toml:"project"`
 	Capabilities  Capabilities `toml:"capabilities"`
@@ -76,7 +77,8 @@ var (
 )
 
 func (m Manifest) Validate() error {
-	if m.SchemaVersion != SchemaVersion {
+	if m.SchemaVersion != SchemaVersion &&
+		(m.SchemaVersion != 7 || len(m.Agents) != 0) {
 		return fmt.Errorf(
 			"unsupported schema_version %d (need %d); no implicit migration",
 			m.SchemaVersion,
@@ -113,6 +115,10 @@ func (m Manifest) Validate() error {
 
 	if m.Database.Engine != "postgres" || m.Database.Queries != "sqlc" {
 		return fmt.Errorf("database requires engine=postgres and queries=sqlc")
+	}
+
+	if err := ValidateAgents(m.Agents); err != nil {
+		return err
 	}
 
 	if err := validateJobs(m.Jobs); err != nil {

@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, **not an imaginary published Pluto framework**. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.9.0`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.10.0`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -610,3 +610,44 @@ identity and environment are configured in authored cmd/api/telemetry.go;
 the generated docs/TELEMETRY.md explains customization and migration.
 Workers own a separate runtime and instrument registered jobs and pgx queries.
 API caches and pgx queries are instrumented too. Existing authored apps are preserved.
+
+## Opt-in agents
+
+```sh
+pluto add agent purchases Review --permission purchases:read --dry-run
+pluto add agent purchases Review --permission purchases:read --provider scripted
+go mod tidy
+pluto fmt
+pluto vet
+```
+
+The wizard offers the same command and provider choice. `--provider scripted`
+is the default; `--provider openai` emits a startup constructor that validates
+the namespaced runtime model/key environment without enabling a route.
+Provider selection is persisted in pluto.toml; credentials never are. Agent metadata uses schema 8; schema 7
+projects without agents remain readable. Adding an agent explicitly upgrades the
+manifest to 8 without rewriting authored code. Earlier CLI versions reject the
+new schema. Existing agents and their tool implementations are never overwritten.
+Only opted-in projects acquire `pluto-agent v0.1.3`; this command adds no OTEL SDK
+or provider SDK. Existing application telemetry choices remain intact.
+
+Generated `internal/agents/<group>` code has typed dependencies, output, one
+read-only tool, explicit permission, resource callback and a per-run allowlist.
+Inject the compiled application policy, verified principal and selected resource
+from the server. The injected Read operation must enforce current tenant and
+resource access on every call. It runs before any model call and again for tools.
+Keep the HTTP handler thin and gate the feature before invoking Run. The skeleton
+creates no route and enables no provider automatically.
+
+Inject a scripted provider for deterministic local tests. To use the published
+OpenAI adapter, construct it at server startup with a supported model and the
+namespaced `<ENV_PREFIX>AGENT_OPENAI_API_KEY` environment variable. Never put
+credentials in pluto.toml. Fail startup on invalid enabled-provider configuration.
+Use an injected observer only when explicitly requested. Tools requiring public
+access must explicitly declare `Access{Public:true}` and retain resource policy;
+never remove checks to make a demo work.
+
+Runs have bounded calls and timeouts, not hard billing caps. Cancellation is
+cooperative. The generated skeleton does not provide durable runs, replay storage,
+exactly-once execution or approval workflows. Approval, when added to a write
+tool, is additional to permissions, run restrictions and resource authorization.

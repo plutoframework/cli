@@ -38,7 +38,7 @@ func TestOldSchemaRejectedBeforeWrites(t *testing.T) {
 	old := strings.Replace(
 		string(data),
 		fmt.Sprintf("schema_version = %d", project.SchemaVersion),
-		fmt.Sprintf("schema_version = %d", project.SchemaVersion-1),
+		fmt.Sprintf("schema_version = %d", project.SchemaVersion-2),
 		1,
 	)
 	if old == string(data) {
@@ -72,7 +72,7 @@ func TestOldSchemaRejectedBeforeWrites(t *testing.T) {
 			err.Error(),
 			fmt.Sprintf(
 				"unsupported schema_version %d (need %d)",
-				project.SchemaVersion-1,
+				project.SchemaVersion-2,
 				project.SchemaVersion,
 			),
 		) {

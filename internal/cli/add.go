@@ -196,6 +196,7 @@ func addCommand(options Options) *cobra.Command {
 	)
 	add.AddCommand(command)
 	add.AddCommand(addJobCommand(options))
+	add.AddCommand(addAgentCommand(options))
 
 	return add
 }

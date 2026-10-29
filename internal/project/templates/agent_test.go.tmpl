@@ -1,0 +1,60 @@
+package {{.Group}}
+
+import (
+ "context"
+ "errors"
+ "testing"
+
+ "{{.Module}}/internal/domain"
+ rbac "github.com/plutoframework/pluto-rbac"
+ agent "github.com/plutoframework/pluto-agent"
+ "github.com/plutoframework/pluto-agent/providers/scripted"
+)
+
+func Test{{.Action}}RejectsUnverifiedPrincipal(t *testing.T) {
+ provider := scripted.New(scripted.Final(`{"summary":"unused","next_steps":[]}`))
+ runner, err := New{{.Action}}(provider)
+ if err != nil { t.Fatal(err) }
+ _, err = Run{{.Action}}(context.Background(), runner, "test-run", {{.Action}}Dependencies{})
+ if !errors.Is(err, agent.ErrDenied) { t.Fatalf("unverified run: %v", err) }
+}
+
+func Test{{.Action}}ReadsOnlySelectedResource(t *testing.T) {
+ policy, err := rbac.New(rbac.Definition{
+  Permissions: []rbac.Permission{ {ID: {{q .Permission}}, Name: "Read", Description: "Test read."}},
+  Roles: []rbac.Role{ {ID: "reader", Name: "Reader", Description: "Test reader.",
+   Permissions: []rbac.PermissionID{ {{q .Permission}} }}},
+ })
+ if err != nil { t.Fatal(err) }
+ reads := 0
+ deps := {{.Action}}Dependencies{
+  Principal: domain.Principal{ActorID: "actor", Roles: []rbac.RoleID{"reader"},
+   {{if .Multi}}TenantID: "tenant",{{end}} },
+  Policy: policy, ResourceID: "selected",
+  Read: func(_ context.Context, p domain.Principal, id string) ({{.Action}}Result, error) {
+   reads++
+   if p.ActorID != "actor" || id != "selected" {
+    t.Fatal("tool escaped verified resource")
+   }
+   return {{.Action}}Result{Summary: "Resource", NextSteps: []string{"Check it"}}, nil
+  },
+ }
+ provider := scripted.New(scripted.Calls(agent.ToolCall{
+  ID: "read", Name: "read_selected_resource", Arguments: `{}`,
+ }), scripted.Final(`{"summary":"Review","next_steps":["Check it"]}`))
+ runner, err := New{{.Action}}(provider)
+ if err != nil { t.Fatal(err) }
+ result, err := Run{{.Action}}(context.Background(), runner, "selected-run", deps)
+ if err != nil || result.Output.Summary != "Review" || reads != 2 {
+  t.Fatalf("read-only run: %+v %v reads=%d", result, err, reads)
+ }
+}
+
+func Test{{.Action}}ProviderConfiguration(t *testing.T) {
+ _, err := New{{.Action}}Provider(func(string) (string, bool) { return "", false })
+ {{if eq .AgentProvider "openai"}}
+ if err == nil { t.Fatal("enabled provider accepted missing runtime configuration") }
+ {{else}}
+ if err != nil { t.Fatal(err) }
+ {{end}}
+}
