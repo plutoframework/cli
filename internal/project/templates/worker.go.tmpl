@@ -3,6 +3,7 @@ package background
 
 import (
     "errors"
+    "github.com/plutoframework/pluto-core/telemetry"
 
     jobs "github.com/plutoframework/pluto-jobs"
     jobpostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
@@ -15,12 +16,20 @@ type Dependencies struct {}
 // NewWorker never runs migrations or starts a goroutine. Empty registrations
 // fail before claiming: an unconfigured worker must not fail queued work.
 func NewWorker(pool *pgxpool.Pool, config jobs.Config) (*jobs.Worker, error) {
+    return NewWorkerWithTelemetry(pool, config, nil)
+}
+
+// NewWorkerWithTelemetry instruments each registered handler explicitly.
+func NewWorkerWithTelemetry(pool *pgxpool.Pool, config jobs.Config, runtime *telemetry.Runtime) (*jobs.Worker, error) {
     // Add typed app-owned adapters here and fields to Dependencies. Authored
     // per-job bindings receive this value; new jobs never rewrite those files.
     dependencies := Dependencies{}
     handlers := Handlers(dependencies)
     if len(handlers) == 0 {
         return nil, errors.New("register a job with pluto add job before starting the worker")
+    }
+    for kind, handler := range handlers {
+        handlers[kind] = runtime.JobHandler(handler)
     }
     store, err := jobpostgres.New(pool)
     if err != nil { return nil, err }

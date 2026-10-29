@@ -5,15 +5,24 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+    "github.com/jackc/pgx/v5"
 )
 
 // Open verifies connectivity only. Generated operation stubs do not persist data.
 // Add explicit domain-specific repositories with tenant predicates when needed.
 func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	return OpenWithTracer(ctx, url, nil)
+}
+
+// OpenWithTracer configures query tracing before any connections are opened.
+func OpenWithTracer(ctx context.Context, url string, tracer pgx.QueryTracer) (*pgxpool.Pool, error) {
+    ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+    if err != nil { return nil, err }
+    cfg.ConnConfig.Tracer = tracer
+    pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

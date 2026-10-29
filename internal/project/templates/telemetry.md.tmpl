@@ -1,0 +1,30 @@
+# API telemetry
+
+The API explicitly owns a Pluto telemetry runtime, request middleware, correlated
+JSON logging and a bounded shutdown. The independently versioned
+github.com/plutoframework/pluto-core/telemetry module is pinned to v0.1.1.
+No global SDK provider or automatic business-operation instrumentation is installed.
+
+Telemetry is disabled by default. Configure it through environment variables
+using {{.Prefix}}OTEL_ENABLED=true, {{.Prefix}}OTEL_ENDPOINT=https://collector:4318
+and {{.Prefix}}OTEL_SAMPLE_RATIO=1 (a fraction from 0 to 1).
+The endpoint uses OTLP over HTTP; standard OTLP exporter settings also apply. Service name defaults to {{.Name}}; service version
+defaults to dev (set with Go's -ldflags "-X main.version=v1.2.3").
+{{.Prefix}}ENVIRONMENT defaults to development. Settings are read once during
+startup. No .env file is loaded. Credentials belong in the secret environment.
+
+The authored cmd/api/telemetry.go is the application customization point.
+Review exporter endpoints, transport security and collected attributes before
+enabling export. The runtime emits bounded route labels rather than raw request
+paths; do not add credentials, bodies or arbitrary user identifiers as attributes.
+The API flushes telemetry after stopping HTTP service. The worker owns a separate runtime with the
+same environment settings, service name {{.Name}}-worker and its own dev version.
+It wraps registered job handlers and its pgx pool, then flushes on bounded shutdown.
+Durable jobs start new trace roots; incoming context is not persisted in the outbox.
+
+The API wraps app.Dependencies.Cache and configures pgx query tracing before pool
+creation. Cache keys/values and SQL text/parameters are omitted. Existing Open and
+NewWorker callers remain compatible and opt out of instrumentation by default.
+
+Existing generated applications must adopt these authored files and composition
+changes deliberately; adding an endpoint never overwrites them.

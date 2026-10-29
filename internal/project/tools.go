@@ -62,6 +62,8 @@ require (
 `, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthVersion, JobsVersion, JobsPostgresVersion, passwordRequirement(m)))
 
 	files["go.sum"] = []byte(appGoSum)
+	addTelemetryRequirement(files)
+
 	if m.Capabilities.Cache == "valkey" {
 		module := string(files["go.mod"])
 		module = strings.Replace(

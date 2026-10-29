@@ -1,0 +1,121 @@
+package main
+
+import (
+    "bytes"
+    "context"
+    "strings"
+    "sync/atomic"
+    "io"
+    "log/slog"
+    "net/http"
+    "net/http/httptest"
+    "testing"
+    "time"
+
+    "{{.Module}}/internal/config"
+    "github.com/go-chi/chi/v5"
+    "github.com/jackc/pgx/v5"
+    "github.com/plutoframework/pluto-core/cache"
+    jobs "github.com/plutoframework/pluto-jobs"
+)
+
+func TestTelemetryDisabledHTTPAndLogs(t *testing.T) {
+    t.Setenv(config.Prefix+"OTEL_ENABLED", "false")
+    runtime, err := newTelemetry(context.Background())
+    if err != nil { t.Fatal(err) }
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+    defer cancel()
+    defer func() {
+        if err := runtime.Shutdown(ctx); err != nil { t.Error(err) }
+    }()
+    logger := slog.New(runtime.Handler(slog.NewJSONHandler(io.Discard, nil)))
+    router := chi.NewRouter()
+    router.Use(runtime.Middleware)
+    router.Get("/items/{id}", func(w http.ResponseWriter, r *http.Request) {
+        logger.InfoContext(r.Context(), "item requested")
+        store := runtime.Cache(cache.Disabled{})
+        if _, _, err := store.Get(r.Context(), "private-cache-key"); err != nil { t.Error(err) }
+        tracer := runtime.PGXTracer()
+        query := tracer.TraceQueryStart(r.Context(), nil, pgx.TraceQueryStartData{SQL:"private-query"})
+        tracer.TraceQueryEnd(query, nil, pgx.TraceQueryEndData{})
+        handler := runtime.JobHandler(func(ctx context.Context, _ jobs.Job) error {
+            logger.InfoContext(ctx, "job attempted")
+            return nil
+        })
+        if err := handler(r.Context(), jobs.Job{}); err != nil { t.Error(err) }
+        w.WriteHeader(http.StatusNoContent)
+    })
+    response := httptest.NewRecorder()
+    router.ServeHTTP(response,
+        httptest.NewRequest(http.MethodGet, "/items/private-id", nil))
+    if response.Code != http.StatusNoContent { t.Fatal(response.Code) }
+}
+
+// A local collector proves enabled applications export on bounded shutdown
+// without depending on an external collector or changing global providers.
+func TestTelemetryEnabledExport(t *testing.T) {
+    var exports atomic.Int64
+    var routeSeen, rawPathSeen atomic.Bool
+    var cacheSeen, querySeen, jobSeen atomic.Bool
+    collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        exports.Add(1)
+        payload, err := io.ReadAll(r.Body)
+        if err != nil { t.Error(err) }
+        if bytes.Contains(payload, []byte("/items/{id}")) { routeSeen.Store(true) }
+        if bytes.Contains(payload, []byte("cache.get")) { cacheSeen.Store(true) }
+        if bytes.Contains(payload, []byte("postgres.query")) { querySeen.Store(true) }
+        if bytes.Contains(payload, []byte("jobs.process")) { jobSeen.Store(true) }
+        for _, sensitive := range []string{"private-id", "private-cache-key", "private-query"} {
+            if bytes.Contains(payload, []byte(sensitive)) { rawPathSeen.Store(true) }
+        }
+        w.Header().Set("Content-Type", "application/x-protobuf")
+        w.WriteHeader(http.StatusOK)
+    }))
+    defer collector.Close()
+    t.Setenv(config.Prefix+"OTEL_ENABLED", "true")
+    t.Setenv(config.Prefix+"OTEL_ENDPOINT", collector.URL)
+    t.Setenv(config.Prefix+"OTEL_SAMPLE_RATIO", "1")
+    runtime, err := newTelemetry(context.Background())
+    if err != nil { t.Fatal(err) }
+    var logs bytes.Buffer
+    logger := slog.New(runtime.Handler(slog.NewJSONHandler(&logs, nil)))
+    router := chi.NewRouter()
+    router.Use(runtime.Middleware)
+    router.Get("/items/{id}", func(w http.ResponseWriter, r *http.Request) {
+        logger.InfoContext(r.Context(), "item requested")
+        store := runtime.Cache(cache.Disabled{})
+        if _, _, err := store.Get(r.Context(), "private-cache-key"); err != nil { t.Error(err) }
+        tracer := runtime.PGXTracer()
+        query := tracer.TraceQueryStart(r.Context(), nil, pgx.TraceQueryStartData{SQL:"private-query"})
+        tracer.TraceQueryEnd(query, nil, pgx.TraceQueryEndData{})
+        handler := runtime.JobHandler(func(ctx context.Context, _ jobs.Job) error {
+            logger.InfoContext(ctx, "job attempted")
+            return nil
+        })
+        if err := handler(r.Context(), jobs.Job{}); err != nil { t.Error(err) }
+        w.WriteHeader(http.StatusNoContent)
+    })
+    response := httptest.NewRecorder()
+    router.ServeHTTP(response,
+        httptest.NewRequest(http.MethodGet, "/items/private-id", nil))
+    if response.Code != http.StatusNoContent { t.Fatal(response.Code) }
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    if err := runtime.Shutdown(ctx); err != nil { t.Fatal(err) }
+    if exports.Load() == 0 { t.Fatal("collector received no telemetry") }
+    if !routeSeen.Load() { t.Fatal("collector lacks bounded Chi route") }
+    if rawPathSeen.Load() { t.Fatal("sensitive request/storage data exported") }
+    if !cacheSeen.Load() || !querySeen.Load() || !jobSeen.Load() {
+        t.Fatal("collector lacks cache/query/job instrumentation")
+    }
+    if !strings.Contains(logs.String(), "trace_id") {
+        t.Fatal("request log lacks trace correlation")
+    }
+}
+
+func TestTelemetryInvalidEnvironment(t *testing.T) {
+    t.Setenv(config.Prefix+"OTEL_ENABLED", "invalid")
+    if _, err := newTelemetry(context.Background()); err == nil {
+        t.Fatal("invalid telemetry environment accepted")
+    }
+}

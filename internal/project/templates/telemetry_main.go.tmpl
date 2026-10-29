@@ -1,0 +1,26 @@
+package main
+
+import (
+    "context"
+    "os"
+
+    "{{.Module}}/internal/config"
+    "github.com/plutoframework/pluto-core/telemetry"
+)
+
+// Set version at build time with -ldflags "-X main.version=v1.2.3".
+var version = "dev"
+
+func newTelemetry(ctx context.Context) (*telemetry.Runtime, error) {
+    environment := os.Getenv(config.Prefix + "ENVIRONMENT")
+    if environment == "" {
+        environment = "development"
+    }
+    cfg, err := telemetry.FromEnv(
+        config.Prefix, {{q .Name}}, version, environment,
+    )
+    if err != nil {
+        return nil, err
+    }
+    return telemetry.New(ctx, cfg)
+}

@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+    "github.com/go-chi/chi/v5"
+
 	"{{.Module}}/internal/app"
 	"{{.Module}}/internal/access"
 	"{{.Module}}/internal/config"
@@ -40,12 +42,22 @@ func run() error {
 		return err
 	}
 
-	logger := slog.New(
-		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}),
-	)
+	runtime, err := newTelemetry(context.Background())
+    if err != nil { return errors.New("invalid telemetry configuration") }
+    logger := slog.New(runtime.Handler(
+        slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}),
+    ))
+    defer func() {
+        shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        if err := runtime.Shutdown(shutdown); err != nil {
+            logger.Error("telemetry shutdown failed")
+        }
+    }()
     dataCache, closeCache, err := caching.New(cfg.Cache)
     if err != nil { return errors.New("invalid cache configuration") }
     defer closeCache()
+    dataCache = runtime.Cache(dataCache)
 
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
@@ -63,7 +75,7 @@ func run() error {
     defer cancelStartup()
     var idempotencyStore idempotency.Store
  if cfg.Database.URL != "" {
-		pool, err := postgres.Open(startup, cfg.Database.URL)
+		pool, err := postgres.OpenWithTracer(startup, cfg.Database.URL, runtime.PGXTracer())
 		if err != nil {
 			return errors.New("postgres connectivity failed; verify DATABASE_URL and database availability")
 		}
@@ -89,9 +101,13 @@ func run() error {
     {{end}}
  authentication.Idempotency=idempotent
 
-	server := &http.Server{
+	router := chi.NewRouter()
+    router.Use(runtime.Middleware)
+    router.Mount("/", app.NewWithCache(cfg, authentication, logger, policy, dataCache))
+
+    server := &http.Server{
 		Addr:              cfg.Server.Address,
-		Handler:           app.NewWithCache(cfg, authentication, logger, policy, dataCache),
+		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,
@@ -99,8 +115,10 @@ func run() error {
 		MaxHeaderBytes:    16 * 1024,
 	}
 	done := make(chan struct{})
+    shutdownDone := make(chan struct{})
 
 	go func() {
+        defer close(shutdownDone)
 		select {
 		case <-ctx.Done():
 			shutdown, cancel := context.WithTimeout(
@@ -116,7 +134,10 @@ func run() error {
 		}
 	}()
 
-	defer close(done)
+	defer func() {
+        close(done)
+        <-shutdownDone
+    }()
 
 	logger.Info(
 		"listening",

@@ -332,6 +332,9 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	layout := map[string]string{
+		"cmd/api/telemetry.go":                       "telemetry_main.go",
+		"cmd/api/telemetry_test.go":                  "telemetry_test.go",
+		"docs/TELEMETRY.md":                          "telemetry.md",
 		"internal/caching/cache.go":                  "cache.go",
 		"cmd/worker/main.go":                         "worker_main.go",
 		"internal/background/worker.go":              "worker.go",

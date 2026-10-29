@@ -7,6 +7,8 @@ import (
     "os"
     "os/signal"
     "syscall"
+    "time"
+    "github.com/plutoframework/pluto-core/telemetry"
 
     "{{.Module}}/internal/background"
     "{{.Module}}/internal/config"
@@ -14,17 +16,35 @@ import (
 
 )
 
+var version = "dev"
+
+func newTelemetry(ctx context.Context) (*telemetry.Runtime, error) {
+    environment := os.Getenv(config.Prefix + "ENVIRONMENT")
+    if environment == "" { environment = "development" }
+    cfg, err := telemetry.FromEnv(config.Prefix, {{q .Name}}+"-worker", version, environment)
+    if err != nil { return nil, errors.New("invalid telemetry configuration") }
+    return telemetry.New(ctx, cfg)
+}
+
 func run() error {
     settings, err := config.Load()
     if err != nil { return err }
     if settings.Database.URL == "" { return errors.New("worker requires DATABASE_URL and migration 005_jobs.sql") }
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
-    pool, err := postgres.Open(ctx, settings.Database.URL)
+    runtime, err := newTelemetry(ctx)
+    if err != nil { return errors.New("worker telemetry startup failed") }
+    logger := slog.New(runtime.Handler(slog.NewJSONHandler(os.Stdout, nil)))
+    defer func() {
+        shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        if err := runtime.Shutdown(shutdown); err != nil { logger.Error("worker telemetry shutdown failed") }
+    }()
+    pool, err := postgres.OpenWithTracer(ctx, settings.Database.URL, runtime.PGXTracer())
     if err != nil { return errors.New("worker database unavailable") }
     defer pool.Close()
     // Tune these explicit defaults for your handlers and database latency.
-    worker, err := background.NewWorker(pool, settings.Jobs)
+    worker, err := background.NewWorkerWithTelemetry(pool, settings.Jobs, runtime)
     if err != nil { return err }
     if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
         return errors.New("worker stopped; inspect sanitized job diagnostics")

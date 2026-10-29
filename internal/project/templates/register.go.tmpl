@@ -64,8 +64,6 @@ func (reg Registrar) Handle(endpoint paths.Endpoint, handler http.HandlerFunc) {
 					"endpoint", endpoint.ID,
 					"status", writer.Status(),
 					"duration", time.Since(started),
-					"actor_id", principal.ActorID,
- {{if .Multi}}"tenant_id",principal.TenantID,{{end}}
 				)
 			}()
 
