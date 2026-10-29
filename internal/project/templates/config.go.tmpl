@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"{{.Module}}/internal/features"
+ corefeatures "github.com/plutoframework/pluto-core/features"
 	jobs "github.com/plutoframework/pluto-jobs"
 )
 
@@ -113,22 +114,10 @@ Logging:  Logging{Level: "info"},
     if cfg.Auth.SessionTTL<=0 || cfg.Auth.IdleTimeout<0 || cfg.Auth.IdleTimeout>cfg.Auth.SessionTTL || len(cfg.Auth.TrustedOrigins)==0 {
         return Config{},fmt.Errorf("invalid AUTH session configuration")
     }
-	for _, definition := range features.Declarations() {
-		key := strings.NewReplacer(".", "_", "-", "_").
-			Replace(strings.ToUpper(definition.Key))
-		if value, ok := lookup(Prefix + "FEATURE_" + key); ok {
-			parsed, err := strconv.ParseBool(value)
-			if err != nil {
-				return Config{}, fmt.Errorf(
-					"%sFEATURE_%s must be boolean",
-					Prefix,
-					key,
-				)
-			}
 
-			cfg.Features[definition.Key] = &parsed
-		}
-	}
+ featureValues, err := corefeatures.ReadEnvironment(features.Declarations(), Prefix+"FEATURE_", lookup)
+ if err != nil { return Config{}, err }
+ for key, value := range featureValues { cfg.Features[key] = &value }
 
  host,port,err:=net.SplitHostPort(cfg.Server.Address)
  if err!=nil { return Config{},fmt.Errorf("%sSERVER_ADDRESS must be host:port",Prefix) }

@@ -54,4 +54,6 @@ github.com/plutoframework/pluto-core/stores/valkey v0.1.0 h1:2dgTKQHK/LE+KQxvYjR
 github.com/plutoframework/pluto-core/stores/valkey v0.1.0/go.mod h1:yT8RBGfMG8+4CuJrxcnlj8+e1e2Sblnb9uL4m8wdCUY=
 github.com/valkey-io/valkey-go v1.0.79 h1:dryzYka/oOkSMOcNmOTjQI8zfu/4bUzDZNnFW9NlqNM=
 github.com/valkey-io/valkey-go v1.0.79/go.mod h1:gvC/r2m3eW4Hbj0YnjogTzNtFdPSM/D+NCqen+5OABM=
+github.com/plutoframework/pluto-core v0.3.0 h1:DUIu2EPh9DjAoreMgwEytxpAifkYI5Itjb1ntI9B80s=
+github.com/plutoframework/pluto-core v0.3.0/go.mod h1:aU+OaFQxGmjf3simyHEJHxOZ/ja2dNnC5xyISaGkgVQ=
 `
