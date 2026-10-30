@@ -8,7 +8,7 @@ import (
 // AuthVersion pins the published root, password and PostgreSQL modules.
 const AuthVersion = "v0.3.0"
 
-const CoreVersion = "v0.3.0"
+const CoreVersion = "v0.4.0"
 
 const ValkeyVersion = "v0.1.0"
 

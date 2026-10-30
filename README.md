@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, **not an imaginary published Pluto framework**. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.10.0`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.11.0`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -651,3 +651,37 @@ Runs have bounded calls and timeouts, not hard billing caps. Cancellation is
 cooperative. The generated skeleton does not provide durable runs, replay storage,
 exactly-once execution or approval workflows. Approval, when added to a write
 tool, is additional to permissions, run restrictions and resource authorization.
+
+
+## Explicit business lifecycles
+
+```sh
+pluto add state purchases --dry-run
+pluto add state purchases
+# Terminal-only guided form:
+pluto add state
+```
+
+Creates `internal/domain/purchases/lifecycle.go` and `lifecycle_test.go`, using
+Core v0.4.0's stdlib-only `state` package. Named states/events, a pure ownership
+guard, unit cases and a fuzz target provide a small editable draft/submitted
+starting point. These are authored files: later commands cannot overwrite them.
+Lifecycle definitions stay in Go; no manifest schema migration or TOML DSL.
+
+Inject `NewLifecycle()` into your operation. The operation verifies identity and
+permission, loads tenant-scoped facts, calls `Next`, then atomically checks the
+expected version while saving state, audit and outbox work. A transition decision
+is neither permission to write nor a durable write. Guard inputs must come from
+verified identity and loaded records, not client-supplied authority fields.
+
+Existing apps must explicitly upgrade Core to v0.4.0 or newer before scaffolding:
+`go get github.com/plutoframework/pluto-core@v0.4.0`. The command checks package
+availability with read-only module resolution; it never silently rewrites pins.
+New applications include the published pin. The command does not add routes,
+change a database schema or wire operations automatically.
+
+```sh
+pluto fmt
+pluto vet
+go test ./internal/domain/purchases -run '^$' -fuzz FuzzLifecycle -fuzztime=5s
+```

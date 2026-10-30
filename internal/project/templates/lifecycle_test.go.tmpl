@@ -1,0 +1,66 @@
+package {{.Group}}_test
+
+import (
+	"errors"
+	"testing"
+
+	lifecycle "{{.Module}}/internal/domain/{{.Group}}"
+
+	"github.com/plutoframework/pluto-core/state"
+)
+
+func TestLifecycle(t *testing.T) {
+	machine, err := lifecycle.NewLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	owner := lifecycle.Facts{ActorID: "owner", OwnerID: "owner"}
+	next, err := machine.Next(lifecycle.Draft, lifecycle.Submit, owner)
+	if err != nil || next != lifecycle.Submitted {
+		t.Fatalf("owner submit: %s %v", next, err)
+	}
+
+	for _, facts := range []lifecycle.Facts{
+		{},
+		{ActorID: "other", OwnerID: "owner"},
+		{ActorID: "owner"},
+	} {
+		next, err := machine.Next(lifecycle.Draft, lifecycle.Submit, facts)
+		if next != lifecycle.Draft || !errors.Is(err, lifecycle.ErrOwnerRequired) ||
+			!errors.Is(err, state.ErrGuard) {
+			t.Fatalf("invalid ownership advanced: %s %v", next, err)
+		}
+	}
+
+	next, err = machine.Next(lifecycle.Submitted, lifecycle.Submit, owner)
+	if next != lifecycle.Submitted || !errors.Is(err, state.ErrTransition) {
+		t.Fatal("terminal state accepted a repeated submission")
+	}
+}
+
+func FuzzLifecycle(f *testing.F) {
+	f.Add("draft", "submit", "owner", "owner")
+	f.Add("submitted", "submit", "other", "owner")
+	f.Fuzz(func(t *testing.T, current, event, actor, owner string) {
+		machine, err := lifecycle.NewLifecycle()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		next, err := machine.Next(
+			lifecycle.Status(current),
+			lifecycle.Event(event),
+			lifecycle.Facts{ActorID: actor, OwnerID: owner},
+		)
+		allowed := current == "draft" && event == "submit" &&
+			actor != "" && actor == owner
+		if allowed {
+			if err != nil || next != lifecycle.Submitted {
+				t.Fatal("valid transition rejected")
+			}
+		} else if err == nil || string(next) != current {
+			t.Fatal("invalid transition changed state")
+		}
+	})
+}

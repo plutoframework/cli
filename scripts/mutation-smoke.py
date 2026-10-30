@@ -9,6 +9,13 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 mutations = [
     (
+        "lifecycle ownership guard",
+        "internal/project/templates/lifecycle.go.tmpl",
+        "facts.ActorID != facts.OwnerID",
+        "false",
+        "TestStateScaffoldConsumers/single",
+    ),
+    (
         "registry source confinement",
         "internal/frontend/registry.go",
         "if !project.RegistryPath(file.Source) {",

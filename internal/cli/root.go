@@ -144,7 +144,12 @@ func New(options Options) *cobra.Command {
 			decorateWizard(command, options, "add", 0, true)
 
 			for _, child := range command.Commands() {
-				decorateWizard(child, options, child.Name(), 2, true)
+				maxArgs := 2
+				if child.Name() == "state" {
+					maxArgs = 1
+				}
+
+				decorateWizard(child, options, child.Name(), maxArgs, true)
 			}
 		case "fmt", "vet", "openapi":
 			decorateWizard(command, options, command.Name(), 0, false)

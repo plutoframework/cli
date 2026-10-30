@@ -1,0 +1,54 @@
+// Package {{.Group}} owns application business rules, independent of HTTP/storage.
+package {{.Group}}
+
+import (
+	"errors"
+
+	"github.com/plutoframework/pluto-core/state"
+)
+
+type Status string
+
+type Event string
+
+const (
+	Draft Status = "draft"
+	Submitted Status = "submitted"
+	Submit Event = "submit"
+)
+
+var ErrOwnerRequired = errors.New("only the owner can submit")
+
+// Facts must come from verified server identity and a tenant-scoped entity.
+// Do not bind these directly from an HTTP body or AI tool arguments.
+type Facts struct {
+	ActorID string
+	OwnerID string
+}
+
+// NewLifecycle compiles rules once for injection into an application operation.
+// Extend these authored rules for your domain. Operations must still authorize,
+// load tenant-scoped data, and atomically save the expected version + audit/outbox.
+// Next only decides a transition; it does not perform or authorize a write.
+func NewLifecycle() (*state.Machine[Status, Event, Facts], error) {
+	return state.New(state.Definition[Status, Event, Facts]{
+		States: []Status{Draft, Submitted},
+		Transitions: []state.Transition[Status, Event, Facts]{
+			{
+				From: Draft,
+				On: Submit,
+				To: Submitted,
+				Guard: canSubmit,
+			},
+		},
+	})
+}
+
+func canSubmit(facts Facts) error {
+	if facts.ActorID == "" || facts.OwnerID == "" ||
+		facts.ActorID != facts.OwnerID {
+		return ErrOwnerRequired
+	}
+
+	return nil
+}
