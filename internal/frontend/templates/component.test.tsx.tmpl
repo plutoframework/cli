@@ -6,7 +6,7 @@ import { <%.Symbol%> } from "./<%.Symbol%>";
 test("submits input through the feature callback and clears successful input", async () => {
   const onSubmit = vi.fn().mockResolvedValue(undefined);
   const user = userEvent.setup();
-  render(<<%.Symbol%> onSubmit={onSubmit} />);
+  render(<<%.Symbol%> onSubmit={onSubmit} scope="test" />);
   await user.type(screen.getByLabelText("Title"), "  Field equipment  ");
   await user.click(screen.getByRole("button", { name: "Continue" }));
   await waitFor(() =>
@@ -17,16 +17,70 @@ test("submits input through the feature callback and clears successful input", a
   expect(screen.getByLabelText("Title")).toHaveValue("");
 });
 
-test("failed callbacks preserve input so the user can retry", async () => {
+test("uncertain callbacks preserve input and block blind retry", async () => {
   const onSubmit = vi.fn().mockRejectedValue(new Error("Synthetic failure"));
   const user = userEvent.setup();
-  render(<<%.Symbol%> onSubmit={onSubmit} />);
+  render(<<%.Symbol%> onSubmit={onSubmit} scope="test" />);
   await user.type(screen.getByLabelText("Title"), "Field equipment");
   await user.click(screen.getByRole("button", { name: "Continue" }));
   await waitFor(() =>
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByRole("alert")).toHaveTextContent(
       "could not be completed",
     ),
   );
   expect(screen.getByLabelText("Title")).toHaveValue("Field equipment");
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+});
+
+
+test("acknowledges immediately and blocks duplicate submits while the response is held", async () => {
+  let finish!: () => void;
+  const onSubmit = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const user = userEvent.setup();
+  render(<<%.Symbol%> onSubmit={onSubmit} scope="test" />);
+  await user.type(screen.getByLabelText("Title"), "Field equipment");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.getByRole("button", { name: "Working…" })).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent("Working…");
+  expect(screen.getByLabelText("Title")).toHaveValue("Field equipment");
+  await user.click(screen.getByRole("button", { name: "Working…" }));
+  expect(onSubmit).toHaveBeenCalledOnce();
+  finish();
+  await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(""));
+});
+
+
+test("scope changes discard old input and ignore late completions", async () => {
+  let finish!: () => void;
+  const onSubmit = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const user = userEvent.setup();
+  const view = render(<<%.Symbol%> onSubmit={onSubmit} scope="old" />);
+  await user.type(screen.getByLabelText("Title"), "Private old tenant input");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  view.rerender(<<%.Symbol%> onSubmit={onSubmit} scope="new" />);
+  await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(""));
+  finish();
+  expect(screen.queryByText("Your action completed.")).not.toBeInTheDocument();
+});
+
+test("definite rejection preserves input and allows correction", async () => {
+  const onSubmit = vi.fn().mockRejectedValue(new Error("Rejected"));
+  const user = userEvent.setup();
+  render(<<%.Symbol%> onSubmit={onSubmit} scope="test" classifyError={() => "rejected"} />);
+  await user.type(screen.getByLabelText("Title"), "Field equipment");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("rejected"));
+  expect(screen.getByLabelText("Title")).toHaveValue("Field equipment");
+  expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+});
+
+
+test("connected submission requires an explicit scope", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  const user = userEvent.setup();
+  render(<<%.Symbol%> onSubmit={onSubmit} />);
+  await user.type(screen.getByLabelText("Title"), "Field equipment");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(screen.getByRole("status")).toHaveTextContent("scope");
 });

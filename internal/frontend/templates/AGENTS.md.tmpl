@@ -27,3 +27,11 @@ regression tests run with npm test. Split files before hitting the 1,000-line li
 Across languages, separate standalone comment blocks from the preceding line with
 one blank line, except at line 1. Keep comment groups and next-line directives
 attached to their following code; preserve trailing inline comments.
+
+Every asynchronous action must acknowledge immediately with accessible pending
+feedback and a clear outcome. Use the published action helpers; keep transport
+in feature mutations. Choose optimism explicitly for predictable operations,
+project over current scoped data and reconcile with server truth. Preserve input
+on errors, block conflicting writes, fence scope changes, and treat timeout as
+uncertain rather than rejection. Keep stable backend idempotency keys separate.
+Test held responses, rejection, uncertain outcomes and concurrent/scope changes.

@@ -105,3 +105,8 @@ and editable. Generated API/catalog/theme files retain their generator format.
 Standalone comments have a blank line above them (except at line 1), keeping them
 attached to the code below. Comment groups and next-line directives stay together;
 inline trailing comments keep their position. JS/TS lint and formatting enforce it.
+
+Built-in forms use published Pluto action primitives for immediate pending
+feedback. Pass actor/session/tenant scope when connecting them to a feature.
+Optimistic UI is explicit; unknown write outcomes require authoritative
+reconciliation before retry. See https://github.com/plutoframework/pluto-frontend#responsive-actions.

@@ -712,3 +712,12 @@ code below. JavaScript and TypeScript lint/format checks enforce this convention
 including the start of a function or branch. Inline trailing comments are kept
 in place, and next-line compiler/linter directives retain their target. The
 cross-language convention is also recorded in AGENTS.md for future changes.
+
+### Responsive frontend actions
+
+Generated forms use published Pluto action helpers for immediate accessible
+pending feedback, duplicate protection, scope-owned cleanup and preserved input
+on failure. Connected callbacks require an explicit actor/session/tenant scope.
+Optimistic projection is an explicit feature-layer choice; uncertain write
+outcomes require reconciliation before retry. Existing authored forms are not
+rewritten by a CLI upgrade. See [frontend guidance](docs/FRONTEND.md#responsive-actions).

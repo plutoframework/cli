@@ -6,11 +6,12 @@ const NodeVersion = "24.22.1"
 
 func dependencies(m project.Manifest) map[string]map[string]string {
 	runtime := map[string]string{
-		"react":                  "19.3.1",
-		"react-dom":              "19.3.1",
-		"@tanstack/react-query":  "5.105.0",
-		"@tanstack/react-router": "1.170.46",
-		"openapi-fetch":          "0.17.0",
+		"react":                    "19.3.1",
+		"@plutoframework/frontend": "0.2.1",
+		"react-dom":                "19.3.1",
+		"@tanstack/react-query":    "5.105.0",
+		"@tanstack/react-router":   "1.170.46",
+		"openapi-fetch":            "0.17.0",
 	}
 	dev := map[string]string{
 		"smol-toml":                   "1.9.1",
