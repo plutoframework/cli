@@ -43,24 +43,73 @@ The response is `{"data":"ok"}`. Change `ORBIT_SERVER_ADDRESS` if the port is bu
 Docker, mise and fnox presets are included; use `--no-docker --no-mise --no-fnox`
 to omit them. Hooks are opt-in. Run `pluto` in a terminal for the wizard.
 
-### 3. Add your feature
+### 3. Make a protected business endpoint return data
+
+The [complete endpoint walkthrough](docs/FIRST-ENDPOINT.md) generates
+`GET /api/greeting`, implements its operation and wires published authentication,
+explicit membership and RBAC into the real generated router. Run its checked
+script from a CLI checkout:
 
 ```sh
-pluto --no-input add endpoint reports List \
-  --method GET --path /api/reports \
-  --name 'List reports' --description 'List visible reports.' \
-  --permission reports:read --feature reports-list
-pluto fmt
-pluto vet
+mise exec golangci-lint@2.15.0 -- python3 scripts/first-endpoint.py
 ```
 
-Implement the generated operation, trusted membership resolver and tests before
-calling the protected route. Business scaffolds intentionally return not
-implemented; a permission declaration grants nobody access. `fmt`/`vet` require
-the pinned tools; the generated mise setup provides them.
+It generates a disposable app with module `example.com/pluto-first-endpoint` and
+uses this complete authored `internal/operations/greeting/read.go`:
 
-For React, start with `pluto frontend init --ui heroui-v3`; connected forms use
-published action primitives and require explicit actor/session/tenant scope.
+<!-- example-source: docs/examples/first-endpoint/operation.go.txt -->
+
+```go
+package greeting
+
+import (
+	"context"
+
+	"example.com/pluto-first-endpoint/internal/access"
+	"example.com/pluto-first-endpoint/internal/domain"
+	"example.com/pluto-first-endpoint/internal/models/greeting"
+
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+type Read struct{ policy *rbac.Policy }
+
+func NewRead(policy *rbac.Policy) *Read { return &Read{policy: policy} }
+
+func (operation *Read) Execute(
+	_ context.Context,
+	principal domain.Principal,
+	_ greeting.ReadRequest,
+) (greeting.ReadData, error) {
+	if !principal.Verified() {
+		return greeting.ReadData{}, domain.ErrUnauthenticated
+	}
+
+	if !principal.Can(operation.policy, access.GreetingReadPermission) {
+		return greeting.ReadData{}, domain.ErrForbidden
+	}
+
+	return greeting.ReadData{Value: "Hello, " + principal.ActorID}, nil
+}
+```
+
+<!-- /example-source -->
+
+The linked [harness](docs/examples/first-endpoint/main.go.txt) supplies trusted
+synthetic sessions, grants only `reader` the capability and explicitly enables
+the feature. It exposes no session-issuance endpoint and leaves the generated
+default resolver denying access. It calls the real API and verifies:
+
+```text
+anonymous: HTTP 401
+authenticated without grant: HTTP 403
+authorized: HTTP 200
+Hello, reader
+```
+
+The script runs `pluto fmt`, `pluto vet`, operation tests and OpenAPI freshness,
+then cleans up. Use real credential and membership integrations for an actual
+application. For React, start with `pluto frontend init --ui heroui-v3`.
 
 ## See Pluto in motion
 

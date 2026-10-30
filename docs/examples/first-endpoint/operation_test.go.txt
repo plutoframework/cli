@@ -1,0 +1,59 @@
+package greeting
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"example.com/pluto-first-endpoint/internal/access"
+	"example.com/pluto-first-endpoint/internal/domain"
+	models "example.com/pluto-first-endpoint/internal/models/greeting"
+
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+func TestReadComplete(t *testing.T) {
+	policy, err := rbac.New(rbac.Definition{
+		Permissions: access.Permissions(),
+		Roles: []rbac.Role{
+			{
+				ID:          "reader",
+				Name:        "Reader",
+				Description: "Trusted tutorial assignment.",
+				Permissions: []rbac.PermissionID{access.GreetingReadPermission},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	operation := NewRead(policy)
+
+	result, err := operation.Execute(
+		context.Background(),
+		domain.Principal{ActorID: "reader", Roles: []rbac.RoleID{"reader"}},
+		models.ReadRequest{},
+	)
+	if err != nil || result.Value != "Hello, reader" {
+		t.Fatalf("result: %#v %v", result, err)
+	}
+
+	for _, check := range []struct {
+		principal domain.Principal
+		want      error
+	}{
+		{domain.Principal{}, domain.ErrUnauthenticated},
+		{domain.Principal{ActorID: "visitor"}, domain.ErrForbidden},
+		{domain.Principal{ActorID: "reader", Roles: []rbac.RoleID{"reader", "unknown"}}, domain.ErrForbidden},
+	} {
+		_, err := operation.Execute(
+			context.Background(),
+			check.principal,
+			models.ReadRequest{},
+		)
+		if !errors.Is(err, check.want) {
+			t.Fatalf("authorization: %v", err)
+		}
+	}
+}

@@ -1,0 +1,165 @@
+// An executable tutorial harness. No public credential-issuance endpoint exists.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+
+	"example.com/pluto-first-endpoint/internal/access"
+	"example.com/pluto-first-endpoint/internal/app"
+	"example.com/pluto-first-endpoint/internal/config"
+	"example.com/pluto-first-endpoint/internal/domain"
+	"example.com/pluto-first-endpoint/internal/transport"
+
+	"github.com/plutoframework/pluto-auth/stores/memory"
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+type memberships struct{}
+
+func (memberships) Resolve(
+	_ context.Context,
+	subject string,
+) (domain.Principal, error) {
+	switch subject {
+	case "reader":
+		return domain.Principal{
+			ActorID: subject,
+			Roles:   []rbac.RoleID{"reader"},
+		}, nil
+	case "visitor":
+		return domain.Principal{ActorID: subject}, nil
+	default:
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+func run() error {
+	cfg, err := config.LoadFrom(
+		func(string) (string, bool) { return "", false },
+	)
+	if err != nil {
+		return err
+	}
+
+	enabled := true
+	cfg.Features = map[string]*bool{"greeting-read": &enabled}
+
+	policy, err := rbac.New(rbac.Definition{
+		Permissions: access.Permissions(),
+		Roles: []rbac.Role{
+			{
+				ID:          "reader",
+				Name:        "Reader",
+				Description: "Trusted tutorial assignment.",
+				Permissions: []rbac.PermissionID{access.GreetingReadPermission},
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	store, err := memory.New(20)
+	if err != nil {
+		return err
+	}
+
+	authentication, err := transport.NewAuthentication(
+		cfg.Auth,
+		store,
+		memberships{},
+	)
+	if err != nil {
+		return err
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	server := httptest.NewServer(app.New(cfg, authentication, logger, policy))
+	defer server.Close()
+
+	// Synthetic, host-verified accounts. Never expose Manager.Start as login.
+	reader, err := authentication.Manager.Start(context.Background(), "reader")
+	if err != nil {
+		return err
+	}
+
+	visitor, err := authentication.Manager.Start(
+		context.Background(),
+		"visitor",
+	)
+	if err != nil {
+		return err
+	}
+
+	for _, check := range []struct {
+		name, token string
+		status      int
+	}{
+		{"anonymous", "", 401},
+		{"authenticated without grant", visitor.Token, 403},
+		{"authorized", reader.Token, 200},
+	} {
+		req, err := http.NewRequest(
+			http.MethodGet,
+			server.URL+"/api/greeting",
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+
+		if check.token != "" {
+			req.Header.Set("Authorization", "Bearer "+check.token)
+		}
+
+		response, err := server.Client().Do(req)
+		if err != nil {
+			return err
+		}
+
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+
+		if err != nil {
+			return err
+		}
+
+		if response.StatusCode != check.status {
+			return fmt.Errorf("%s: got %d", check.name, response.StatusCode)
+		}
+
+		fmt.Printf("%s: HTTP %d\n", check.name, response.StatusCode)
+
+		if response.StatusCode == 200 {
+			var payload struct {
+				Data struct {
+					Value string `json:"value"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(body, &payload); err != nil {
+				return err
+			}
+
+			if payload.Data.Value != "Hello, reader" {
+				return fmt.Errorf("unexpected greeting")
+			}
+
+			fmt.Println(payload.Data.Value)
+		}
+	}
+
+	return nil
+}

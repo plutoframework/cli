@@ -1,0 +1,31 @@
+package greeting
+
+import (
+	"context"
+
+	"example.com/pluto-first-endpoint/internal/access"
+	"example.com/pluto-first-endpoint/internal/domain"
+	"example.com/pluto-first-endpoint/internal/models/greeting"
+
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+type Read struct{ policy *rbac.Policy }
+
+func NewRead(policy *rbac.Policy) *Read { return &Read{policy: policy} }
+
+func (operation *Read) Execute(
+	_ context.Context,
+	principal domain.Principal,
+	_ greeting.ReadRequest,
+) (greeting.ReadData, error) {
+	if !principal.Verified() {
+		return greeting.ReadData{}, domain.ErrUnauthenticated
+	}
+
+	if !principal.Can(operation.policy, access.GreetingReadPermission) {
+		return greeting.ReadData{}, domain.ErrForbidden
+	}
+
+	return greeting.ReadData{Value: "Hello, " + principal.ActorID}, nil
+}
