@@ -1,14 +1,44 @@
 # Feature flags
 
-Feature flags were already wired into endpoint scaffolding. The CLI saves each
-endpoint's feature key and client visibility in pluto.toml, generates declarations,
-loads prefixed environment overrides, gates the route and exposes explicitly
-client-visible values through the authenticated /api/features contract.
+Use flags to merge staged application behavior while keeping it unavailable by
+default. Keep permission and resource checks in the operation: a flag is never
+authorization.
+
+## Scaffold a gated endpoint
+
+From an initialized Pluto project:
 
 ```sh
-pluto add endpoint reports Export --method GET --path /api/reports/export \
-  --permission reports.export --feature reports-export --feature-client-visible
+pluto --no-input add endpoint reports Export \
+  --method GET \
+  --path /api/reports/export \
+  --name 'Export reports' \
+  --description 'Export reports visible to the verified caller.' \
+  --permission reports:export \
+  --feature reports-export \
+  --feature-client-visible
 ```
+
+This writes route metadata, authored handler/model/operation files, a default-off
+flag declaration and OpenAPI. Implement the operation and tests; the CLI does
+not invent report data or grant anyone permission.
+
+If the project prefix is `ORBIT_`, enable the declared flag at startup with:
+
+```sh
+ORBIT_FEATURE_REPORTS_EXPORT=true go run ./cmd/api
+```
+
+The default-off route is unavailable until enabled. The authenticated
+`/api/features` endpoint exposes only client-visible declarations so the UI can
+hide unavailable controls; route and operation checks remain authoritative.
+
+## Evaluate defaults and overrides directly
+
+The complete Core program below demonstrates application overrides followed by
+environment overrides, explicit false, and internal versus client-visible flags.
+It uses `pluto-core v0.4.0`; the complete source and tests live in
+[Core's flag example](https://github.com/plutoframework/pluto-core/tree/main/examples/featureflags).
 
 Generated apps now import github.com/plutoframework/pluto-core/features. Core owns
 immutable local evaluation, default/override precedence, environment normalization
