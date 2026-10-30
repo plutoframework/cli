@@ -8,7 +8,7 @@ import (
 	"github.com/plutoframework/cli/internal/cli"
 )
 
-var version = "0.12.0"
+var version = "0.12.1"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

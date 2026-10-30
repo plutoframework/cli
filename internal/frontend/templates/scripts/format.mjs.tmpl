@@ -29,7 +29,7 @@ export async function formatSource(source, file, linter = eslint) {
       filepath: file,
     });
     let next = printed;
-    if (/\.[cm]?tsx?$/.test(file)) {
+    if (/\.[cm]?[jt]sx?$/.test(file)) {
       const [result] = await linter.lintText(printed, { filePath: file });
       if (result.fatalErrorCount) throw new Error(`Cannot parse ${file}`);
       next = await prettier.format(result.output ?? printed, {

@@ -21,3 +21,10 @@ commands deterministic; auto-prompt only on terminal input AND output, outside C
 Never open hidden /dev/tty prompts or write before wizard confirmation. Reuse
 project validators and saved capabilities. Pass argument slices, never a shell.
 Keep Bubble Tea and terminal dependencies confined to the CLI module.
+
+
+Across languages, put one blank line before a standalone comment block unless
+it starts on line 1. Keep consecutive comment lines together and keep the comment
+attached to the code below it. Preserve trailing inline comments and any placement
+required by compiler/tool directives; never separate a next-line directive from
+its target. This preference also applies at the beginning of a code block.

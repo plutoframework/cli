@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, **not an imaginary published Pluto framework**. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.12.0`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.12.1`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -704,3 +704,11 @@ To adopt the policy, review/copy the formatter, regression test, readability
 policy and ESLint configuration from a fresh scaffold, install the pinned dev
 plugin, and update the fmt/lint/test scripts before running `npm run fmt` and
 `npm run check`. No manifest or runtime API migration is required.
+
+
+Standalone comment blocks have one blank line above them, except at line 1.
+Consecutive comment lines stay together, and the comment remains attached to the
+code below. JavaScript and TypeScript lint/format checks enforce this convention,
+including the start of a function or branch. Inline trailing comments are kept
+in place, and next-line compiler/linter directives retain their target. The
+cross-language convention is also recorded in AGENTS.md for future changes.

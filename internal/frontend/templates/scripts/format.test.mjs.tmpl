@@ -53,3 +53,36 @@ test("nested ternaries produce actionable diagnostics rather than silent rewrite
     result.messages.some((message) => message.ruleId === "no-nested-ternary"),
   );
 });
+
+test("comment blocks have a blank line above and stay attached below", async () => {
+  const source =
+    "// File header\n// Header continues\nexport function value(){\n// Explain the next block.\nconst count=1;\n/* Explain the return. */\nreturn count;\n}";
+  const expanded = await formatSource(source, file);
+  assert(expanded.startsWith("// File header\n// Header continues\n"));
+  assert.match(
+    expanded,
+    /\{\n\n\s*\/\/ Explain the next block\.\n\s*const count/,
+  );
+  assert.match(
+    expanded,
+    /count = 1;\n\n\s*\/\* Explain the return\. \*\/\n\s*return/,
+  );
+  assert.equal(await formatSource(expanded, file), expanded);
+});
+
+test("comment spacing preserves inline comments and next-line directives", async () => {
+  const source =
+    'export const first=1; // describes first\n// @ts-expect-error deliberate fixture\nexport const second:number="text";';
+  const expanded = await formatSource(source, file);
+  assert.match(expanded, /first = 1; \/\/ describes first/);
+  assert.match(
+    expanded,
+    /\/\/ @ts-expect-error deliberate fixture\nexport const second/,
+  );
+});
+
+
+test("JavaScript comments follow the same spacing convention", async () => {
+  const expanded = await formatSource('export function run(){\n// Explain this work.\nreturn 1;\n}', path.join(root, 'scripts/comment-fixture.mjs'));
+  assert.match(expanded, /\{\n\n\s*\/\/ Explain this work\.\n\s*return/);
+});

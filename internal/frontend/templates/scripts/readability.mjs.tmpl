@@ -6,6 +6,22 @@ export const readability = {
   plugins: { "@stylistic": stylistic },
   rules: {
     curly: ["error", "all"],
+    "@stylistic/lines-around-comment": [
+      "error",
+      {
+        beforeLineComment: true,
+        beforeBlockComment: true,
+        afterLineComment: false,
+        afterBlockComment: false,
+        allowBlockStart: false,
+        allowClassStart: false,
+        allowObjectStart: false,
+        allowArrayStart: false,
+        allowInterfaceStart: false,
+        allowTypeStart: false,
+        applyDefaultIgnorePatterns: false,
+      },
+    ],
     "no-nested-ternary": "error",
     "no-lonely-if": "error",
     "@stylistic/indent": [

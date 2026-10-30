@@ -22,3 +22,8 @@ The visible scripts/readability.mjs policy requires expanded control blocks,
 braces, separated object/type members and logical blank lines. Avoid nested
 ternaries. npm run lint checks canonical formatting without writes; formatter
 regression tests run with npm test. Split files before hitting the 1,000-line limit.
+
+
+Across languages, separate standalone comment blocks from the preceding line with
+one blank line, except at line 1. Keep comment groups and next-line directives
+attached to their following code; preserve trailing inline comments.
