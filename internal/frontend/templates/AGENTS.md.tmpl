@@ -15,3 +15,10 @@ Theme tokens and mode live in pluto.toml. Never edit src/generated/theme*.css or
 public/pluto-theme.js; run npm run theme:generate. Custom selectors belong in the
 configured application-owned overrides CSS. Preserve the import precedence and
 external prepaint bootstrap. Never bundle the TOML document into browser code.
+
+
+Use npm run fmt, not plain Prettier, as the final TS/TSX formatting command.
+The visible scripts/readability.mjs policy requires expanded control blocks,
+braces, separated object/type members and logical blank lines. Avoid nested
+ternaries. npm run lint checks canonical formatting without writes; formatter
+regression tests run with npm test. Split files before hitting the 1,000-line limit.

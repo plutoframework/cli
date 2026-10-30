@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, **not an imaginary published Pluto framework**. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.11.0`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.12.0`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -685,3 +685,22 @@ pluto fmt
 pluto vet
 go test ./internal/domain/purchases -run '^$' -fuzz FuzzLifecycle -fuzztime=5s
 ```
+
+
+## Expanded frontend readability
+
+New React scaffolds include pinned ESLint Stylistic 5.10.0 and a visible
+`scripts/readability.mjs` policy. `npm run fmt` combines 80-column Prettier output
+with ESLint structural fixes; `npm run lint` verifies the same canonical result.
+The policy requires braces, expanded blocks, logical blank lines, one statement
+per line and separate object/type member lines. Nested ternaries are errors;
+rewrite them as named values or explicit branches. Formatter regression tests
+run in the standard test command. Generated API/catalog/theme artifacts keep
+their machine-owned formatting and are still type-checked.
+
+These are project defaults, editable in `.prettierrc.json` and
+`scripts/readability.mjs`. Existing frontends are not overwritten by a CLI upgrade.
+To adopt the policy, review/copy the formatter, regression test, readability
+policy and ESLint configuration from a fresh scaffold, install the pinned dev
+plugin, and update the fmt/lint/test scripts before running `npm run fmt` and
+`npm run check`. No manifest or runtime API migration is required.

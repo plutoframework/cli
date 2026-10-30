@@ -90,3 +90,13 @@ Vite regenerates on start/build and TOML changes; `npm run theme:check` detects
 drift without writing, and participates in npm check and pluto vet. Authored
 CSS loads last and is never regenerated. A new override path must already exist.
 Only the public mode goes into the bootstrap; never place runtime secrets here.
+
+
+## Readable source
+
+`npm run fmt` combines 80-column Prettier wrapping with the structural ESLint
+rules in `scripts/readability.mjs`. `npm run lint` checks the same canonical form
+without writing. Control flow requires braces, blocks and multiple object/type
+members expand, and logical phases have blank lines. Rewrite nested ternaries
+with named values or explicit branches. Both config files are application-owned
+and editable. Generated API/catalog/theme files retain their generator format.
