@@ -67,7 +67,7 @@ func TestLocalPublishedLifecycle(t *testing.T) {
     localPool,err:=pgxpool.NewWithConfig(ctx,pc)
     if err!=nil {t.Fatal(err)}
     defer localPool.Close()
-    for _,name:=range []string{"001_initial.sql","002_auth_sessions.sql","003_idempotency.sql","004_local_credentials.sql"} {
+    for _,name:=range []string{"001_initial.sql","002_auth_sessions.sql","003_idempotency.sql","004_local_credentials.sql","006_authentication.sql"} {
         data,err:=os.ReadFile(filepath.Join("../../db/migrations",name))
         if err!=nil {t.Fatal(err)}
         if _,err:=localPool.Exec(ctx,string(data));err!=nil {t.Fatal(err)}
@@ -136,6 +136,8 @@ func TestLocalPublishedLifecycle(t *testing.T) {
     request("POST","/auth/verify","",origin,tokenInput(verification),200)
     request("POST","/auth/verify","",origin,tokenInput(verification),400)
     login:=request("POST","/auth/signin","",origin,input,200)
+    var evidence bool
+    if err:=localPool.QueryRow(ctx,"SELECT EXISTS (SELECT 1 FROM pluto_auth_local_sessions WHERE primary_method = 'password')").Scan(&evidence); err!=nil || !evidence {t.Fatal("missing published authentication evidence",err)}
     cookie:=login.Result().Cookies()[0]
     if !cookie.Secure || !cookie.HttpOnly || strings.Contains(login.Body.String(),cookie.Value){t.Fatal("cookie contract")}
     another:=request("POST","/auth/signin","",origin,input,200).Result().Cookies()[0].Value

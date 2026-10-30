@@ -25,7 +25,7 @@ shared AttemptLimiter, trusted-client/concurrency Ingress and optional local
 PasswordPolicy. There is no production no-op sender, demo password, admin
 bootstrap, memory credential fallback or placeholder success.
 
-Apply migrations 001 through 004 explicitly. `postgres.NewLocal` is the single
+Apply migrations 001 through 006 explicitly. `postgres.NewLocal` is the single
 account/session backend and `transport.NewLocalAuthentication` builds the published
 password.Service/passwordhttp adapter around it. Always use service.Sessions()
 for local authentication, revocation and rotation; never issue local accounts

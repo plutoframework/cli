@@ -36,6 +36,7 @@ repositories. Add typed fields to app.Dependencies and construct/inject them in
 app.New. Generated group registries accept narrow Operations interfaces and never
 choose concrete implementations; additions preserve authored constructor wiring.
 
+Apply migration 006_authentication.sql for account-backed evidence.
 Local-password apps use password.Service with postgres.NewLocal for both accounts
 and sessions. Never use direct Manager.Start/session-only issuance for local
 accounts. Keep delivery, shared account limits and trusted client/concurrency

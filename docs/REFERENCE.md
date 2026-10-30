@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, alongside the published Pluto runtime libraries. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.13.0`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.14.0`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -716,3 +716,15 @@ on failure. Connected callbacks require an explicit actor/session/tenant scope.
 Optimistic projection is an explicit feature-layer choice; uncertain write
 outcomes require reconciliation before retry. Existing authored forms are not
 rewritten by a CLI upgrade. See [frontend guidance](../docs/FRONTEND.md#responsive-actions).
+
+## Account authentication upgrade
+
+This revision uses Pluto Auth v0.4.0. Account-backed deployments explicitly apply
+`db/migrations/006_authentication.sql` after the existing migrations, before
+running the upgraded application. Constructors perform no DDL. Existing sessions
+keep unknown authentication evidence until the next real sign-in; rotation does
+not make them fresh. See [the authentication guide](https://plutoframework.github.io/pluto-site/docs/backend/authentication/).
+
+The library foundation adds account policy, method evidence and freshness guards.
+Native social sign-in, TOTP enrollment and their frontend flows remain next work;
+no factor policy is enabled automatically by this upgrade.

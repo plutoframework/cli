@@ -21,7 +21,7 @@ A clear path from an empty folder to an explicit Go API.
 Requires Go **1.25.5+** and Git:
 
 ```sh
-go install github.com/plutoframework/cli/cmd/pluto@v0.13.0
+go install github.com/plutoframework/cli/cmd/pluto@v0.14.0
 pluto version
 ```
 
@@ -118,6 +118,18 @@ application. For React, start with `pluto frontend init --ui heroui-v3`.
 Recorded from the real CLI. Compilation waits are shortened. The demo uses the
 built-in `/healthz` route; business operations still need implementation and auth.
 [Text transcript and static image](https://github.com/plutoframework/pluto/blob/main/docs/DEMO.md).
+
+## Account authentication upgrade
+
+This revision uses Pluto Auth v0.4.0. Account-backed deployments explicitly apply
+`db/migrations/006_authentication.sql` after the existing migrations, before
+running the upgraded application. Constructors perform no DDL. Existing sessions
+keep unknown authentication evidence until the next real sign-in; rotation does
+not make them fresh. See [the authentication guide](https://plutoframework.github.io/pluto-site/docs/backend/authentication/).
+
+The library foundation adds account policy, method evidence and freshness guards.
+Native social sign-in, TOTP enrollment and their frontend flows remain next work;
+no factor policy is enabled automatically by this upgrade.
 
 ## Read further
 

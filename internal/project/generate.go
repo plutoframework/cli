@@ -382,6 +382,7 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		layout["internal/paths/credentials.go"] = "credentials_paths.go"
 		layout["cmd/api/credentials.go"] = "credentials_main.go"
 		layout["db/migrations/004_local_credentials.sql"] = "credentials_schema.sql"
+		layout["db/migrations/006_authentication.sql"] = "authentication_schema.sql"
 	}
 
 	for path, name := range layout {
