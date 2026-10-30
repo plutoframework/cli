@@ -613,14 +613,14 @@ API caches and pgx queries are instrumented too. Existing authored apps are pres
 
 ```sh
 pluto add agent purchases Review --permission purchases:read --dry-run
-pluto add agent purchases Review --permission purchases:read --provider scripted
+pluto add agent purchases Review --permission purchases:read --provider openai
 go mod tidy
 pluto fmt
 pluto vet
 ```
 
-The wizard offers the same command and provider choice. `--provider scripted`
-is the default; `--provider openai` emits a startup constructor that validates
+The example explicitly selects the real provider. The wizard offers the same
+choice. `--provider scripted` is the CLI default for deterministic tests; `--provider openai` emits a startup constructor that validates
 the namespaced runtime model/key environment without enabling a route.
 Provider selection is persisted in pluto.toml; credentials never are. Agent metadata uses schema 8; schema 7
 projects without agents remain readable. Adding an agent explicitly upgrades the
