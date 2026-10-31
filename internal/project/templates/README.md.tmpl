@@ -25,7 +25,7 @@ shared AttemptLimiter, trusted-client/concurrency Ingress and optional local
 PasswordPolicy. There is no production no-op sender, demo password, admin
 bootstrap, memory credential fallback or placeholder success.
 
-Apply migrations 001 through 006 explicitly. `postgres.NewLocal` is the single
+Apply migrations 001 through 007 explicitly. `postgres.NewLocal` is the single
 account/session backend and `transport.NewLocalAuthentication` builds the published
 password.Service/passwordhttp adapter around it. Always use service.Sessions()
 for local authentication, revocation and rotation; never issue local accounts
@@ -422,3 +422,35 @@ set capabilities.cache to none, memory or valkey, include the adapter/service on
 for valkey, then change schema_version to 7. No cache SQL migration is required.
 Preserve authored handlers, operations and composition; old schemas fail before
 writes. Complete earlier manual migrations first.
+
+{{if .OIDC}}
+## OIDC sign-in
+
+OIDC support was saved in `capabilities.oidc`. Runtime sign-in remains disabled
+until `{{.Prefix}}OIDC_ENABLED=true`. Configure the trusted issuer, client ID,
+client secret, exact HTTPS callback and host-managed base64 32-byte encryption key
+from `.env.example`. Never store secrets in TOML or commit them.
+
+Apply migration 007 after the earlier account migrations. Configure real local
+integrations/ingress in `cmd/api/credentials.go`; missing integrations fail startup.
+Public enrollment is separately opt-in with `OIDC_ALLOW_ENROLLMENT=true`; it grants
+no business role or tenant membership. Existing accounts never merge by email.
+
+Routes: trusted-Origin POST `/auth/oidc/begin`, browser-bound GET
+`/auth/oidc/callback`, and public provider-ID GET `/auth/providers`. Auth responses
+bypass business idempotency. Callback success returns to the fixed `/` path.
+Use HTTPS at the browser (including local development), preserving Secure and
+HttpOnly cookies and exact Origin. GitHub OAuth, linking and native MFA are separate
+work; required-factor accounts fail closed.
+
+When adding a frontend, use `pluto frontend init --auth --ui heroui-v3` (or native /
+shadcn). Provider UI is shown only when the backend advertises a configured client.
+Existing authored frontends are never silently rewritten.
+{{end}}
+
+{{if .OIDC}}
+OIDC browser starts use a same-origin API POST with `Accept: application/json`,
+then navigate to the server-built `data.authorization_url`. This preserves
+trusted Origin under the default no-referrer policy. A native form may send
+`Origin: null` and is intentionally denied; no Origin guard is weakened.
+{{end}}

@@ -1,3 +1,5 @@
+<%if .OIDC%>import { useProviderSignIn } from "../mutations";<%end%>
+<%if .OIDC%>import { useProviders } from "../queries";<%end%>
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Button } from "@heroui/react";
@@ -7,7 +9,11 @@ import { useSession } from "../provider";
 import { AuthForm, modeLabels } from "../forms/AuthForm";
 import type { AuthMode } from "../types";
 
+<%if .OIDC%>import { ProviderSignIn } from "../components/ProviderSignIn";<%end%>
+
 export function AuthPage() {
+<%if .OIDC%>const providerSignIn=useProviderSignIn();<%end%>
+<%if .OIDC%>const providers=useProviders();<%end%>
   const [mode, setMode] = useState<AuthMode>("signin");
   const [message, setMessage] = useState("");
   const { session, pending, error, refresh } = useSession();
@@ -58,6 +64,7 @@ export function AuthPage() {
             {message}
           </p>
         )}
+        <%if .OIDC%>{mode === "signin" && <ProviderSignIn redirecting={providerSignIn.isPending || providerSignIn.isSuccess} requestFailed={providerSignIn.isError} onContinue={()=>providerSignIn.mutate()}  available={providers.data?.includes("oidc") ?? false} pending={providers.isPending} failed={providers.isError} />}<%end%>
         <AuthForm
           key={mode}
           mode={mode}

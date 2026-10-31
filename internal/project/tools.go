@@ -5,8 +5,10 @@ import (
 	"strings"
 )
 
-// AuthVersion pins the published root, password and PostgreSQL modules.
+// AuthVersion pins the published root and password modules.
 const AuthVersion = "v0.4.0"
+
+const AuthPostgresVersion = "v0.5.0"
 
 const CoreVersion = "v0.4.0"
 
@@ -59,10 +61,11 @@ require (
  golang.org/x/sync v0.22.0 // indirect
  golang.org/x/text v0.41.0 // indirect
 )
-`, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthVersion, JobsVersion, JobsPostgresVersion, passwordRequirement(m)))
+`, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthPostgresVersion, JobsVersion, JobsPostgresVersion, passwordRequirement(m)))
 
 	files["go.sum"] = []byte(appGoSum)
 	addTelemetryRequirement(files)
+	addOIDCRequirements(m, files)
 
 	if m.Capabilities.Cache == "valkey" {
 		module := string(files["go.mod"])

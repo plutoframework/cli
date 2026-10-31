@@ -1,0 +1,44 @@
+package config
+
+import (
+ "encoding/base64"
+ "fmt"
+ "strconv"
+)
+
+type OIDC struct {
+ Enabled bool
+ AllowEnrollment bool
+ Issuer string
+ ClientID string
+ ClientSecret string
+ CallbackURL string
+ EncryptionKey []byte
+}
+
+func loadOIDC(lookup func(string)(string,bool))(OIDC,error){
+ var cfg OIDC
+ for _,setting:=range []struct{name string;target *bool}{
+  {"OIDC_ENABLED",&cfg.Enabled},{"OIDC_ALLOW_ENROLLMENT",&cfg.AllowEnrollment},
+ }{
+  if value,ok:=lookup(Prefix+setting.name);ok{
+   parsed,err:=strconv.ParseBool(value)
+   if err!=nil{return OIDC{},fmt.Errorf("%s must be boolean",setting.name)}
+   *setting.target=parsed
+  }
+ }
+ if !cfg.Enabled{return cfg,nil}
+ for _,setting:=range []struct{name string;target *string}{
+  {"OIDC_ISSUER",&cfg.Issuer},{"OIDC_CLIENT_ID",&cfg.ClientID},
+  {"OIDC_CLIENT_SECRET",&cfg.ClientSecret},{"OIDC_CALLBACK_URL",&cfg.CallbackURL},
+ }{
+  value,ok:=lookup(Prefix+setting.name)
+  if !ok||value==""{return OIDC{},fmt.Errorf("%s is required",setting.name)}
+  *setting.target=value
+ }
+ encoded,_:=lookup(Prefix+"OIDC_ENCRYPTION_KEY")
+ key,err:=base64.StdEncoding.DecodeString(encoded)
+ if err!=nil||len(key)!=32{return OIDC{},fmt.Errorf("OIDC_ENCRYPTION_KEY must encode 32 bytes")}
+ cfg.EncryptionKey=key
+ return cfg,nil
+}

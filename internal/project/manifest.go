@@ -34,6 +34,7 @@ type Project struct {
 }
 
 type Capabilities struct {
+	OIDC             bool   `toml:"oidc,omitempty"`
 	Cache            string `toml:"cache"`
 	LocalCredentials bool   `toml:"local_credentials"`
 	Tenancy          string `toml:"tenancy"`
@@ -77,6 +78,12 @@ var (
 )
 
 func (m Manifest) Validate() error {
+	if m.Capabilities.OIDC && !m.Capabilities.LocalCredentials {
+		return fmt.Errorf(
+			"OIDC requires --local-credentials for the shared account/session profile",
+		)
+	}
+
 	if m.SchemaVersion != SchemaVersion &&
 		(m.SchemaVersion != 7 || len(m.Agents) != 0) {
 		return fmt.Errorf(

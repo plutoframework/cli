@@ -21,7 +21,7 @@ A clear path from an empty folder to an explicit Go API.
 Requires Go **1.25.5+** and Git:
 
 ```sh
-go install github.com/plutoframework/cli/cmd/pluto@v0.14.0
+go install github.com/plutoframework/cli/cmd/pluto@v0.15.0
 pluto version
 ```
 

@@ -1,0 +1,31 @@
+<%if eq .UI "heroui-v3"%>import { Button } from "@heroui/react";<%end%>
+<%if eq .UI "shadcn"%>import { Button } from "@/shared/ui/button";<%end%>
+
+type Props = {
+ available: boolean;
+ pending: boolean;
+ failed: boolean;
+ redirecting: boolean;
+ requestFailed: boolean;
+ onContinue: () => void;
+};
+
+export function ProviderSignIn({available,pending,failed,redirecting,requestFailed,onContinue}: Props) {
+ if (pending) {return <p role="status">Checking sign-in options…</p>;}
+ if (failed) {return <p role="status">Sign-in options are temporarily unavailable.</p>;}
+ if (!available) {return null;}
+ return (
+  <div>
+   {requestFailed && <p role="alert">Unable to start sign-in. Try again.</p>}
+<%if eq .UI "native"%>
+   <button className="pluto-button" type="button" disabled={redirecting} onClick={onContinue}>
+    {redirecting ? "Redirecting…" : "Continue with your identity provider"}
+   </button>
+<%else%>
+   <Button type="button" <%if eq .UI "heroui-v3"%>isDisabled<%else%>disabled<%end%>={redirecting} onClick={onContinue}>
+    {redirecting ? "Redirecting…" : "Continue with your identity provider"}
+   </Button>
+<%end%>
+ </div>
+ );
+}

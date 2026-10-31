@@ -9,6 +9,7 @@ import tempfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--keep", action="store_true", help="Keep consumers/logs for browser QA")
+parser.add_argument("--oidc", action="store_true", help="Exercise published OIDC sign-in in every auth profile")
 args = parser.parse_args()
 checkout = Path(__file__).resolve().parent.parent
 binary = checkout / "bin/pluto"
@@ -37,6 +38,8 @@ try:
         print(f"Checking fresh consumer: {profile}", flush=True)
         app = root / profile
         local = [] if profile == "native-bare" else ["--local-credentials"]
+        if args.oidc and local:
+            local.append("--oidc")
         run(checkout, str(binary), "init", str(app), "--name", "orbital",
             "--no-mise", "--no-fnox", "--no-docker", "--no-input", *local)
         ui = "native" if profile == "native-bare" else profile

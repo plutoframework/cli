@@ -78,7 +78,17 @@ func NewWithCache(
         }
     }
     {{end}}
-    transport.RegisterSessions(reg,authentication)
+    {{if .OIDC}}
+ if authentication.OIDC!=nil {
+  router.Mount("/auth/oidc",http.StripPrefix("/auth/oidc",authentication.OIDC))
+ }
+ router.Get(paths.OIDCProviders.Path,func(w http.ResponseWriter,r *http.Request){
+  providers:=[]string{}
+  if authentication.OIDC!=nil {providers=append(providers,"oidc")}
+  transport.JSON(w,200,map[string]any{"data":providers})
+ })
+ {{end}}
+ transport.RegisterSessions(reg,authentication)
  RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy, Cache: dataCache})
 	router.NotFound(
 		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 404, "not_found") },

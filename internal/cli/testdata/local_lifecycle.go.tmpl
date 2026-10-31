@@ -67,7 +67,7 @@ func TestLocalPublishedLifecycle(t *testing.T) {
     localPool,err:=pgxpool.NewWithConfig(ctx,pc)
     if err!=nil {t.Fatal(err)}
     defer localPool.Close()
-    for _,name:=range []string{"001_initial.sql","002_auth_sessions.sql","003_idempotency.sql","004_local_credentials.sql","006_authentication.sql"} {
+    for _,name:=range []string{"001_initial.sql","002_auth_sessions.sql","003_idempotency.sql","004_local_credentials.sql","006_authentication.sql","007_external_accounts.sql"} {
         data,err:=os.ReadFile(filepath.Join("../../db/migrations",name))
         if err!=nil {t.Fatal(err)}
         if _,err:=localPool.Exec(ctx,string(data));err!=nil {t.Fatal(err)}

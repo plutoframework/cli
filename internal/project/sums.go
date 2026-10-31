@@ -1,6 +1,8 @@
 package project
 
-const appGoSum = `github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+const appGoSum = `github.com/plutoframework/pluto-auth/stores/postgres v0.5.0 h1:kbDvAr0MO9yWzFE3MdsIdAk2CEdtk7CQkJbo9OlLfVk=
+github.com/plutoframework/pluto-auth/stores/postgres v0.5.0/go.mod h1:oT+Le0OZt0W2pwCche3vBokdHlHaNvFjW+XY/ngjF+Q=
+github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/go-chi/chi/v5 v5.2.3 h1:WQIt9uxdsAbgIYgid+BpYc+liqQZGMHRaUwp0JUcvdE=
@@ -17,8 +19,6 @@ github.com/plutoframework/pluto-auth v0.4.0 h1:yTY5ejF1AJi0rn2SLtKg25MlA68KxgzE+
 github.com/plutoframework/pluto-auth v0.4.0/go.mod h1:HQZU04XbBCfkfALpO4twiunihATxfNdH7jIrzpBAyDA=
 github.com/plutoframework/pluto-auth/methods/password v0.4.0 h1:tQ/LCHmnE6/XHSDXV/TObQNHAQevcgpLvFUE6ncm674=
 github.com/plutoframework/pluto-auth/methods/password v0.4.0/go.mod h1:eqRcl5kkKiLlAS17EjvpevZRIlJwcb8H4/UTIjuRyZo=
-github.com/plutoframework/pluto-auth/stores/postgres v0.4.0 h1:lyXOIqiq6bJVrXa/JZC5KmXpM9mm+GF1cIjj9No5c1o=
-github.com/plutoframework/pluto-auth/stores/postgres v0.4.0/go.mod h1:oT+Le0OZt0W2pwCche3vBokdHlHaNvFjW+XY/ngjF+Q=
 github.com/plutoframework/pluto-core v0.1.2 h1:CKh+vu9jxd3o4A4hWPujffNepoK5mhe957HcRTEx4Dc=
 github.com/plutoframework/pluto-core v0.1.2/go.mod h1:aU+OaFQxGmjf3simyHEJHxOZ/ja2dNnC5xyISaGkgVQ=
 github.com/plutoframework/pluto-core/stores/postgres v0.1.0 h1:qCTcfxBCutg+m/JC2c7FqeD6vEejLBSCEPsaqqSwH4Y=

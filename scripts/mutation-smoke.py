@@ -9,6 +9,13 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 mutations = [
     (
+        "OIDC account profile guard",
+        "internal/project/manifest.go",
+        "if m.Capabilities.OIDC && !m.Capabilities.LocalCredentials {",
+        "if false {",
+        "TestOIDCProfileRequiresAccountBackend",
+    ),
+    (
         "lifecycle ownership guard",
         "internal/project/templates/lifecycle.go.tmpl",
         "facts.ActorID != facts.OwnerID",

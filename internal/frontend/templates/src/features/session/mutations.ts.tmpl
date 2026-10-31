@@ -76,3 +76,20 @@ export function useSignOut() {
     },
   });
 }
+
+<%if .OIDC%>
+export function useProviderSignIn() {
+ return useMutation({
+  retry:false,
+  mutationFn: async () => {
+   const {data}=await api.POST("/auth/oidc/begin",{params:{header:authHeaders()},headers:{Accept:"application/json"}});
+   const location=data?.data?.authorization_url;
+   if (!location) {throw new Error("Sign-in navigation missing");}
+   const parsed=new URL(location);
+   if (parsed.protocol!=="https:" || parsed.username || parsed.password) {throw new Error("Invalid sign-in navigation");}
+   return parsed.href;
+  },
+  onSuccess:(location)=>{window.location.assign(location);},
+ });
+}
+<%end%>

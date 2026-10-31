@@ -21,6 +21,7 @@ type AccountDisabler interface {
 
 // Authentication is explicit wiring shared by protected routes and logout.
 type Authentication struct {
+ {{if .OIDC}}OIDC http.Handler{{end}}
     Accounts AccountDisabler
     Credentials http.Handler
  Idempotency *httpidem.Handler

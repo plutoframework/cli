@@ -17,8 +17,13 @@ func Document() ([]byte, error) {
 			routes[endpoint.Path] = map[string]any{}
 		}
 
- responseSchema,err:=modelSchema(endpoint.Response)
- if err!=nil { return nil,fmt.Errorf("%s response: %w",endpoint.ID,err) }
+ var responseSchema map[string]any
+ var err error
+ redirect:=endpoint.SuccessStatus>=300 && endpoint.SuccessStatus<400
+ if !redirect {
+  responseSchema,err=modelSchema(endpoint.Response)
+  if err!=nil { return nil,fmt.Errorf("%s response: %w",endpoint.ID,err) }
+ }
 
 		operation := map[string]any{
 			"operationId":  endpoint.ID,
@@ -47,7 +52,21 @@ func Document() ([]byte, error) {
 				},
 			},
 		}
-		if endpoint.Authenticated {
+		if redirect {
+ operation["responses"].(map[string]any)[strconv.Itoa(endpoint.SuccessStatus)]=map[string]any{
+  "description":"Browser redirect; no JSON success body.",
+  "headers":map[string]any{"Location":map[string]any{"required":true,"schema":map[string]any{"type":"string","format":"uri-reference"}}},
+ }
+ }
+ if endpoint.ID=="oidc.begin" {
+  schema,err:=modelSchema(endpoint.Response)
+  if err!=nil{return nil,err}
+  operation["responses"].(map[string]any)["200"]=map[string]any{
+   "description":"With Accept: application/json, returns a server-built authorization URL.",
+   "content":map[string]any{"application/json":map[string]any{"schema":schema}},
+  }
+ }
+ if endpoint.Authenticated {
 			operation["security"] = []any{
 				map[string]any{"bearerAuth": []string{}},
 map[string]any{"sessionCookie": []string{}},
@@ -80,6 +99,17 @@ map[string]any{"sessionCookie": []string{}},
 		}
 
 		parameters := []any{}
+ if endpoint.ID=="oidc.begin" { parameters=append(parameters,map[string]any{"name":"Origin","in":"header","required":true,"schema":map[string]any{"type":"string"}}) }
+ if endpoint.ID=="oidc.callback" {
+  for _,name:=range []string{"state","code"} {parameters=append(parameters,map[string]any{"name":name,"in":"query","required":true,"schema":map[string]any{"type":"string"}})}
+ }
+ if strings.HasPrefix(endpoint.ID,"oidc.") {
+  operation["responses"].(map[string]any)["default"]=map[string]any{
+   "description":"Opaque authentication error; no credential data.",
+   "content":map[string]any{"application/json":map[string]any{"schema":map[string]any{"type":"object","properties":map[string]any{"error":map[string]any{"type":"object","properties":map[string]any{"code":map[string]any{"type":"string"}},"required":[]string{"code"}}},"required":[]string{"error"}}}},
+  }
+ }
+
         {{if .LocalCredentials}}
         if strings.HasPrefix(endpoint.ID,"credentials.") {
             parameters=append(parameters,map[string]any{"name":"Origin","in":"header","required":true,"schema":map[string]any{"type":"string"}})

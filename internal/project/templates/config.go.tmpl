@@ -23,6 +23,7 @@ type Config struct {
 	Jobs jobs.Config
 	Cache Cache
  Auth Auth
+ {{if .OIDC}}OIDC OIDC{{end}}
 }
 
 type Auth struct { TrustedOrigins []string; SessionTTL time.Duration; IdleTimeout time.Duration }
@@ -140,5 +141,6 @@ Logging:  Logging{Level: "info"},
 		)
 	}
 
-	return cfg, nil
+	{{if .OIDC}}cfg.OIDC,err=loadOIDC(lookup);if err!=nil{return Config{},err}{{end}}
+ return cfg, nil
 }

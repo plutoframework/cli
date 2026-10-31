@@ -26,6 +26,7 @@ type Plan struct {
 }
 
 type templateData struct {
+	OIDC                        bool
 	Name, Prefix, UI, Directory string
 	Component, Symbol, Kind     string
 }
@@ -67,6 +68,7 @@ func dataFor(m project.Manifest) templateData {
 	return templateData{
 		Name: m.Project.Name, Prefix: m.Project.EnvPrefix,
 		UI: m.Frontend.UI, Directory: m.Frontend.Directory,
+		OIDC: m.Capabilities.OIDC,
 	}
 }
 

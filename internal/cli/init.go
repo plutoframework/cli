@@ -14,7 +14,7 @@ import (
 func initCommand(options Options) *cobra.Command {
 	var (
 		name, module, prefix                       string
-		localCredentials                           bool
+		localCredentials, oidc                     bool
 		cacheBackend                               string
 		multi, noMise, noFnox, noDocker, hook, dry bool
 	)
@@ -69,6 +69,7 @@ func initCommand(options Options) *cobra.Command {
 					Cache:            cacheBackend,
 					Tenancy:          tenancy,
 					LocalCredentials: localCredentials,
+					OIDC:             oidc,
 				},
 				Database: project.Database{
 					Engine:  "postgres",
@@ -184,6 +185,12 @@ func initCommand(options Options) *cobra.Command {
 		"env-prefix",
 		"",
 		"Uppercase environment prefix ending in underscore",
+	)
+	flags.BoolVar(
+		&oidc,
+		"oidc",
+		false,
+		"Include optional OIDC sign-in; requires --local-credentials and explicit runtime secrets",
 	)
 	flags.BoolVar(
 		&localCredentials,

@@ -4,7 +4,7 @@ A working Cobra generator for small Go/Chi APIs. The application uses provisiona
 app-local primitives, alongside the published Pluto runtime libraries. The module is
 `github.com/plutoframework/cli`. Go 1.25.5+ and Git are required.
 The executable is named `pluto`; install the release with
-`go install github.com/plutoframework/cli/cmd/pluto@v0.14.0`.
+`go install github.com/plutoframework/cli/cmd/pluto@v0.15.0`.
 
 ```sh
 git clone https://github.com/plutoframework/cli.git pluto-cli
@@ -728,3 +728,36 @@ not make them fresh. See [the authentication guide](https://plutoframework.githu
 The library foundation adds account policy, method evidence and freshness guards.
 Native social sign-in, TOTP enrollment and their frontend flows remain next work;
 no factor policy is enabled automatically by this upgrade.
+
+## Optional OIDC sign-in
+
+```sh
+pluto --no-input init mission --local-credentials --oidc
+cd mission
+pluto frontend init --auth --ui heroui-v3
+```
+
+`--oidc` is saved in `capabilities.oidc` and requires the shared local-credential
+account profile. The terminal wizard exposes the same choice. Runtime OIDC stays
+off until explicitly configured. Apply migration 007 after 001–006 for all new
+account-backed PostgreSQL profiles; session-only profiles need only their existing
+schema. Existing apps require deliberate source/config/migration updates.
+
+Configure `OIDC_ENABLED`, issuer, client ID/secret, exact HTTPS callback and a
+base64-encoded random 32-byte encryption key using the app environment prefix.
+Secrets belong in the host secret manager, not TOML or frontend code. First-use
+registration separately requires `OIDC_ALLOW_ENROLLMENT=true` and grants no
+business membership. Configure real ingress/local integrations before startup.
+
+The native handler owns POST `/auth/oidc/begin` and GET `/auth/oidc/callback`;
+GET `/auth/providers` exposes configured IDs without provider secrets. Auth
+responses bypass idempotency/tenancy. Generated frontend auth adds a provider action
+in the selected native/HeroUI/shadcn profile, with loading/error/redirect feedback.
+No authored frontend is migrated automatically. Read the
+[OIDC workflow](https://github.com/plutoframework/pluto-auth/blob/main/docs/OIDC.md)
+for provider requirements, migrations, encrypted persistence and operational limits.
+
+OIDC browser starts use a same-origin API POST with `Accept: application/json`,
+then navigate to the server-built `data.authorization_url`. This preserves
+trusted Origin under the default no-referrer policy. A native form may send
+`Origin: null` and is intentionally denied; no Origin guard is weakened.

@@ -199,6 +199,12 @@ func initForm(
 			"Enrollment, verification and recovery; you supply delivery, limits and ingress.",
 			seed(cmd, "local-credentials", "false"),
 		),
+		boolField(
+			"oidc",
+			"OIDC sign-in",
+			"Requires local authentication profile, TLS and provider secrets.",
+			seed(cmd, "oidc", "false"),
+		),
 		choiceField(
 			"cache",
 			"Data cache",
@@ -291,6 +297,7 @@ func initForm(
 				Tenancy:          tenancy,
 				Cache:            v["cache"],
 				LocalCredentials: v["local-credentials"] == "true",
+				OIDC:             v["oidc"] == "true",
 			},
 			Database: project.Database{
 				Engine:  "postgres",

@@ -261,6 +261,14 @@ func (p *Plan) catalog() error {
 }
 
 func (p *Plan) auth() error {
+	if p.Manifest.Capabilities.OIDC {
+		if err := p.addTemplate(
+			"src/features/session/components/ProviderSignIn.tsx.tmpl",
+		); err != nil {
+			return err
+		}
+	}
+
 	for _, name := range []string{
 		"src/features/session/types.ts.tmpl", "src/features/session/queries.ts.tmpl",
 		"src/features/session/mutations.ts.tmpl", "src/features/session/provider.tsx.tmpl",

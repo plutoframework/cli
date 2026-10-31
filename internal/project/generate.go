@@ -18,6 +18,7 @@ var templates embed.FS
 type templateData struct {
 	Module, Name, Prefix string
 	Multi                bool
+	OIDC                 bool
 	LocalCredentials     bool
 	CacheBackend         string
 	Valkey               bool
@@ -53,6 +54,7 @@ func dataFor(m Manifest, e Endpoint) templateData {
 		Prefix:           m.Project.EnvPrefix,
 		Multi:            m.Capabilities.Tenancy == "multi",
 		LocalCredentials: m.Capabilities.LocalCredentials,
+		OIDC:             m.Capabilities.OIDC,
 		CacheBackend:     cacheBackend,
 		Valkey:           cacheBackend == "valkey",
 		Development:      m.Development,
@@ -249,6 +251,10 @@ func Managed(m Manifest) (map[string][]byte, error) {
 		)
 	}
 
+	if m.Capabilities.OIDC {
+		catalog.WriteString("OIDCBegin,OIDCCallback,OIDCProviders,\n")
+	}
+
 	catalog.WriteString("}\n}\n")
 	composition.WriteString("}\n")
 	definitions.WriteString(
@@ -383,6 +389,13 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		layout["cmd/api/credentials.go"] = "credentials_main.go"
 		layout["db/migrations/004_local_credentials.sql"] = "credentials_schema.sql"
 		layout["db/migrations/006_authentication.sql"] = "authentication_schema.sql"
+		layout["db/migrations/007_external_accounts.sql"] = "external_accounts.sql"
+	}
+
+	if m.Capabilities.OIDC {
+		layout["cmd/api/oidc.go"] = "oidc_main.go"
+		layout["internal/config/oidc.go"] = "oidc_config.go"
+		layout["internal/paths/oidc.go"] = "oidc_paths.go"
 	}
 
 	for path, name := range layout {
