@@ -43,3 +43,12 @@ Follow any repository security policy and use GitHub's private vulnerability
 reporting when enabled. Do not post undisclosed exploit details in a public issue;
 if no private route is offered, ask maintainers how to report privately without
 including sensitive details. Publishing a patch is not an independent audit.
+
+Go checks enforce a blank line before each standalone comment block except at
+file line one, including comments at the start of a code block. Consecutive
+comment lines stay together; inline comments, generated files and compiler/linter
+directives are preserved. The formatter applies comment spacing after the Go
+formatters; checks compare that combined result so gofumpt cannot undo this rule.
+The stdlib-only helper in `scripts/commentspacing` is synchronized from
+`pluto/scripts/commentspacing`; run `go test ./scripts/commentspacing` after
+changing it. Test fixtures under `testdata` are excluded from formatting.
