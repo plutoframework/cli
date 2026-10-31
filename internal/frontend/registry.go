@@ -145,6 +145,7 @@ func registryEntries(
 				}
 
 				entry.source[file.Source] = contents
+
 				// Delimited digest input includes metadata, paths and complete source bytes.
 				_, _ = fmt.Fprintf(
 					hash,

@@ -177,6 +177,7 @@ func (p *Plan) primitives(root string, previous project.Manifest) error {
 			name+".tsx",
 		)
 		if old[name] {
+
 			// Existing primitives belong to the application, including edits.
 			safe, err := project.SafePath(root, path)
 			if err != nil {

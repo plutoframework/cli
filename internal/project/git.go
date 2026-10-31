@@ -95,6 +95,7 @@ func InstallHook(ctx context.Context, root string) error {
 		return err
 	}
 	defer file.Close()
+
 	// Git runs hooks at the worktree root. Resolve it each time rather than bake
 	// in a path that breaks when the worktree moves.
 	_, err = file.WriteString(
