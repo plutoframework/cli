@@ -98,9 +98,8 @@ func InstallHook(ctx context.Context, root string) error {
 	}
 	defer file.Close()
 
-	// Git runs hooks at the worktree root. Resolve it each time rather than
-	// bake
-	// in a path that breaks when the worktree moves.
+	// Git runs hooks at the worktree root. Resolve it each time instead of
+	// baking in a path that breaks when the worktree moves.
 	_, err = file.WriteString(
 		"#!/bin/sh\nset -eu\ncd \"$(git rev-parse --show-toplevel)\"\nexec " +
 			"pluto vet --staged\n",
