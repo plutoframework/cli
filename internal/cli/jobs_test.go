@@ -139,6 +139,10 @@ func TestGeneratedJobs(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			if report := project.InspectArchitecture(root); !report.Passed {
+				t.Fatalf("generated job consumer has architecture diagnostics: %+v", report.Diagnostics)
+			}
+
 			before = snapshot(t, root)
 			for _, args := range [][]string{
 				{"add", "job", "invoices", "Again", "--kind", "invoice.send"},

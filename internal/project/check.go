@@ -360,5 +360,20 @@ func Contracts(root string, m Manifest) error {
 		}
 	}
 
+	// Dependency rules are shared with the standalone read-only inspector.
+	// Manifest and classification migration diagnostics remain inspection-only.
+	for _, diagnostic := range InspectArchitecture(root).Diagnostics {
+		if diagnostic.ID == "ARCH101" {
+			return fmt.Errorf(
+				"architecture: %s:%d: %s: %s; %s",
+				diagnostic.File,
+				diagnostic.Line,
+				diagnostic.ID,
+				diagnostic.Message,
+				diagnostic.Repair,
+			)
+		}
+	}
+
 	return nil
 }

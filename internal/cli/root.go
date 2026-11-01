@@ -92,6 +92,7 @@ func New(options Options) *cobra.Command {
 			Run:   func(cmd *cobra.Command, _ []string) { cmd.Println("pluto " + options.Version) },
 		},
 	)
+	root.AddCommand(architectureCommand(options))
 	root.AddCommand(initCommand(options))
 	root.AddCommand(addCommand(options))
 	root.AddCommand(

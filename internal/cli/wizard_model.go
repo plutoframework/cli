@@ -341,6 +341,7 @@ func (m wizardModel) View() string {
 func shellCommand(args []string) string {
 	quoted := []string{"pluto"}
 	for _, arg := range args {
+
 		// Display only. Execution always passes the original argument slice.
 		quoted = append(quoted, "'"+strings.ReplaceAll(arg, "'", "'\\''")+"'")
 	}

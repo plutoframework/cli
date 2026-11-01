@@ -10,7 +10,7 @@ import (
     "time"
     "github.com/plutoframework/pluto-core/telemetry"
 
-    "{{.Module}}/internal/background"
+    "{{.Module}}/internal/app"
     "{{.Module}}/internal/config"
     "{{.Module}}/internal/storage/postgres"
 
@@ -44,7 +44,7 @@ func run() error {
     if err != nil { return errors.New("worker database unavailable") }
     defer pool.Close()
     // Tune these explicit defaults for your handlers and database latency.
-    worker, err := background.NewWorkerWithTelemetry(pool, settings.Jobs, runtime)
+    worker, err := app.NewWorkerWithTelemetry(pool, settings.Jobs, runtime)
     if err != nil { return err }
     if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
         return errors.New("worker stopped; inspect sanitized job diagnostics")
