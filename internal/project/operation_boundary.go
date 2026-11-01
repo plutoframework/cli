@@ -15,7 +15,8 @@ import (
 )
 
 // operationBoundaryDiagnostics recognizes the generated operation shape, never
-// the mere presence of an authorization call in arbitrary authored control flow.
+// the mere presence of an authorization call in arbitrary authored control
+// flow.
 func operationBoundaryDiagnostics(
 	root string,
 	manifest []byte,
@@ -56,7 +57,8 @@ func operationBoundaryDiagnostics(
 			"pluto.toml",
 			1,
 			"operation boundary metadata cannot be assessed: "+err.Error(),
-			"Repair declarations; authored authorization calls do not replace managed gates.",
+			"Repair declarations; authored authorization calls do not "+
+				"replace managed gates.",
 		)
 	}
 
@@ -85,7 +87,9 @@ func operationBoundaryDiagnostics(
 				"pluto.toml",
 				1,
 				"required managed boundary is absent: "+path,
-				"Explicitly migrate authored business bodies behind declared managed operation/entry adapters; preserve authored logic.",
+				"Explicitly migrate authored business bodies behind declared "+
+					"managed operation/entry adapters; preserve authored "+
+					"logic.",
 			)
 
 			return
@@ -96,12 +100,21 @@ func operationBoundaryDiagnostics(
 				"ARCH202",
 				path,
 				1,
-				"managed operation or entry adapter differs from its declared contract",
-				"Restore the canonical managed boundary; keep business orchestration only in the private operation implementation.",
+				"managed operation or entry adapter differs from its "+
+					"declared contract",
+				"Restore the canonical managed boundary; keep business "+
+					"orchestration only in the private operation "+
+					"implementation.",
 			)
 		}
 	}
-	generatedSource := func(template string, data templateData) ([]byte, error) {
+	generatedSource := func(
+		template string,
+		data templateData,
+	) (
+		[]byte,
+		error,
+	) {
 		source, err := render(template, data)
 
 		return append(
@@ -116,11 +129,18 @@ func operationBoundaryDiagnostics(
 			m.Capabilities.Tenancy == "multi",
 		); err != nil {
 			add(
+
 				"ARCH201",
+
 				"pluto.toml",
+
 				1,
-				"declared operation cannot establish a supported gate: "+err.Error(),
-				"Declare valid independent operation identity, authority and contracts.",
+
+				"declared operation cannot establish a supported gate: "+
+					err.Error(),
+
+				"Declare valid independent operation identity, authority and "+
+					"contracts.",
 			)
 
 			continue
@@ -137,7 +157,9 @@ func operationBoundaryDiagnostics(
 
 		boundaryTypes[operationImport][operation.Action] = true
 		boundaryTypes[operationImport][operation.Action+"Boundary"] = true
-		authored[dir+"/"+strings.ToLower(operation.Action)+".go"] = operation.Action
+		authored[dir+"/"+strings.ToLower(
+			operation.Action,
+		)+".go"] = operation.Action
 		path := dir + "/" + strings.ToLower(operation.Action) + "_gate_gen.go"
 		gates[path] = true
 
@@ -171,7 +193,8 @@ func operationBoundaryDiagnostics(
 				"pluto.toml",
 				1,
 				err.Error(),
-				"Declare an independent operation and reference it from the HTTP entry.",
+				"Declare an independent operation and reference it from the "+
+					"HTTP entry.",
 			)
 
 			continue
@@ -224,7 +247,8 @@ func operationBoundaryDiagnostics(
 				"pluto.toml",
 				1,
 				"managed entry registration cannot be derived: "+err.Error(),
-				"Declare every worker/tool target operation before generating its managed adapter.",
+				"Declare every worker/tool target operation before "+
+					"generating its managed adapter.",
 			)
 		} else {
 			for path, source := range expected {
@@ -297,8 +321,13 @@ func operationBoundaryDiagnostics(
 							"ARCH201",
 							relative,
 							1,
-							"production operation package has no declared managed operation boundary: "+dir,
-							"Inventory its entry operations in endpoint metadata and explicitly migrate them behind managed gates; legacy authored authorization calls are not proof of a mandatory boundary.",
+							"production operation package has no declared "+
+								"managed operation boundary: "+dir,
+							"Inventory its entry operations in endpoint "+
+								"metadata and explicitly migrate them "+
+								"behind managed gates; legacy authored "+
+								"authorization calls are not proof of a "+
+								"mandatory boundary.",
 						)
 
 						undeclared[dir] = true
@@ -328,8 +357,10 @@ func operationBoundaryDiagnostics(
 						"ARCH204",
 						relative,
 						set.Position(spec.Pos()).Line,
-						"dot-imported operation boundary hides its qualified ownership",
-						"Use a qualified managed boundary; production dot imports are unsupported for operation gates.",
+						"dot-imported operation boundary hides its qualified "+
+							"ownership",
+						"Use a qualified managed boundary; production dot "+
+							"imports are unsupported for operation gates.",
 					)
 				}
 			}
@@ -373,8 +404,12 @@ func operationBoundaryDiagnostics(
 							"ARCH204",
 							relative,
 							set.Position(function.Pos()).Line,
-							"unsupported operation entry or receiver method outside the managed gate: "+function.Name.Name,
-							"Expose only the generated Execute gate; keep private implementation and package helpers behind it. Additional use cases require declared operation boundaries.",
+							"unsupported operation entry or receiver method "+
+								"outside the managed gate: "+function.Name.Name,
+							"Expose only the generated Execute gate; keep "+
+								"private implementation and package "+
+								"helpers behind it. Additional use cases "+
+								"require declared operation boundaries.",
 						)
 					}
 				}
@@ -399,8 +434,13 @@ func operationBoundaryDiagnostics(
 									"ARCH204",
 									relative,
 									set.Position(name.Pos()).Line,
-									"exported operation variable creates an unsupported entry or mutable global: "+name.Name,
-									"Keep operation entry points managed; inject typed dependencies instead of exporting callable or mutable globals.",
+									"exported operation variable creates an "+
+										"unsupported entry or mutable "+
+										"global: "+name.Name,
+									"Keep operation entry points managed; "+
+										"inject typed dependencies "+
+										"instead of exporting callable "+
+										"or mutable globals.",
 								)
 							}
 						}
@@ -421,8 +461,11 @@ func operationBoundaryDiagnostics(
 							"ARCH203",
 							relative,
 							set.Position(n.Pos()).Line,
-							"private operation implementation referenced outside its managed gate",
-							"Call the managed Execute method; do not capture, alias, recurse into or invoke the private implementation from helpers.",
+							"private operation implementation referenced "+
+								"outside its managed gate",
+							"Call the managed Execute method; do not capture,"+
+								" alias, recurse into or invoke the "+
+								"private implementation from helpers.",
 						)
 					}
 				case *ast.StructType:
@@ -432,8 +475,12 @@ func operationBoundaryDiagnostics(
 								"ARCH204",
 								relative,
 								set.Position(field.Pos()).Line,
-								"embedding an operation gate or sealed boundary can override its entry method",
-								"Inject the generated boundary as a named field or constructor dependency; do not embed it in production adapters.",
+								"embedding an operation gate or sealed "+
+									"boundary can override its entry "+
+									"method",
+								"Inject the generated boundary as a named "+
+									"field or constructor dependency; do "+
+									"not embed it in production adapters.",
 							)
 						}
 					}
@@ -445,8 +492,11 @@ func operationBoundaryDiagnostics(
 								"ARCH204",
 								relative,
 								set.Position(field.Pos()).Line,
-								"embedding a managed operation boundary into another interface is unsupported",
-								"Use the generated sealed contract directly; do not create a replacement interface embedding route.",
+								"embedding a managed operation boundary into "+
+									"another interface is unsupported",
+								"Use the generated sealed contract directly; "+
+									"do not create a replacement "+
+									"interface embedding route.",
 							)
 						}
 					}
@@ -457,8 +507,11 @@ func operationBoundaryDiagnostics(
 							"ARCH204",
 							relative,
 							set.Position(n.Pos()).Line,
-							"aliasing or redefining an operation boundary outside managed code is unsupported",
-							"Use the generated sealed entry contract directly; aliases cannot establish another authorized implementation.",
+							"aliasing or redefining an operation boundary "+
+								"outside managed code is unsupported",
+							"Use the generated sealed entry contract "+
+								"directly; aliases cannot establish "+
+								"another authorized implementation.",
 						)
 					}
 				}

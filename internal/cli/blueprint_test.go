@@ -38,10 +38,21 @@ func TestBlueprintChecksumsPreservePinsAndRejectConflict(t *testing.T) {
 }
 
 func TestReadOperationBlueprintRequiresExplicitContracts(t *testing.T) {
-	for _, test := range []struct{ name, source, want string }{
+	for _, test := range []struct {
+		name, source, want string
+	}{
 		{"empty", "", "must declare"},
-		{"unknown section", "[[operation]]\ngroup='sales'\naction='Approve'\n", "invalid blueprint"},
-		{"unknown obligation", "[[resources]]\ngroup='sales'\nname='Invoice'\nallow_unsafe=true\n", "invalid blueprint"},
+		{
+			"unknown section",
+			"[[operation]]\ngroup='sales'\naction='Approve'\n",
+			"invalid blueprint",
+		},
+		{
+			"unknown obligation",
+			"[[resources]]\ngroup='sales'\nname='Invoice'\nallow_" +
+				"unsafe=true\n",
+			"invalid blueprint",
+		},
 		{"malformed", "[[operations\n", "invalid blueprint"},
 		{"oversized", strings.Repeat(" ", (2<<20)+1), "2 MiB"},
 	} {

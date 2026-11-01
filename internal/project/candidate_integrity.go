@@ -19,12 +19,19 @@ func candidateIntegrity(root string, m Manifest) []ArchitectureDiagnostic {
 	if err != nil {
 		return []ArchitectureDiagnostic{
 			{
-				ID:       "ARCH601",
-				File:     "pluto.toml",
-				Line:     1,
+				ID: "ARCH601",
+
+				File: "pluto.toml",
+
+				Line: 1,
+
 				Severity: "error",
-				Message:  "candidate managed contract cannot be derived: " + err.Error(),
-				Repair:   "Repair complete supported declarations before relying on candidate boundaries.",
+
+				Message: "candidate managed contract cannot be derived: " +
+					err.Error(),
+
+				Repair: "Repair complete supported declarations before " +
+					"relying on candidate boundaries.",
 			},
 		}
 	}
@@ -46,8 +53,11 @@ func candidateIntegrity(root string, m Manifest) []ArchitectureDiagnostic {
 			File:     path,
 			Line:     1,
 			Severity: "error",
-			Message:  "candidate managed boundary differs from its declared contract",
-			Repair:   "Preserve authored source separately, migrate explicitly, and regenerate the exact supported contract; do not edit managed implementation.",
+			Message: "candidate managed boundary differs from its declared " +
+				"contract",
+			Repair: "Preserve authored source separately, migrate " +
+				"explicitly, and regenerate the exact supported " +
+				"contract; do not edit managed implementation.",
 		}
 		if err != nil {
 			diagnostic.ID = "ARCH201"
@@ -103,7 +113,9 @@ func candidateDirectives(source []byte) ([]candidateDirective, bool) {
 	scan.Init(
 		file,
 		source,
-		func(token.Position, string) { valid = false },
+		func(token.Position, string) {
+			valid = false
+		},
 		scanner.ScanComments,
 	)
 
@@ -135,7 +147,12 @@ func candidateDirectives(source []byte) ([]candidateDirective, bool) {
 				} else {
 					end = len(source)
 				}
-			} else if close := bytes.Index(source[offset:], []byte("*/")); close >= 0 {
+			} else if close := bytes.Index(
+				source[offset:],
+				[]byte(
+					"*/",
+				),
+			); close >= 0 {
 				end = offset + close + 2
 			}
 
@@ -165,8 +182,10 @@ func candidateDirectives(source []byte) ([]candidateDirective, bool) {
 				"\n",
 			)
 
-			// Absolute byte positions may change with harmless formatting before
-			// the directive; only its code attachment and local gap are semantic.
+			// Absolute byte positions may change with harmless formatting
+			// before
+			// the directive; only its code attachment and local gap are
+			// semantic.
 			directives[index].end = 0
 		}
 

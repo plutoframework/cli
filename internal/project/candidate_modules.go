@@ -39,7 +39,8 @@ func inspectCandidateModules(
 		if configureErr != nil {
 			message += ": " + configureErr.Error()
 		} else {
-			message = "candidate go.mod does not contain the required declared dependency bindings"
+			message = "candidate go.mod does not contain the required " +
+				"declared dependency bindings"
 		}
 	}
 
@@ -50,7 +51,10 @@ func inspectCandidateModules(
 			Line:     1,
 			Severity: "error",
 			Message:  message,
-			Repair:   "Preserve authored module requirements and explicitly restore the validated candidate sources/identity dependency; declaration alone does not select the required runtime.",
+			Repair: "Preserve authored module requirements and explicitly " +
+				"restore the validated candidate sources/identity " +
+				"dependency; declaration alone does not select the " +
+				"required runtime.",
 		},
 	}
 }

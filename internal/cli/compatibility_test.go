@@ -34,7 +34,8 @@ func assertPublishedDraft(t *testing.T, root string) {
 
 	if report.Passed {
 		t.Fatal(
-			"published protected draft incorrectly claimed candidate compliance",
+			"published protected draft incorrectly claimed candidate " +
+				"compliance",
 		)
 	}
 

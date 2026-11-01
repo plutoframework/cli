@@ -25,9 +25,11 @@ type lifecycleType struct {
 	alias bool
 }
 
-// This source-only inventory intentionally does not load dependencies or execute
+// This source-only inventory intentionally does not load dependencies or
+// execute
 // consumer tooling. It recognizes direct local type declarations and aliases;
-// full type checking and external/re-exported lifecycle factories remain separate
+// full type checking and external/re-exported lifecycle factories remain
+// separate
 // coverage obligations, never implied by an empty diagnostic list.
 func inspectLifecycleBoundaries(
 	root, module string,
@@ -35,7 +37,9 @@ func inspectLifecycleBoundaries(
 	diagnostics := []ArchitectureDiagnostic{}
 
 	unassessed := []string{
-		"lifecycle inspection resolves direct local types and aliases only; external factories, reflection, unsafe, generic wrappers and full assignment flow are not assessed",
+		"lifecycle inspection resolves direct local types and aliases only; " +
+			"external factories, reflection, unsafe, generic wrappers " +
+			"and full assignment flow are not assessed",
 	}
 	if module == "" {
 		return diagnostics, unassessed
@@ -46,7 +50,8 @@ func inspectLifecycleBoundaries(
 	types := map[string]lifecycleType{}
 
 	// General inventory diagnostics belong to InspectArchitecture. Match its
-	// exclusions here so this pass cannot silently execute or include test code.
+	// exclusions here so this pass cannot silently execute or include test
+	// code.
 	_ = filepath.WalkDir(
 		root,
 		func(path string, entry fs.DirEntry, err error) error {
@@ -190,7 +195,12 @@ func inspectLifecycleBoundaries(
 		})
 	}
 
-	add := func(id string, file *lifecycleFile, pos token.Pos, message, repair string) {
+	add := func(
+		id string,
+		file *lifecycleFile,
+		pos token.Pos,
+		message, repair string,
+	) {
 		diagnostics = append(diagnostics, ArchitectureDiagnostic{
 			ID:       id,
 			File:     file.path,
@@ -221,29 +231,49 @@ func inspectLifecycleBoundaries(
 			for _, fieldName := range field.Names {
 				if fieldName.IsExported() {
 					add(
+
 						"ARCH301",
+
 						definition.file,
+
 						fieldName.Pos(),
-						"publicly mutable lifecycle field: "+key+"."+fieldName.Name,
-						"Keep lifecycle state private to its domain owner; expose read access and controlled construction, evaluation and rehydration paths.",
+
+						"publicly mutable lifecycle field: "+
+							key+
+							"."+
+							fieldName.Name,
+
+						"Keep lifecycle state private to its domain owner; "+
+							"expose read access and controlled "+
+							"construction, evaluation and rehydration "+
+							"paths.",
 					)
 				}
 			}
 
 			if len(field.Names) == 0 {
 				add(
+
 					"ARCH301",
+
 					definition.file,
+
 					field.Pos(),
-					"embedded lifecycle state exposes uncontrolled mutation: "+key,
-					"Use a private named lifecycle field with controlled domain construction and mutation.",
+
+					"embedded lifecycle state exposes uncontrolled mutation: "+
+						key,
+
+					"Use a private named lifecycle field with controlled "+
+						"domain construction and mutation.",
 				)
 			}
 		}
 	}
 
-	// Resolve declared receiver/parameter types and straightforward local aliases.
-	// An unresolved expression is not evidence of a safe write or decision path.
+	// Resolve declared receiver/parameter types and straightforward local
+	// aliases.
+	// An unresolved expression is not evidence of a safe write or decision
+	// path.
 	var machine func(lifecycleType, map[string]bool) bool
 
 	machine = func(value lifecycleType, seen map[string]bool) bool {
@@ -366,7 +396,8 @@ func inspectLifecycleBoundaries(
 					continue
 				}
 
-				// Inspect package-level method captures with the same typed resolver.
+				// Inspect package-level method captures with the same typed
+				// resolver.
 				function = &ast.FuncDecl{
 					Name: ast.NewIdent(""),
 					Type: &ast.FuncType{},
@@ -381,7 +412,10 @@ func inspectLifecycleBoundaries(
 				variables[id] = value
 			}
 
-			for _, list := range []*ast.FieldList{function.Recv, function.Type.Params} {
+			for _, list := range []*ast.FieldList{
+				function.Recv,
+				function.Type.Params,
+			} {
 				if list == nil {
 					continue
 				}
@@ -405,11 +439,21 @@ func inspectLifecycleBoundaries(
 						map[string]bool{},
 					) {
 						add(
+
 							"ARCH303",
+
 							file,
+
 							parameter.Pos(),
-							"data entry accepts a raw lifecycle entity: "+function.Name.Name,
-							"Require an opaque evaluated transition at the lifecycle write boundary; atomically match scope, entity, state and version in persistence. Model initial creation separately.",
+
+							"data entry accepts a raw lifecycle entity: "+
+								function.Name.Name,
+
+							"Require an opaque evaluated transition at the "+
+								"lifecycle write boundary; atomically "+
+								"match scope, entity, state and version "+
+								"in persistence. Model initial creation "+
+								"separately.",
 						)
 					}
 				}
@@ -510,7 +554,10 @@ func inspectLifecycleBoundaries(
 						file,
 						selector.Pos(),
 						"raw lifecycle decision escapes domain ownership",
-						"Expose a domain-owned evaluator returning an opaque evaluated transition and require it at the write boundary; do not persist a raw Next result.",
+						"Expose a domain-owned evaluator returning an opaque "+
+							"evaluated transition and require it at the "+
+							"write boundary; do not persist a raw Next "+
+							"result.",
 					)
 				}
 

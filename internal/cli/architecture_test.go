@@ -46,17 +46,30 @@ func TestLifecycleArchitectureCheck(t *testing.T) {
 	root := temporary(t)
 
 	files := map[string]string{
-		"go.mod":     "module example.test/lifecycle\n",
-		"pluto.toml": "schema_version=9\n[project]\nmodule='example.test/lifecycle'\n",
+		"go.mod": "module example.test/lifecycle\n",
+		"pluto.toml": "schema_version=9\n[project]\nmodule='example.test/" +
+			"lifecycle'\n",
 		"internal/domain/model.go": `package domain
+
 import "github.com/plutoframework/pluto-core/state"
+
 type Stage string
-type Entity struct { Status Stage }
-func Machine() (*state.Machine[Stage,string,bool],error) {return state.New(state.Definition[Stage,string,bool]{})}
+type Entity struct {
+	Status Stage
+}
+
+func Machine() (*state.Machine[Stage, string, bool], error) {
+	return state.New(state.Definition[Stage, string, bool]{})
+}
 `,
 		"internal/storage/store.go": `package storage
+
 import "example.test/lifecycle/internal/domain"
-func Save(value domain.Entity) error {return nil}
+
+func Save(value domain.Entity) error {
+
+	return nil
+}
 `,
 	}
 	for path, source := range files {

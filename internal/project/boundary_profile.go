@@ -58,7 +58,15 @@ func CandidateReplacements(profile BoundaryProfile) (map[string]string, error) {
 		name, source string
 		modules      []string
 	}{
-		{"pluto-auth", profile.AuthSource, []string{"", "stores/postgres", "methods/password"}},
+		{
+			"pluto-auth",
+			profile.AuthSource,
+			[]string{
+				"",
+				"stores/postgres",
+				"methods/password",
+			},
+		},
 		{"pluto-rbac", profile.RBACSource, []string{"", "identity"}},
 		{"pluto-core", profile.CoreSource, []string{"", "stores/postgres"}},
 		{"pluto-jobs", profile.JobsSource, []string{"", "stores/postgres"}},
@@ -151,7 +159,10 @@ func boundaryModulePath(data []byte) (string, error) {
 	var scan scanner.Scanner
 	scan.Init(strings.NewReader(string(data)))
 
-	scan.Mode = scanner.ScanIdents | scanner.ScanStrings | scanner.ScanComments | scanner.SkipComments
+	scan.Mode = scanner.ScanIdents |
+		scanner.ScanStrings |
+		scanner.ScanComments |
+		scanner.SkipComments
 	scan.Error = func(_ *scanner.Scanner, _ string) {}
 
 	type token struct {

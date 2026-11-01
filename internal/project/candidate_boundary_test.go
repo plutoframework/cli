@@ -50,6 +50,21 @@ func candidateReviewMetadata(t *testing.T) string {
 
 	profile := boundaryProfileFixture(t)
 
+	settings := fmt.Sprintf(
+		"mode=\"candidate\"\nauth_source=%q\nrbac_source=%q\ncore_source=%q\n"+
+			"jobs_source=%q",
+		profile.AuthSource,
+		profile.RBACSource,
+		profile.CoreSource,
+		profile.JobsSource,
+	)
+	definitions := strings.Replace(
+		candidateReviewDefinitions,
+		`mode="candidate"`,
+		settings,
+		1,
+	)
+
 	return fmt.Sprintf(`schema_version=%d
 [project]
 name="candidate"
@@ -61,7 +76,7 @@ cache="none"
 [database]
 engine="postgres"
 queries="sqlc"
-%s`, SchemaVersion, strings.Replace(candidateReviewDefinitions, `mode="candidate"`, fmt.Sprintf("mode=\"candidate\"\nauth_source=%q\nrbac_source=%q\ncore_source=%q\njobs_source=%q", profile.AuthSource, profile.RBACSource, profile.CoreSource, profile.JobsSource), 1))
+%s`, SchemaVersion, definitions)
 }
 
 func candidateReviewFixture(t *testing.T, files map[string]string) string {
@@ -71,17 +86,43 @@ func candidateReviewFixture(t *testing.T, files map[string]string) string {
 
 	foundation := map[string]string{
 		"internal/domain/sales/invoice_contract_gen.go": `package sales
+
 import "github.com/plutoframework/pluto-core/state"
-type InvoiceRecord struct{invoiceRecordID string;invoiceRecordValid bool}
-type InvoiceCommand struct{invoiceCommandID string}
-func NewInvoiceMachine()(*state.Machine[string,string,bool],error){return nil,nil}
-func RehydrateInvoice()InvoiceRecord{return InvoiceRecord{}}
-func EvaluateInvoice(){}
-func NewInvoiceCommand()InvoiceCommand{return InvoiceCommand{}}
+
+type InvoiceRecord struct {
+	invoiceRecordID    string
+	invoiceRecordValid bool
+}
+type InvoiceCommand struct {
+	invoiceCommandID string
+}
+
+func NewInvoiceMachine() (
+	*state.Machine[string, string, bool],
+	error,
+
+) {
+
+	return nil, nil
+}
+func RehydrateInvoice() InvoiceRecord {
+
+	return InvoiceRecord{}
+}
+func EvaluateInvoice() {}
+func NewInvoiceCommand() InvoiceCommand {
+
+	return InvoiceCommand{}
+}
 `,
 		"internal/access/caller_gen.go": `package access
+
 import "github.com/plutoframework/pluto-auth"
-type Caller struct{callerIdentity *auth.Identity;callerTenant,callerWorkID,callerWorkKind string}
+
+type Caller struct {
+	callerIdentity                             *auth.Identity
+	callerTenant, callerWorkID, callerWorkKind string
+}
 `,
 	}
 	for path, source := range files {
@@ -119,16 +160,104 @@ func candidateReviewHas(
 
 func TestCandidateBoundaryMetadataAndPublishedBlocker(t *testing.T) {
 	root := candidateReviewFixture(t, nil)
-	for _, test := range []struct{ name, metadata, want string }{
+	for _, test := range []struct {
+		name, metadata, want string
+	}{
 		{"supported", candidateReviewMetadata(t), ""},
-		{"published", strings.Replace(candidateReviewMetadata(t), `mode="candidate"`, `mode="published"`, 1), "ARCH401"},
-		{"unknown mode", strings.Replace(candidateReviewMetadata(t), `mode="candidate"`, `mode="other"`, 1), "ARCH601"},
-		{"permission drift", strings.Replace(candidateReviewMetadata(t), `permission="invoice:approve"`, `permission="other"`, 1), "ARCH601"},
-		{"write drift", strings.Replace(candidateReviewMetadata(t), `write=true`, `write=false`, 1), "ARCH601"},
-		{"replay drift", strings.Replace(candidateReviewMetadata(t), `idempotency="required"`, `idempotency="none"`, 1), "ARCH601"},
-		{"missing contract", strings.Split(candidateReviewMetadata(t), "[[operation_contracts]]")[0], "ARCH601"},
-		{"empty resource name", strings.Replace(candidateReviewMetadata(t), `name="Invoice"`, `name=""`, 1), "ARCH601"},
-		{"empty operation action", strings.Replace(candidateReviewMetadata(t), `action="Approve"`, `action=""`, 1), "ARCH601"},
+		{
+			"published",
+			strings.Replace(
+				candidateReviewMetadata(
+					t,
+				),
+				`mode="candidate"`,
+				`mode="published"`,
+				1,
+			),
+			"ARCH401",
+		},
+		{
+			"unknown mode",
+			strings.Replace(
+				candidateReviewMetadata(
+					t,
+				),
+				`mode="candidate"`,
+				`mode="other"`,
+				1,
+			),
+			"ARCH601",
+		},
+		{
+			"permission drift",
+			strings.Replace(
+				candidateReviewMetadata(
+					t,
+				),
+				`permission="invoice:approve"`,
+				`permission="other"`,
+				1,
+			),
+			"ARCH601",
+		},
+		{
+			"write drift",
+			strings.Replace(
+				candidateReviewMetadata(
+					t,
+				),
+				`write=true`,
+				`write=false`,
+				1,
+			),
+			"ARCH601",
+		},
+		{
+			"replay drift",
+			strings.Replace(
+				candidateReviewMetadata(
+					t,
+				),
+				`idempotency="required"`,
+				`idempotency="none"`,
+				1,
+			),
+			"ARCH601",
+		},
+		{
+			"missing contract",
+			strings.Split(
+				candidateReviewMetadata(
+					t,
+				),
+				"[[operation_contracts]]",
+			)[0],
+			"ARCH601",
+		},
+		{
+			"empty resource name",
+			strings.Replace(
+				candidateReviewMetadata(
+					t,
+				),
+				`name="Invoice"`,
+				`name=""`,
+				1,
+			),
+			"ARCH601",
+		},
+		{
+			"empty operation action",
+			strings.Replace(
+				candidateReviewMetadata(
+					t,
+				),
+				`action="Approve"`,
+				`action=""`,
+				1,
+			),
+			"ARCH601",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			diagnostics, _ := inspectCandidateBoundaries(
@@ -149,48 +278,419 @@ func TestCandidateBoundaryMetadataAndPublishedBlocker(t *testing.T) {
 }
 
 func TestCandidateBoundaryCapabilitiesAndForgery(t *testing.T) {
-	for _, test := range []struct{ name, path, source, id string }{
-		{"rehydration capture", "internal/domain/sales/policy.go", `package sales;var rehydrate=RehydrateInvoice`, "ARCH603"},
-		{"qualified machine capture", "internal/infrastructure/legacy.go", `package infrastructure;import "example.test/candidate/internal/domain/sales";var machine=sales.NewInvoiceMachine`, "ARCH603"},
-		{"data constructor capture", "internal/app/legacy.go", `package app;import data "example.test/candidate/internal/storage/sales";var constructor=data.NewInvoiceData`, "ARCH603"},
-		{"operation constructor", "internal/app/legacy.go", `package app;import op "example.test/candidate/internal/operations/sales";var constructor=op.NewApproveWithDependencies`, "ARCH603"},
-		{"domain evaluator capture", "internal/domain/sales/policy.go", `package sales;var evaluate=EvaluateInvoice`, "ARCH603"},
-		{"private record assignment", "internal/domain/sales/policy.go", `package sales;func mutate(r *InvoiceRecord){r.invoiceRecordID="other"}`, "ARCH604"},
-		{"record composite", "internal/domain/sales/policy.go", `package sales;var record=InvoiceRecord{}`, "ARCH604"},
-		{"record alias", "internal/domain/sales/policy.go", `package sales;type Alias=InvoiceRecord;var record=Alias{}`, "ARCH604"},
-		{"record defined wrapper", "internal/domain/sales/policy.go", `package sales;type Alias InvoiceRecord;var record=Alias{}`, "ARCH604"},
-		{"caller alias mutation", "internal/access/legacy.go", `package access;type Alias=Caller;func mutate(c Alias){copy:=c;copy.callerTenant="other"}`, "ARCH604"},
-		{"caller field capture", "internal/access/legacy.go", `package access;func capture(c Caller){_ = c.callerIdentity}`, "ARCH604"},
-		{"opaque identity composite", "internal/infrastructure/legacy.go", `package infrastructure;import "github.com/plutoframework/pluto-auth";var fake=auth.Identity{}`, "ARCH604"},
-		{"opaque scope allocation", "internal/infrastructure/legacy.go", `package infrastructure;import "github.com/plutoframework/pluto-rbac/identity";var fake=new(identitygate.Execution)`, "ARCH604"},
+	for _, test := range []struct {
+		name, path, source, id string
+	}{
+		{
+			"rehydration capture",
+			"internal/domain/sales/policy.go",
+			`package sales
 
-		{"typed issuer Start capture", "internal/infrastructure/legacy.go", `package infrastructure;import "github.com/plutoframework/pluto-auth";func bad(manager *auth.Manager){_ = manager.Start}`, "ARCH606"},
-		{"runtime manager private mutation", "internal/app/legacy.go", `package app;func bad(r *CandidateRuntime){r.candidateRuntimeManager=nil}`, "ARCH604"},
-		{"caller work binding mutation", "internal/access/legacy.go", `package access;func bad(c *Caller){c.callerWorkKind="other"}`, "ARCH604"},
-		{"issuer default package name", "internal/infrastructure/legacy.go", `package infrastructure;import "github.com/plutoframework/pluto-auth";var factory=auth.New`, "ARCH603"},
-		{"gate default package name", "internal/infrastructure/legacy.go", `package infrastructure;import "github.com/plutoframework/pluto-rbac/identity";var factory=identitygate.New`, "ARCH603"},
-		{"dot hidden domain factory", "internal/infrastructure/legacy.go", `package infrastructure;import . "example.test/candidate/internal/domain/sales";var factory=NewInvoiceMachine`, "ARCH606"},
+var rehydrate = RehydrateInvoice
+`,
+			"ARCH603",
+		},
+		{
+			"qualified machine capture",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
 
-		{"operation boundary wrapper", "internal/infrastructure/legacy.go", `package infrastructure;import op "example.test/candidate/internal/operations/sales";type inherited op.ApproveBoundary;type fake struct{inherited}`, "ARCH604"},
-		{"operation boundary embedding", "internal/infrastructure/legacy.go", `package infrastructure;import op "example.test/candidate/internal/operations/sales";type fake struct{op.ApproveBoundary}`, "ARCH604"},
-		{"raw port alias", "internal/infrastructure/legacy.go", `package infrastructure;import contract "example.test/candidate/internal/ports/sales";type Raw contract.InvoiceData`, "ARCH604"},
-		{"unsupported authored domain hook", "internal/domain/sales/policy.go", `package sales;func ApprovalRule()bool{return true}`, "ARCH602"},
+import "example.test/candidate/internal/domain/sales"
 
-		{"unmanaged startup initializer", "internal/app/legacy.go", `package app;func init(){}`, "ARCH602"},
-		{"unmanaged command initializer", "cmd/api/legacy.go", `package main;func init(){}`, "ARCH602"},
-		{"unmanaged unrelated import", "internal/infrastructure/legacy.go", `package infrastructure;import _ "example.test/opaque"`, "ARCH602"},
-		{"raw database client", "internal/infrastructure/legacy.go", `package infrastructure;import pool "github.com/jackc/pgx/v5/pgxpool";var factory=pool.New`, "ARCH608"},
-		{"raw authentication store", "internal/app/legacy.go", `package app;import store "github.com/plutoframework/pluto-auth/stores/postgres";var factory=store.New`, "ARCH608"},
-		{"extra operation source", "internal/operations/sales/legacy.go", `package sales;func extra(){}`, "ARCH602"},
-		{"extra data source", "internal/storage/sales/legacy.go", `package sales;func extra(){}`, "ARCH602"},
-		{"extra port source", "internal/ports/sales/legacy.go", `package sales;type Raw interface{Commit()}`, "ARCH602"},
-		{"extra worker entry", "internal/jobs/legacy/work.go", `package legacy;func extra(){}`, "ARCH602"},
-		{"extra tool entry", "internal/agents/legacy/work.go", `package legacy;func extra(){}`, "ARCH602"},
+var machine = sales.NewInvoiceMachine
+`,
+			"ARCH603",
+		},
+		{
+			"data constructor capture",
+			"internal/app/legacy.go",
+			`package app
 
-		{"reflection dynamic method escape", "internal/infrastructure/legacy.go", `package infrastructure;import "reflect";func escape(v any){reflect.ValueOf(v).MethodByName("UnsafePointer").Call(nil)}`, "ARCH605"},
-		{"reflection indexed method escape", "internal/infrastructure/legacy.go", `package infrastructure;import "reflect";func escape(v any){reflect.ValueOf(v).Method(0).Call(nil)}`, "ARCH605"},
-		{"local unsafe", "internal/domain/sales/policy.go", `package sales;import _ "unsafe"`, "ARCH605"},
-		{"linkname", "internal/domain/sales/policy.go", "package sales\n//go:linkname escape target\nfunc escape()", "ARCH605"},
+import data "example.test/candidate/internal/storage/sales"
+
+var constructor = data.NewInvoiceData
+`,
+			"ARCH603",
+		},
+		{
+			"operation constructor",
+			"internal/app/legacy.go",
+			`package app
+
+import op "example.test/candidate/internal/operations/sales"
+
+var constructor = op.NewApproveWithDependencies
+`,
+			"ARCH603",
+		},
+		{
+			"domain evaluator capture",
+			"internal/domain/sales/policy.go",
+			`package sales
+
+var evaluate = EvaluateInvoice
+`,
+			"ARCH603",
+		},
+		{
+			"private record assignment",
+			"internal/domain/sales/policy.go",
+			`package sales
+
+func mutate(r *InvoiceRecord) {
+
+	r.invoiceRecordID = "other"
+}
+`,
+			"ARCH604",
+		},
+		{
+			"record composite",
+			"internal/domain/sales/policy.go",
+			`package sales
+
+var record = InvoiceRecord{}
+`,
+			"ARCH604",
+		},
+		{
+			"record alias",
+			"internal/domain/sales/policy.go",
+			`package sales
+
+type Alias = InvoiceRecord
+
+var record = Alias{}
+`,
+			"ARCH604",
+		},
+		{
+			"record defined wrapper",
+			"internal/domain/sales/policy.go",
+			`package sales
+
+type Alias InvoiceRecord
+
+var record = Alias{}
+`,
+			"ARCH604",
+		},
+		{
+			"caller alias mutation",
+			"internal/access/legacy.go",
+			`package access
+
+type Alias = Caller
+
+func mutate(c Alias) {
+
+	copy := c
+	copy.callerTenant = "other"
+}
+`,
+			"ARCH604",
+		},
+		{
+			"caller field capture",
+			"internal/access/legacy.go",
+			`package access
+
+func capture(c Caller) {
+
+	_ = c.callerIdentity
+}
+`,
+			"ARCH604",
+		},
+		{
+			"opaque identity composite",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import "github.com/plutoframework/pluto-auth"
+
+var fake = auth.Identity{}
+`,
+			"ARCH604",
+		},
+		{
+			"opaque scope allocation",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import "github.com/plutoframework/pluto-rbac/identity"
+
+var fake = new(identitygate.Execution)
+`,
+			"ARCH604",
+		},
+
+		{
+			"typed issuer Start capture",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import "github.com/plutoframework/pluto-auth"
+
+func bad(manager *auth.Manager) {
+
+	_ = manager.Start
+}
+`,
+			"ARCH606",
+		},
+		{
+			"runtime manager private mutation",
+			"internal/app/legacy.go",
+			`package app
+
+func bad(r *CandidateRuntime) {
+
+	r.candidateRuntimeManager = nil
+}
+`,
+			"ARCH604",
+		},
+		{
+			"caller work binding mutation",
+			"internal/access/legacy.go",
+			`package access
+
+func bad(c *Caller) {
+
+	c.callerWorkKind = "other"
+}
+`,
+			"ARCH604",
+		},
+		{
+			"issuer default package name",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import "github.com/plutoframework/pluto-auth"
+
+var factory = auth.New
+`,
+			"ARCH603",
+		},
+		{
+			"gate default package name",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import "github.com/plutoframework/pluto-rbac/identity"
+
+var factory = identitygate.New
+`,
+			"ARCH603",
+		},
+		{
+			"dot hidden domain factory",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import . "example.test/candidate/internal/domain/sales"
+
+var factory = NewInvoiceMachine
+`,
+			"ARCH606",
+		},
+
+		{
+			"operation boundary wrapper",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import op "example.test/candidate/internal/operations/sales"
+
+type inherited op.ApproveBoundary
+type fake struct{ inherited }
+`,
+			"ARCH604",
+		},
+		{
+			"operation boundary embedding",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import op "example.test/candidate/internal/operations/sales"
+
+type fake struct{ op.ApproveBoundary }
+`,
+			"ARCH604",
+		},
+		{
+			"raw port alias",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import contract "example.test/candidate/internal/ports/sales"
+
+type Raw contract.InvoiceData
+`,
+			"ARCH604",
+		},
+		{
+			"unsupported authored domain hook",
+			"internal/domain/sales/policy.go",
+			`package sales
+
+func ApprovalRule() bool {
+
+	return true
+}
+`,
+			"ARCH602",
+		},
+
+		{
+			"unmanaged startup initializer",
+			"internal/app/legacy.go",
+			`package app
+
+func init() {}
+`,
+			"ARCH602",
+		},
+		{
+			"unmanaged command initializer",
+			"cmd/api/legacy.go",
+			`package main
+
+func init() {}
+`,
+			"ARCH602",
+		},
+		{
+			"unmanaged unrelated import",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import _ "example.test/opaque"
+`,
+			"ARCH602",
+		},
+		{
+			"raw database client",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import pool "github.com/jackc/pgx/v5/pgxpool"
+
+var factory = pool.New
+`,
+			"ARCH608",
+		},
+		{
+			"raw authentication store",
+			"internal/app/legacy.go",
+			`package app
+
+import store "github.com/plutoframework/pluto-auth/stores/postgres"
+
+var factory = store.New
+`,
+			"ARCH608",
+		},
+		{
+			"extra operation source",
+			"internal/operations/sales/legacy.go",
+			`package sales
+
+func extra() {}
+`,
+			"ARCH602",
+		},
+		{
+			"extra data source",
+			"internal/storage/sales/legacy.go",
+			`package sales
+
+func extra() {}
+`,
+			"ARCH602",
+		},
+		{
+			"extra port source",
+			"internal/ports/sales/legacy.go",
+			`package sales
+
+type Raw interface{ Commit() }
+`,
+			"ARCH602",
+		},
+		{
+			"extra worker entry",
+			"internal/jobs/legacy/work.go",
+			`package legacy
+
+func extra() {}
+`,
+			"ARCH602",
+		},
+		{
+			"extra tool entry",
+			"internal/agents/legacy/work.go",
+			`package legacy
+
+func extra() {}
+`,
+			"ARCH602",
+		},
+
+		{
+			"reflection dynamic method escape",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import "reflect"
+
+func escape(
+	v any,
+
+) {
+
+	reflect.ValueOf(
+		v,
+	).MethodByName(
+		"UnsafePointer",
+	).Call(
+		nil,
+	)
+}
+`,
+			"ARCH605",
+		},
+		{
+			"reflection indexed method escape",
+			"internal/infrastructure/legacy.go",
+			`package infrastructure
+
+import "reflect"
+
+func escape(v any) {
+
+	reflect.ValueOf(v).Method(0).Call(nil)
+}
+`,
+			"ARCH605",
+		},
+		{
+			"local unsafe",
+			"internal/domain/sales/policy.go",
+			`package sales
+
+import _ "unsafe"
+`,
+			"ARCH605",
+		},
+		{
+			"linkname",
+			"internal/domain/sales/policy.go",
+			"package sales\n//go:linkname escape target\nfunc escape()",
+			"ARCH605",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := candidateReviewFixture(
@@ -215,44 +715,33 @@ func TestCandidateBoundaryCapabilitiesAndForgery(t *testing.T) {
 	}
 }
 
-func TestCandidateRawMachineTypeFlow(t *testing.T) {
-	for _, source := range []string{
-		`func bad(m *state.Machine[string,string,bool]){_ = m.Evaluate}`,
-		`func bad(){var m *state.Machine[string,string,bool];alias:=m;_ = alias.Evaluate}`,
-		`var m *state.Machine[string,string,bool];func bad(){_ = m.Evaluate}`,
-		`type Service struct{machine *state.Machine[string,string,bool]};func(s *Service)bad(){_ = s.machine.Evaluate}`,
-		`func acquire()*state.Machine[string,string,bool]{return nil};func bad(){_ = acquire().Evaluate}`,
-		`type Alias = state.Machine[string,string,bool];func bad(m *Alias){_ = m.Evaluate}`,
-		`var mint = state.New[string,string,bool]`,
-		`func bad(){type Alias=state.Machine[string,string,bool];var m *Alias;_ = m.Evaluate}`,
-		`type Other struct{};func(Other)Evaluate(){};func bad(m *state.Machine[string,string,bool]){{m:=Other{};m.Evaluate()};_ = m.Evaluate}`,
-	} {
-		path := "internal/domain/sales/policy.go"
-		root := candidateReviewFixture(
-			t,
-			map[string]string{
-				path: `package sales;import "github.com/plutoframework/pluto-core/state";` + source,
-			},
-		)
-
-		diagnostics, _ := inspectCandidateBoundaries(
-			root,
-			candidateReviewModule,
-			[]byte(candidateReviewMetadata(t)),
-		)
-		if !candidateReviewHas(diagnostics, "ARCH603", path) {
-			t.Fatalf("raw evaluation escaped: %s: %+v", source, diagnostics)
-		}
-	}
-}
-
 func TestCandidateManagedOwners(t *testing.T) {
 	root := candidateReviewFixture(t, map[string]string{
-		"internal/storage/sales/invoice_reads_gen.go":       `package sales;import domain "example.test/candidate/internal/domain/sales";var hydrate=domain.RehydrateInvoice`,
-		"internal/operations/sales/approve_workflow_gen.go": `package sales;import domain "example.test/candidate/internal/domain/sales";var evaluate=domain.EvaluateInvoice`,
-		"internal/app/candidate_operations_gen.go":          `package app;import domain "example.test/candidate/internal/domain/sales";var machine=domain.NewInvoiceMachine`,
+		"internal/storage/sales/invoice_reads_gen.go": `package sales
 
-		"internal/domain/sales/ignored_test.go": `package sales;import _ "unsafe";var captured=RehydrateInvoice`,
+import domain "example.test/candidate/internal/domain/sales"
+
+var hydrate = domain.RehydrateInvoice
+`,
+		"internal/operations/sales/approve_workflow_gen.go": `package sales
+
+import domain "example.test/candidate/internal/domain/sales"
+
+var evaluate = domain.EvaluateInvoice
+`,
+		"internal/app/candidate_operations_gen.go": `package app
+
+import domain "example.test/candidate/internal/domain/sales"
+
+var machine = domain.NewInvoiceMachine
+`,
+
+		"internal/domain/sales/ignored_test.go": `package sales
+
+import _ "unsafe"
+
+var captured = RehydrateInvoice
+`,
 	})
 
 	diagnostics, _ := inspectCandidateBoundaries(
@@ -269,7 +758,10 @@ func TestCandidateUnsafeCannotHideInManagedFile(t *testing.T) {
 	path := "internal/app/candidate_operations_gen.go"
 	root := candidateReviewFixture(
 		t,
-		map[string]string{path: `package app;import _ "unsafe"`},
+		map[string]string{path: `package app
+
+import _ "unsafe"
+`},
 	)
 
 	diagnostics, _ := inspectCandidateBoundaries(
@@ -283,13 +775,26 @@ func TestCandidateUnsafeCannotHideInManagedFile(t *testing.T) {
 }
 
 func TestCandidateResourceNamesAreDeclarationDerived(t *testing.T) {
-	metadata := strings.NewReplacer("sales", "catalog", "Invoice", "Document", "invoice", "document").
+	metadata := strings.NewReplacer(
+		"sales",
+		"catalog",
+		"Invoice",
+		"Document",
+		"invoice",
+		"document",
+	).
 		Replace(candidateReviewMetadata(t))
 	path := "internal/domain/catalog/forged.go"
 	root := candidateReviewFixture(
 		t,
 		map[string]string{
-			path: `package catalog;var forged=DocumentRecord{documentRecordID:"other",documentRecordValid:true}`,
+			path: `package catalog
+
+var forged = DocumentRecord{
+ documentRecordID: "other",
+ documentRecordValid: true,
+}
+`,
 		},
 	)
 
@@ -304,7 +809,11 @@ func TestCandidateResourceNamesAreDeclarationDerived(t *testing.T) {
 }
 
 func TestCandidateHiddenAndNativeBuildInputs(t *testing.T) {
-	for _, path := range []string{"internal/app/escape.s", "internal/app/escape.syso", "internal/app/nested/go.mod"} {
+	for _, path := range []string{
+		"internal/app/escape.s",
+		"internal/app/escape.syso",
+		"internal/app/nested/go.mod",
+	} {
 		root := candidateReviewFixture(
 			t,
 			map[string]string{path: "module example.test/nested\n"},
@@ -360,10 +869,40 @@ permission="invoice:approve"
 provider="scripted"
 approval="host"
 `
-	for _, test := range []struct{ path, source string }{
-		{"internal/operations/sales/extra.go", `package sales;func mutate(i *ApproveIntent){i.approveIntentOwner=nil}`},
-		{"internal/agents/reviews/extra.go", `package reviews;func mutate(d *InspectDependencies){d.inspectIntent=nil;d.inspectReceipt=nil}`},
-		{"internal/agents/reviews/extra.go", `package reviews;var forged=inspectReceipt{applied:true}`},
+	for _, test := range []struct {
+		path, source string
+	}{
+		{
+			"internal/operations/sales/extra.go",
+			`package sales
+
+func mutate(i *ApproveIntent) {
+
+	i.approveIntentOwner = nil
+}
+`,
+		},
+		{
+			"internal/agents/reviews/extra.go",
+			`package reviews
+
+func mutate(
+	d *InspectDependencies,
+
+) {
+
+	d.inspectIntent = nil
+	d.inspectReceipt = nil
+}
+`,
+		},
+		{
+			"internal/agents/reviews/extra.go",
+			`package reviews
+
+var forged = inspectReceipt{applied: true}
+`,
+		},
 	} {
 		root := candidateReviewFixture(
 			t,
@@ -384,7 +923,11 @@ approval="host"
 	root := candidateReviewFixture(
 		t,
 		map[string]string{
-			path: `package app;var output="display only";var applied=false`,
+			path: `package app
+
+var output = "display only"
+var applied = false
+`,
 		},
 	)
 
@@ -402,90 +945,5 @@ approval="host"
 
 	if !candidateReviewHas(diagnostics, "ARCH602", path) {
 		t.Fatal("unowned production source was accepted")
-	}
-}
-
-func TestCandidateReflectionOnlyCanonicalSchemaOwner(t *testing.T) {
-	for _, path := range []string{"internal/api/schema.go", "internal/access/caller_gen.go", "internal/api/extra.go"} {
-		root := candidateReviewFixture(
-			t,
-			map[string]string{
-				path: `package api;import "reflect";var t=reflect.TypeOf(0)`,
-			},
-		)
-		diagnostics, _ := inspectCandidateBoundaries(
-			root,
-			candidateReviewModule,
-			[]byte(candidateReviewMetadata(t)),
-		)
-
-		blocked := candidateReviewHas(diagnostics, "ARCH605", path)
-		if blocked != (path != "internal/api/schema.go") {
-			t.Fatalf("reflection owner %s: %+v", path, diagnostics)
-		}
-	}
-}
-
-func TestCandidateDeclaredSkippedDirectoryCannotHideInitializer(t *testing.T) {
-	for _, group := range []string{"testdata", "dist", "vendor"} {
-		t.Run(group, func(t *testing.T) {
-			metadata := strings.ReplaceAll(
-				candidateReviewMetadata(t),
-				"sales",
-				group,
-			)
-			path := "internal/domain/" + group + "/extra.go"
-			root := candidateReviewFixture(
-				t,
-				map[string]string{path: "package " + group + ";func init(){}"},
-			)
-
-			// Remove unrelated original sales fixtures so the assertion tests only this namespace.
-			if err := os.RemoveAll(
-				filepath.Join(root, "internal/domain/sales"),
-			); err != nil {
-				t.Fatal(err)
-			}
-
-			diagnostics, _ := inspectCandidateBoundaries(
-				root,
-				candidateReviewModule,
-				[]byte(metadata),
-			)
-			if !candidateReviewHas(diagnostics, "ARCH602", path) {
-				t.Fatalf(
-					"declared ignored-name package hid initializer: %+v",
-					diagnostics,
-				)
-			}
-		})
-	}
-}
-
-func TestCandidateOwnershipBranches(t *testing.T) {
-	for _, test := range []struct{ path, source, id, marker string }{
-		{"internal/access/policy.go", `package access;func erase(c *Caller){c.callerIdentity=nil}`, "ARCH604", "managed sibling altered opaque caller field"},
-		{"internal/app/extra.go", `package app;func init(){}`, "ARCH602", "unowned initializer accepted"},
-	} {
-		root := candidateReviewFixture(
-			t,
-			map[string]string{test.path: test.source},
-		)
-
-		diagnostics, _ := inspectCandidateBoundaries(
-			root,
-			candidateReviewModule,
-			[]byte(candidateReviewMetadata(t)),
-		)
-		if len(diagnostics) != 1 || diagnostics[0].ID != test.id ||
-			diagnostics[0].File != test.path {
-			t.Fatalf(
-				"%s: expected only %s at %s, got %+v",
-				test.marker,
-				test.id,
-				test.path,
-				diagnostics,
-			)
-		}
 	}
 }

@@ -39,11 +39,23 @@ func TestRuntimePolicies(t *testing.T) {
 	}
 
 	for _, change := range []func(*Endpoint){
-		func(e *Endpoint) { e.Collection = true },
-		func(e *Endpoint) { e.Permission = "" },
-		func(e *Endpoint) { e.Public = true; e.Idempotency = "required" },
-		func(e *Endpoint) { e.Method = "GET"; e.Idempotency = "required" },
-		func(e *Endpoint) { e.Idempotency = "typo" },
+		func(e *Endpoint) {
+			e.Collection = true
+		},
+		func(e *Endpoint) {
+			e.Permission = ""
+		},
+		func(e *Endpoint) {
+			e.Public = true
+			e.Idempotency = "required"
+		},
+		func(e *Endpoint) {
+			e.Method = "GET"
+			e.Idempotency = "required"
+		},
+		func(e *Endpoint) {
+			e.Idempotency = "typo"
+		},
 	} {
 		invalid := base
 		change(&invalid)

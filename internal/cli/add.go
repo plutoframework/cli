@@ -22,10 +22,12 @@ func addCommand(options Options) *cobra.Command {
 	)
 
 	command := &cobra.Command{
-		Use:     "endpoint GROUP ACTION",
-		Short:   "Add an endpoint, models, operation, HTTP adapter and tests",
-		Example: "  pluto add endpoint widgets Create --method POST --path /api/widgets --name 'Create widget' --description 'Create an authorized widget.'",
-		Args:    cobra.ExactArgs(2),
+		Use:   "endpoint GROUP ACTION",
+		Short: "Add an endpoint, models, operation, HTTP adapter and tests",
+		Example: "  pluto add endpoint widgets Create --method POST --path /" +
+			"api/widgets --name 'Create widget' --description 'Create an " +
+			"authorized widget.'",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, m, err := project.Discover(options.Directory)
 			if err != nil {
@@ -68,7 +70,9 @@ func addCommand(options Options) *cobra.Command {
 			}
 
 			endpoint.Operation = operation.ID()
-			endpoint.Permission, endpoint.Public, endpoint.Collection = operation.Permission, operation.Public, operation.Collection
+			endpoint.Permission = operation.Permission
+			endpoint.Public = operation.Public
+			endpoint.Collection = operation.Collection
 
 			m.Endpoints = append(
 				append([]project.Endpoint(nil), m.Endpoints...),
@@ -143,13 +147,15 @@ func addCommand(options Options) *cobra.Command {
 				"./cmd/openapi",
 			); err != nil {
 				return fmt.Errorf(
-					"endpoint written; OpenAPI regeneration failed: %w; repair and run pluto openapi",
+					"endpoint written; OpenAPI regeneration failed: %w; "+
+						"repair and run pluto openapi",
 					err,
 				)
 			}
 
 			cmd.Printf(
-				"Added %s.%s; operation intentionally returns not implemented. Run pluto fmt and pluto vet.\n",
+				"Added %s.%s; operation intentionally returns not "+
+					"implemented. Run pluto fmt and pluto vet.\n",
 				endpoint.Group,
 				endpoint.Action,
 			)
@@ -162,19 +168,22 @@ func addCommand(options Options) *cobra.Command {
 		&endpoint.ResourceSource,
 		"resource-source",
 		"",
-		"Candidate resource binding: body, path:name, query:name or collection",
+		"Candidate resource binding: body, path:name, query:name or "+
+			"collection",
 	)
 	flags.BoolVar(
 		&endpoint.Collection,
 		"collection",
 		false,
-		"Paginated collection (defaults on for GET List; use --collection=false for details)",
+		"Paginated collection (defaults on for GET List; use "+
+			"--collection=false for details)",
 	)
 	flags.StringVar(
 		&endpoint.Idempotency,
 		"idempotency",
 		"auto",
-		"auto requires keys on authenticated business writes; exempt for sensitive/streaming routes",
+		"auto requires keys on authenticated business writes; exempt for "+
+			"sensitive/streaming routes",
 	)
 	flags.StringVar(
 		&endpoint.Method,

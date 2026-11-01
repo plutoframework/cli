@@ -52,21 +52,35 @@ type architectureSource struct {
 	file     string
 }
 
-// InspectArchitecture parses production sources without executing project tools,
-// resolving dependencies, or modifying even obsolete manifests. It checks source
+// InspectArchitecture parses production sources without executing project
+// tools,
+// resolving dependencies, or modifying even obsolete manifests. It checks
+// source
 // dependencies, not authorization, business meaning, or runtime effects.
 func InspectArchitecture(directory string) ArchitectureReport {
 	root, err := filepath.Abs(directory)
 	r := ArchitectureReport{
-		Version:      1,
-		CheckedScope: "passed means only implemented production Go dependency, inventory, manifest, managed operation/entry ownership, supported candidate contract/source confinement, source-derived lifecycle boundary and local invocation checks have no diagnostics; unassessed guarantees are never implied",
-		Directory:    root,
-		Packages:     []ArchitecturePackage{},
-		Diagnostics:  []ArchitectureDiagnostic{},
+		Version: 1,
+		CheckedScope: "passed means only implemented production Go " +
+			"dependency, inventory, manifest, managed operation/entry " +
+			"ownership, supported candidate contract/source confinement, " +
+			"source-derived lifecycle boundary and local invocation " +
+			"checks have no diagnostics; unassessed guarantees are never " +
+			"implied",
+		Directory:   root,
+		Packages:    []ArchitecturePackage{},
+		Diagnostics: []ArchitectureDiagnostic{},
 		Unassessed: []string{
-			"semantic business-rule placement, lifecycle commit enforcement, principal provenance, resource authorization and required CI execution are not assessed; generated capability gates do not establish restricted write adoption",
-			"external dependency internals and frontend source dependencies are not traversed",
-			"contract classification is a syntactic declaration inventory, not proof of purity; build-tag variants are inspected together without type checking",
+			"semantic business-rule placement, lifecycle commit enforcement, " +
+				"principal provenance, resource authorization and " +
+				"required CI execution are not assessed; generated " +
+				"capability gates do not establish restricted write " +
+				"adoption",
+			"external dependency internals and frontend source dependencies " +
+				"are not traversed",
+			"contract classification is a syntactic declaration inventory, " +
+				"not proof of purity; build-tag variants are inspected " +
+				"together without type checking",
 		},
 	}
 
@@ -107,7 +121,8 @@ func InspectArchitecture(directory string) ArchitectureReport {
 			"pluto.toml",
 			1,
 			"manifest unavailable: "+err.Error(),
-			"Create or restore the project manifest; inspection does not migrate it.",
+			"Create or restore the project manifest; inspection does not "+
+				"migrate it.",
 		)
 	} else if err = toml.Unmarshal(manifest, &m); err != nil {
 		add(
@@ -123,11 +138,13 @@ func InspectArchitecture(directory string) ArchitectureReport {
 			"pluto.toml",
 			1,
 			fmt.Sprintf(
-				"schema %d requires explicit migration to %d; source inspection continued",
+				"schema %d requires explicit migration to %d; source "+
+					"inspection continued",
 				m.SchemaVersion,
 				SchemaVersion,
 			),
-			"Review and explicitly migrate metadata and managed contracts using the owning CLI version.",
+			"Review and explicitly migrate metadata and managed contracts "+
+				"using the owning CLI version.",
 		)
 	}
 
@@ -149,7 +166,8 @@ func InspectArchitecture(directory string) ArchitectureReport {
 			"ARCH003",
 			"go.mod",
 			1,
-			"module path unavailable; local dependency resolution is unassessed",
+			"module path unavailable; local dependency resolution is "+
+				"unassessed",
 			"Restore a valid module directive.",
 		)
 	}
@@ -296,14 +314,20 @@ func InspectArchitecture(directory string) ArchitectureReport {
 				s.file,
 				1,
 				"unclassified production package: "+key,
-				"Place the package under a documented responsibility root; helpers retain transitive dependency checks.",
+				"Place the package under a documented responsibility root; "+
+					"helpers retain transitive dependency checks.",
 			)
 		}
 
 		if s.role == "policy" || s.role == "configuration" {
 			r.Unassessed = append(
+
 				r.Unassessed,
-				"origin dependency restrictions not assessed for shared "+s.role+" package: "+key,
+
+				"origin dependency restrictions not assessed for shared "+
+					s.role+
+					" package: "+
+					key,
 			)
 		}
 
@@ -358,7 +382,9 @@ func InspectArchitecture(directory string) ArchitectureReport {
 							dep.path,
 							strings.Join(append(chain, current), " -> "),
 						),
-						"Move concrete effects to adapters; inject a consumer-owned port and keep shared wire types in contract-only packages.",
+						"Move concrete effects to adapters; inject a "+
+							"consumer-owned port and keep shared wire "+
+							"types in contract-only packages.",
 					)
 
 					r.Diagnostics[len(r.Diagnostics)-1].SourceRole = origin.role
@@ -374,7 +400,8 @@ func InspectArchitecture(directory string) ArchitectureReport {
 							dep.file,
 							dep.line,
 							"local import cannot be inspected: "+dep.path,
-							"Restore the local package or remove the unresolved import.",
+							"Restore the local package or remove the "+
+								"unresolved import.",
 						)
 					} else {
 						visit(local, append(chain, current))
@@ -393,12 +420,17 @@ func InspectArchitecture(directory string) ArchitectureReport {
 			"scripts/check.sh",
 			1,
 			"canonical CLI check invocation is absent or unrecognized",
-			"Have the project check script invoke pluto vet or pluto architecture check; separately require it in trusted CI.",
+			"Have the project check script invoke pluto vet or pluto "+
+				"architecture check; separately require it in trusted CI.",
 		)
 	}
 
 	if m.Boundary.Mode == "candidate" {
-		r.Unassessed[0] = "supported candidate source ownership and declared capability shape are checked; arbitrary business semantics, deployed SQL behavior, downstream idempotency, dependency runtime correctness and trusted CI execution are not proved by source inspection"
+		r.Unassessed[0] = "supported candidate source ownership and declared " +
+			"capability shape are checked; arbitrary business semantics, " +
+			"deployed SQL behavior, downstream idempotency, dependency " +
+			"runtime correctness and trusted CI execution are not proved " +
+			"by source inspection"
 	}
 
 	r.Diagnostics = append(
@@ -453,7 +485,110 @@ func InspectArchitecture(directory string) ArchitectureReport {
 }
 
 func architectureRole(path string) string {
-	for _, item := range []struct{ root, role string }{{"cmd", "composition"}, {"internal/app", "composition"}, {"internal/config", "configuration"}, {"internal/access", "policy"}, {"internal/features", "domain"}, {"internal/pluto", "entry"}, {"internal/development", "composition"}, {"internal/handlers", "entry"}, {"internal/background", "entry"}, {"internal/jobs", "entry"}, {"internal/agents", "entry"}, {"internal/jobcontracts", "contract"}, {"internal/transport", "entry"}, {"internal/tools", "entry"}, {"internal/operations", "operations"}, {"internal/domain", "domain"}, {"internal/storage", "data"}, {"internal/caching", "data"}, {"internal/auth", "infrastructure"}, {"internal/infrastructure", "infrastructure"}, {"internal/paths", "contract"}, {"internal/models", "contract"}, {"internal/ports", "contract"}, {"internal/api", "contract"}, {"web", "presentation"}} {
+	for _, item := range []struct {
+		root, role string
+	}{
+		{
+			"cmd",
+			"composition",
+		},
+		{
+			"internal/app",
+			"composition",
+		},
+		{
+			"internal/config",
+			"configuration",
+		},
+		{
+			"internal/access",
+			"policy",
+		},
+		{
+			"internal/features",
+			"domain",
+		},
+		{
+			"internal/pluto",
+			"entry",
+		},
+		{
+			"internal/development",
+			"composition",
+		},
+		{
+			"internal/handlers",
+			"entry",
+		},
+		{
+			"internal/background",
+			"entry",
+		},
+		{
+			"internal/jobs",
+			"entry",
+		},
+		{
+			"internal/agents",
+			"entry",
+		},
+		{
+			"internal/jobcontracts",
+			"contract",
+		},
+		{
+			"internal/transport",
+			"entry",
+		},
+		{
+			"internal/tools",
+			"entry",
+		},
+		{
+			"internal/operations",
+			"operations",
+		},
+		{
+			"internal/domain",
+			"domain",
+		},
+		{
+			"internal/storage",
+			"data",
+		},
+		{
+			"internal/caching",
+			"data",
+		},
+		{
+			"internal/auth",
+			"infrastructure",
+		},
+		{
+			"internal/infrastructure",
+			"infrastructure",
+		},
+		{
+			"internal/paths",
+			"contract",
+		},
+		{
+			"internal/models",
+			"contract",
+		},
+		{
+			"internal/ports",
+			"contract",
+		},
+		{
+			"internal/api",
+			"contract",
+		},
+		{
+			"web",
+			"presentation",
+		},
+	} {
 		if path == item.root || strings.HasPrefix(path, item.root+"/") {
 			return item.role
 		}

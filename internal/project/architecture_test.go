@@ -13,11 +13,21 @@ func TestArchitectureInspection(t *testing.T) {
 		name, source, dependency string
 		bad                      bool
 	}{
-		{"data entry", "internal/storage/store.go", "internal/background", true},
+		{
+			"data entry",
+			"internal/storage/store.go",
+			"internal/background",
+			true,
+		},
 		{"helper bypass", "internal/storage/store.go", "internal/helper", true},
 		{"operation transport", "internal/operations/run.go", "net/http", true},
 		{"domain effect", "internal/domain/rule.go", "os", true},
-		{"data contract", "internal/storage/store.go", "internal/models", false},
+		{
+			"data contract",
+			"internal/storage/store.go",
+			"internal/models",
+			false,
+		},
 		{"composition", "cmd/server/main.go", "internal/background", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,7 +69,8 @@ func TestArchitectureInspection(t *testing.T) {
 			)
 			write(
 				"internal/helper/helper.go",
-				"package helper\nimport _ \"example.test/app/internal/background\"\n",
+				"package helper\nimport _ \"example.test/app/internal/"+
+					"background\"\n",
 			)
 			write(
 				"internal/models/wire.go",
@@ -71,7 +82,9 @@ func TestArchitectureInspection(t *testing.T) {
 
 			for _, d := range report.Diagnostics {
 				if d.ID == "ARCH101" &&
-					(d.File == tc.source || tc.name == "helper bypass" && d.File == "internal/helper/helper.go") {
+					(d.File == tc.source ||
+						tc.name == "helper bypass" &&
+							d.File == "internal/helper/helper.go") {
 					found = true
 				}
 			}
@@ -130,7 +143,8 @@ func TestArchitectureBuildVariantsAndUnresolvedImport(t *testing.T) {
 	if err := os.WriteFile(
 		filepath.Join(root, "variant.go"),
 		[]byte(
-			"//go:build imaginary\n\npackage app\nimport _ \"example.test/app/missing\"\n",
+			"//go:build imaginary\n\npackage app\nimport _ \"example.test/"+
+				"app/missing\"\n",
 		),
 		0o644,
 	); err != nil {
@@ -156,13 +170,21 @@ func TestArchitectureBuildVariantsAndUnresolvedImport(t *testing.T) {
 }
 
 func TestArchitectureInvocationRequiresCommand(t *testing.T) {
-	for _, s := range []string{"# pluto vet", "echo pluto vet", "printf 'pluto architecture check'"} {
+	for _, s := range []string{
+		"# pluto vet",
+		"echo pluto vet",
+		"printf 'pluto architecture check'",
+	} {
 		if architectureInvocation(s) {
 			t.Fatalf("accepted inert invocation: %s", s)
 		}
 	}
 
-	for _, s := range []string{"pluto vet", "exec pluto vet", "pluto architecture check --format json"} {
+	for _, s := range []string{
+		"pluto vet",
+		"exec pluto vet",
+		"pluto architecture check --format json",
+	} {
 		if !architectureInvocation(s) {
 			t.Fatalf("missed invocation: %s", s)
 		}

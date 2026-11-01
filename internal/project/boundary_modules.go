@@ -39,7 +39,8 @@ func ConfigureBoundaryModules(
 	candidate := profile.Mode == "candidate"
 	if !candidate && requires[boundaryIdentityModule] != "" {
 		return nil, fmt.Errorf(
-			"published boundary profile cannot retain candidate identity requirements",
+			"published boundary profile cannot retain candidate identity " +
+				"requirements",
 		)
 	}
 
@@ -71,9 +72,12 @@ func ConfigureBoundaryModules(
 			"github.com/plutoframework/",
 		)
 		if !candidate &&
-			(replacement.module == boundaryIdentityModule || (framework && local)) {
+			(replacement.module == boundaryIdentityModule ||
+				(framework &&
+					local)) {
 			return nil, fmt.Errorf(
-				"published boundary profile cannot retain local framework replacement %s",
+				"published boundary profile cannot retain local framework "+
+					"replacement %s",
 				replacement.module,
 			)
 		}
@@ -199,7 +203,8 @@ func boundaryModuleInventory(
 		case "require":
 			if len(fields) != 2 || fields[0] == "(" || fields[1] == ")" {
 				return nil, nil, fmt.Errorf(
-					"unsupported require syntax; format go.mod before configuring boundaries",
+					"unsupported require syntax; format go.mod before " +
+						"configuring boundaries",
 				)
 			}
 
@@ -215,7 +220,8 @@ func boundaryModuleInventory(
 			for _, field := range fields {
 				if field == "(" || field == ")" {
 					return nil, nil, fmt.Errorf(
-						"unsupported inline replacement block; format go.mod before configuring boundaries",
+						"unsupported inline replacement block; format go.mod " +
+							"before configuring boundaries",
 					)
 				}
 			}
@@ -237,7 +243,8 @@ func boundaryModuleInventory(
 			if (arrow != 1 && arrow != 2) ||
 				(len(fields)-arrow != 2 && len(fields)-arrow != 3) {
 				return nil, nil, fmt.Errorf(
-					"unsupported replacement syntax; format go.mod before configuring boundaries",
+					"unsupported replacement syntax; format go.mod before " +
+						"configuring boundaries",
 				)
 			}
 
@@ -258,7 +265,8 @@ func boundaryModuleInventory(
 				!strings.HasPrefix(replacement.target, "./") &&
 				!strings.HasPrefix(replacement.target, "../") {
 				return nil, nil, fmt.Errorf(
-					"replacement target without a version must be a filesystem path",
+					"replacement target without a version must be a " +
+						"filesystem path",
 				)
 			}
 
@@ -280,7 +288,10 @@ func boundaryModuleFields(data []byte) ([][]string, error) {
 	var scan scanner.Scanner
 	scan.Init(strings.NewReader(string(data)))
 
-	scan.Mode = scanner.ScanIdents | scanner.ScanStrings | scanner.ScanComments | scanner.SkipComments
+	scan.Mode = scanner.ScanIdents |
+		scanner.ScanStrings |
+		scanner.ScanComments |
+		scanner.SkipComments
 	scan.Error = func(_ *scanner.Scanner, _ string) {}
 
 	var (
@@ -309,7 +320,14 @@ func boundaryModuleFields(data []byte) ([][]string, error) {
 
 				fields = append(fields, decoded)
 			} else {
-				value = strings.NewReplacer("=>", " => ", "(", " ( ", ")", " ) ").
+				value = strings.NewReplacer(
+					"=>",
+					" => ",
+					"(",
+					" ( ",
+					")",
+					" ) ",
+				).
 					Replace(value)
 				fields = append(fields, strings.Fields(value)...)
 			}

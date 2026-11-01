@@ -9,7 +9,10 @@ import (
 	"testing"
 )
 
-const boundaryBaseModule = "module example.test/app\n\ngo 1.25.5\n\nrequire (\n github.com/plutoframework/pluto-auth v0.1.0 // retain pin\n example.test/other v1.2.3\n)\n\nreplace example.test/other => ../other\n"
+const boundaryBaseModule = "module example.test/app\n\ngo 1.25.5\n\nrequire " +
+	"(\n github.com/plutoframework/pluto-auth v0.1.0 // retain pin\n " +
+	"example.test/other v1.2.3\n)\n\nreplace example.test/other => ../" +
+	"other\n"
 
 func TestBoundaryModulesPreservePinsAndAreIdempotent(t *testing.T) {
 	profile := boundaryProfileFixture(t)
@@ -60,10 +63,19 @@ func TestBoundaryModulesPreservePinsAndAreIdempotent(t *testing.T) {
 
 func TestBoundaryModulesPublishedCannotRetainCandidates(t *testing.T) {
 	for _, suffix := range []string{
-		"require " + boundaryIdentityModule + " " + boundaryIdentityVersion + "\n",
+		"require " +
+			boundaryIdentityModule +
+			" " +
+			boundaryIdentityVersion +
+			"\n",
+
 		"replace github.com/plutoframework/pluto-auth => ../pluto-auth\n",
-		"replace(\ngithub.com/plutoframework/pluto-core=>\"/tmp/source path\"\n)\n",
-		"replace " + boundaryIdentityModule + " => example.test/identity v1.0.0\n",
+
+		"replace(\ngithub.com/plutoframework/pluto-core=>\"/tmp/source " +
+			"path\"\n)\n",
+
+		"replace " + boundaryIdentityModule + " => example.test/identity " +
+			"v1.0.0\n",
 	} {
 		if _, err := ConfigureBoundaryModules(
 			BoundaryProfile{},
@@ -88,18 +100,72 @@ func TestBoundaryModulesPublishedCannotRetainCandidates(t *testing.T) {
 }
 
 func TestBoundaryModulesRejectConflictsWithoutRewriting(t *testing.T) {
-	for _, test := range []struct{ name, suffix, want string }{
-		{"agent pin", "require github.com/plutoframework/pluto-agent v9.0.0\n", "explicit upgrade"},
-		{"identity pin", "require " + boundaryIdentityModule + " v1.0.0\n", "explicit candidate"},
-		{"duplicate identity", "require " + boundaryIdentityModule + " " + boundaryIdentityVersion + "\nrequire " + boundaryIdentityModule + " " + boundaryIdentityVersion + "\n", "duplicate"},
-		{"different source", "replace github.com/plutoframework/pluto-core => /not/the/source\n", "conflicting"},
-		{"relative source", "replace github.com/plutoframework/pluto-core => ../pluto-core\n", "conflicting"},
-		{"versioned source", "replace github.com/plutoframework/pluto-core v0.1.0 => /not/the/source\n", "conflicting"},
-		{"remote replacement", "replace github.com/plutoframework/pluto-core => example.test/core v1.0.0\n", "conflicting"},
-		{"undeclared source", "replace github.com/plutoframework/pluto-auth/methods/oidc => /tmp/oidc\n", "no declared source"},
-		{"inline block", "replace (github.com/plutoframework/pluto-core => /tmp/core)\n", "inline"},
+	for _, test := range []struct {
+		name, suffix, want string
+	}{
+		{
+			"agent pin",
+			"require github.com/plutoframework/pluto-agent v9.0.0\n",
+			"explicit upgrade",
+		},
+		{
+			"identity pin",
+			"require " + boundaryIdentityModule + " v1.0.0\n",
+			"explicit candidate",
+		},
+		{
+			"duplicate identity",
+
+			"require " +
+				boundaryIdentityModule +
+				" " +
+				boundaryIdentityVersion +
+				"\nrequire " +
+
+				boundaryIdentityModule + " " + boundaryIdentityVersion + "\n",
+
+			"duplicate",
+		},
+		{
+			"different source",
+			"replace github.com/plutoframework/pluto-core => /not/the/" +
+				"source\n",
+			"conflicting",
+		},
+		{
+			"relative source",
+			"replace github.com/plutoframework/pluto-core => ../pluto-core\n",
+			"conflicting",
+		},
+		{
+			"versioned source",
+			"replace github.com/plutoframework/pluto-core v0.1.0 => /not/the/" +
+				"source\n",
+			"conflicting",
+		},
+		{
+			"remote replacement",
+			"replace github.com/plutoframework/pluto-core => example.test/" +
+				"core v1.0.0\n",
+			"conflicting",
+		},
+		{
+			"undeclared source",
+			"replace github.com/plutoframework/pluto-auth/methods/oidc => /" +
+				"tmp/oidc\n",
+			"no declared source",
+		},
+		{
+			"inline block",
+			"replace (github.com/plutoframework/pluto-core => /tmp/core)\n",
+			"inline",
+		},
 		{"unfinished block", "replace (\n", "unterminated"},
-		{"hidden spacing", "require github.com/plutoframework/ /*gap*/ pluto-agent v1.0.0\n", "require syntax"},
+		{
+			"hidden spacing",
+			"require github.com/plutoframework/ /*gap*/ pluto-agent v1.0.0\n",
+			"require syntax",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			input := []byte(boundaryBaseModule + test.suffix)
@@ -131,7 +197,8 @@ func TestBoundaryModulesRetainMatchingSourcesAndQuotedPaths(t *testing.T) {
 
 	corePath := paths["github.com/plutoframework/pluto-core"]
 	input := boundaryBaseModule + fmt.Sprintf(
-		"replace (\n github.com/plutoframework/pluto-core => %s // explicit local source\n)\n",
+		"replace (\n github.com/plutoframework/pluto-core => %s // explicit "+
+			"local source\n)\n",
 		strconv.Quote(corePath),
 	)
 
@@ -173,9 +240,12 @@ func TestBoundaryModulesRetainMatchingSourcesAndQuotedPaths(t *testing.T) {
 
 	_, replacements, err := boundaryModuleInventory(
 		[]byte(
-			"module example.test/app\nreplace example.test/other => " + strconv.Quote(
-				quoted,
-			) + "\n",
+
+			"module example.test/app\nreplace example.test/other => " +
+				strconv.Quote(
+
+					quoted,
+				) + "\n",
 		),
 	)
 	if err != nil || len(replacements) != 1 ||

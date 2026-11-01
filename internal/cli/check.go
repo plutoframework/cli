@@ -93,7 +93,13 @@ func projectCommand(
 	}
 	if vet {
 		command.Flags().
-			BoolVar(&staged, "staged", false, "Require all project contents staged, then vet the identical working tree")
+			BoolVar(
+				&staged,
+				"staged",
+				false,
+				"Require all project contents staged, then vet the identical "+
+					"working tree",
+			)
 	}
 
 	return command

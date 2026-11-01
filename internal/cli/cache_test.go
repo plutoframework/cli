@@ -59,7 +59,9 @@ func TestGeneratedCaches(t *testing.T) {
 			var output bytes.Buffer
 			if err := tmpl.Execute(
 				&output,
-				struct{ Mode string }{mode},
+				struct {
+					Mode string
+				}{mode},
 			); err != nil {
 				t.Fatal(err)
 			}

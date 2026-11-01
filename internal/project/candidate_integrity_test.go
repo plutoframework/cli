@@ -57,7 +57,8 @@ func TestCandidateIntegrityPreservesCompilerDirectives(t *testing.T) {
 		)
 		if candidateSourceEquivalent([]byte(actual), expected) {
 			t.Fatal(
-				"compiler directive moved to another declaration or attachment",
+				"compiler directive moved to another declaration or " +
+					"attachment",
 			)
 		}
 	}
@@ -95,8 +96,13 @@ func TestCandidateIntegrityRejectsExcludedGateAndSQLChanges(t *testing.T) {
 		t.Fatalf("canonical positive failed: %v", diagnostics)
 	}
 
-	for _, test := range []struct{ path, prefix string }{
-		{"internal/operations/sales/approve_gate_gen.go", "//go:build never_candidate_review\n\n"},
+	for _, test := range []struct {
+		path, prefix string
+	}{
+		{
+			"internal/operations/sales/approve_gate_gen.go",
+			"//go:build never_candidate_review\n\n",
+		},
 		{"db/migrations/001_initial.sql", "-- changed managed migration\n"},
 	} {
 		original := files[test.path]

@@ -93,9 +93,10 @@ func addBlueprintCommand(options Options) *cobra.Command {
 	)
 
 	command := &cobra.Command{
-		Use:   "blueprint --file PATH",
-		Short: "Atomically add declared candidate resources, operations and entries",
-		Args:  cobra.NoArgs,
+		Use: "blueprint --file PATH",
+		Short: "Atomically add declared candidate resources, operations and " +
+			"entries",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if file == "" {
 				return fmt.Errorf("blueprint requires --file")
@@ -108,7 +109,8 @@ func addBlueprintCommand(options Options) *cobra.Command {
 
 			if manifest.Boundary.Mode != "candidate" {
 				return fmt.Errorf(
-					"blueprints require an explicitly configured candidate boundary profile",
+					"blueprints require an explicitly configured candidate " +
+						"boundary profile",
 				)
 			}
 
@@ -208,9 +210,19 @@ func addBlueprintCommand(options Options) *cobra.Command {
 		},
 	}
 	command.Flags().
-		StringVar(&file, "file", "", "TOML blueprint path; relative paths use the project root")
+		StringVar(
+			&file,
+			"file",
+			"",
+			"TOML blueprint path; relative paths use the project root",
+		)
 	command.Flags().
-		BoolVar(&dry, "dry-run", false, "Validate the complete blueprint without writing")
+		BoolVar(
+			&dry,
+			"dry-run",
+			false,
+			"Validate the complete blueprint without writing",
+		)
 
 	return command
 }
@@ -271,7 +283,8 @@ func applyBlueprintChange(
 
 	if !dry {
 		cmd.Println(
-			"Blueprint contracts created. Run go mod tidy, pluto fmt and pluto vet; apply declared migrations explicitly.",
+			"Blueprint contracts created. Run go mod tidy, pluto fmt and " +
+				"pluto vet; apply declared migrations explicitly.",
 		)
 	}
 
@@ -298,7 +311,12 @@ func blueprintChecksums(current []byte) ([]byte, error) {
 
 	output := string(current)
 
-	for _, line := range strings.Split(strings.TrimSpace(project.AgentGoSum), "\n") {
+	for _, line := range strings.Split(
+		strings.TrimSpace(
+			project.AgentGoSum,
+		),
+		"\n",
+	) {
 		fields := strings.Fields(line)
 		if len(fields) != 3 {
 			return nil, fmt.Errorf("invalid embedded agent checksum metadata")
@@ -308,7 +326,8 @@ func blueprintChecksums(current []byte) ([]byte, error) {
 		if prior, ok := existing[key]; ok {
 			if prior != fields[2] {
 				return nil, fmt.Errorf(
-					"existing checksum for %s conflicts with the pinned agent dependency",
+					"existing checksum for %s conflicts with the pinned "+
+						"agent dependency",
 					key,
 				)
 			}

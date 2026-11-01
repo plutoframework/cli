@@ -2,12 +2,15 @@ package project
 
 import "fmt"
 
-const initialMigrationSQL = "-- Foundation only: no application tables or migration runner yet.\nCREATE TABLE schema_metadata (version bigint PRIMARY KEY);\nINSERT INTO schema_metadata (version) VALUES (1);\n"
+const initialMigrationSQL = "-- Foundation only: no application tables or " +
+	"migration runner yet.\nCREATE TABLE schema_metadata (version bigint " +
+	"PRIMARY KEY);\nINSERT INTO schema_metadata (version) VALUES (1);\n"
 
 // candidateFoundation renders the same initial production foundation without
 // calling Managed or InitialFiles. CandidateManaged replaces the authority and
 // composition files with candidate implementations before formatting/checking.
-// Tests, tooling, documentation and application metadata are generated separately.
+// Tests, tooling, documentation and application metadata are generated
+// separately.
 func candidateFoundation(m Manifest) (map[string][]byte, error) {
 	if m.Boundary.Mode != "candidate" {
 		return nil, fmt.Errorf(
@@ -53,9 +56,12 @@ func candidateFoundation(m Manifest) (map[string][]byte, error) {
 		layout["internal/transport/credentials.go"] = "credentials.go"
 		layout["internal/paths/credentials.go"] = "credentials_paths.go"
 		layout["cmd/api/credentials.go"] = "credentials_main.go"
-		layout["db/migrations/004_local_credentials.sql"] = "credentials_schema.sql"
-		layout["db/migrations/006_authentication.sql"] = "authentication_schema.sql"
-		layout["db/migrations/007_external_accounts.sql"] = "external_accounts.sql"
+		layout["db/migrations/004_local_credentials.sql"] = "credentials_" +
+			"schema.sql"
+		layout["db/migrations/006_authentication.sql"] = "authentication_" +
+			"schema.sql"
+		layout["db/migrations/007_external_accounts.sql"] = "external_" +
+			"accounts.sql"
 	}
 
 	if m.Capabilities.OIDC {

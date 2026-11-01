@@ -87,26 +87,114 @@ func boundaryFixture(t *testing.T) (string, Manifest) {
 }
 
 func TestManagedOperationBoundary(t *testing.T) {
-	for _, tc := range []struct{ name, path, source, id string }{
+	for _, tc := range []struct {
+		name, path, source, id string
+	}{
 		{"positive", "", "", ""},
-		{"gate removed", "internal/operations/widgets/create_gate_gen.go", "", "ARCH201"},
-		{"gate changed", "internal/operations/widgets/create_gate_gen.go", "package widgets\n", "ARCH202"},
-		{"handler replaced", "internal/handlers/widgets/create.go", "package widgets\n", "ARCH202"},
-		{"entry registration changed", "internal/app/routes_gen.go", "package app\n", "ARCH202"},
-		{"group registration changed", "internal/handlers/widgets/register_gen.go", "package widgets\n", "ARCH202"},
+		{
+			"gate removed",
+			"internal/operations/widgets/create_gate_gen.go",
+			"",
+			"ARCH201",
+		},
+		{
+			"gate changed",
+			"internal/operations/widgets/create_gate_gen.go",
+			"package widgets\n",
+			"ARCH202",
+		},
+		{
+			"handler replaced",
+			"internal/handlers/widgets/create.go",
+			"package widgets\n",
+			"ARCH202",
+		},
+		{
+			"entry registration changed",
+			"internal/app/routes_gen.go",
+			"package app\n",
+			"ARCH202",
+		},
+		{
+			"group registration changed",
+			"internal/handlers/widgets/register_gen.go",
+			"package widgets\n",
+			"ARCH202",
+		},
 
-		{"resolver changed", "internal/access/authorization_gen.go", "package access\n", "ARCH202"},
-		{"private helper bypass", "internal/operations/widgets/helper.go", "package widgets\nfunc helper(op *Create) { _ = op.execute }\n", "ARCH203"},
-		{"method expression bypass", "internal/operations/widgets/helper.go", "package widgets\nvar bypass = (*Create).execute\n", "ARCH203"},
-		{"exported alternate entry", "internal/operations/widgets/helper.go", "package widgets\nfunc Unsafe() {}\n", "ARCH204"},
-		{"sealed interface embedding", "internal/handlers/widgets/helper.go", "package widgets\nimport ops \"example.test/boundary/internal/operations/widgets\"\ntype bypass struct { ops.CreateBoundary }\n", "ARCH204"},
-		{"interface embedding route", "internal/handlers/widgets/helper.go", "package widgets\nimport ops \"example.test/boundary/internal/operations/widgets\"\ntype bypass interface { ops.CreateBoundary }\n", "ARCH204"},
-		{"dot import embedding route", "internal/handlers/widgets/helper.go", "package widgets\nimport . \"example.test/boundary/internal/operations/widgets\"\ntype bypass struct { CreateBoundary }\n", "ARCH204"},
+		{
+			"resolver changed",
+			"internal/access/authorization_gen.go",
+			"package access\n",
+			"ARCH202",
+		},
+		{
+			"private helper bypass",
+			"internal/operations/widgets/helper.go",
+			"package widgets\nfunc helper(op *Create) { _ = op.execute }\n",
+			"ARCH203",
+		},
+		{
+			"method expression bypass",
+			"internal/operations/widgets/helper.go",
+			"package widgets\nvar bypass = (*Create).execute\n",
+			"ARCH203",
+		},
+		{
+			"exported alternate entry",
+			"internal/operations/widgets/helper.go",
+			"package widgets\nfunc Unsafe() {}\n",
+			"ARCH204",
+		},
+		{
+			"sealed interface embedding",
+			"internal/handlers/widgets/helper.go",
+			"package widgets\nimport ops \"example.test/boundary/internal/" +
+				"operations/widgets\"\ntype bypass struct { " +
+				"ops.CreateBoundary }\n",
+			"ARCH204",
+		},
+		{
+			"interface embedding route",
+			"internal/handlers/widgets/helper.go",
+			"package widgets\nimport ops \"example.test/boundary/internal/" +
+				"operations/widgets\"\ntype bypass interface { " +
+				"ops.CreateBoundary }\n",
+			"ARCH204",
+		},
+		{
+			"dot import embedding route",
+			"internal/handlers/widgets/helper.go",
+			"package widgets\nimport . \"example.test/boundary/internal/" +
+				"operations/widgets\"\ntype bypass struct { " +
+				"CreateBoundary }\n",
+			"ARCH204",
+		},
 
-		{"defined interface wrapper", "internal/handlers/widgets/helper.go", "package widgets\nimport ops \"example.test/boundary/internal/operations/widgets\"\ntype inherited ops.CreateBoundary\ntype bypass struct{ inherited }\n", "ARCH204"},
-		{"parenthesized defined interface", "internal/handlers/widgets/helper.go", "package widgets\nimport ops \"example.test/boundary/internal/operations/widgets\"\ntype inherited (ops.CreateBoundary)\ntype bypass struct{ inherited }\n", "ARCH204"},
+		{
+			"defined interface wrapper",
+			"internal/handlers/widgets/helper.go",
+			"package widgets\nimport ops \"example.test/boundary/internal/" +
+				"operations/widgets\"\ntype inherited " +
+				"ops.CreateBoundary\ntype bypass struct{ inherited }\n",
+			"ARCH204",
+		},
+		{
+			"parenthesized defined interface",
+			"internal/handlers/widgets/helper.go",
+			"package widgets\nimport ops \"example.test/boundary/internal/" +
+				"operations/widgets\"\ntype inherited " +
+				"(ops.CreateBoundary)\ntype bypass struct{ inherited }\n",
+			"ARCH204",
+		},
 
-		{"alias embedding route", "internal/handlers/widgets/helper.go", "package widgets\nimport ops \"example.test/boundary/internal/operations/widgets\"\ntype bypass = ops.CreateBoundary\n", "ARCH204"},
+		{
+			"alias embedding route",
+			"internal/handlers/widgets/helper.go",
+			"package widgets\nimport ops \"example.test/boundary/internal/" +
+				"operations/widgets\"\ntype bypass = ops.CreateBoundary\n",
+			"ARCH204",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := boundaryFixture(t)
@@ -116,7 +204,13 @@ func TestManagedOperationBoundary(t *testing.T) {
 					if err := os.Remove(path); err != nil {
 						t.Fatal(err)
 					}
-				} else if err := os.WriteFile(path, []byte(tc.source), 0o644); err != nil {
+				} else if err := os.WriteFile(
+					path,
+					[]byte(
+						tc.source,
+					),
+					0o644,
+				); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -125,7 +219,8 @@ func TestManagedOperationBoundary(t *testing.T) {
 			if tc.id == "" {
 				if report.Passed {
 					t.Fatal(
-						"published protected fixture incorrectly passed complete gate",
+						"published protected fixture incorrectly passed " +
+							"complete gate",
 					)
 				}
 
@@ -145,7 +240,13 @@ func TestManagedOperationBoundary(t *testing.T) {
 
 			for _, d := range report.Diagnostics {
 				if d.ID == tc.id &&
-					(d.File == tc.path || tc.name == "gate removed" && d.File == "pluto.toml" && strings.Contains(d.Message, tc.path)) {
+					(d.File == tc.path ||
+						tc.name == "gate removed" &&
+							d.File == "pluto.toml" &&
+							strings.Contains(
+								d.Message,
+								tc.path,
+							)) {
 					found = true
 				}
 			}

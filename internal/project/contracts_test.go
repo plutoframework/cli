@@ -6,7 +6,11 @@ import (
 	"testing"
 )
 
-func contractFixture() ([]ResourceContract, []OperationContract, []EffectContract) {
+func contractFixture() (
+	[]ResourceContract,
+	[]OperationContract,
+	[]EffectContract,
+) {
 	resources := []ResourceContract{
 		{
 			Group:        "sales",
@@ -76,13 +80,14 @@ func contractFixture() ([]ResourceContract, []OperationContract, []EffectContrac
 			Effects:        []string{"approval-notice"},
 		},
 		{
-			ID:              "delivery.Notify",
-			Resource:        "sales.Invoice",
-			Kind:            "effect",
-			Permission:      "invoice:notify",
-			ResourcePolicy:  "tenant",
-			Idempotency:     "exempt",
-			ExemptionReason: "The provider deduplicates the stable delivery identifier.",
+			ID:             "delivery.Notify",
+			Resource:       "sales.Invoice",
+			Kind:           "effect",
+			Permission:     "invoice:notify",
+			ResourcePolicy: "tenant",
+			Idempotency:    "exempt",
+			ExemptionReason: "The provider deduplicates the stable delivery " +
+				"identifier.",
 		},
 	}
 	effects := []EffectContract{
@@ -233,59 +238,316 @@ func TestContractsSupportDistinctExplicitResources(t *testing.T) {
 func TestContractsRejectMissingAndContradictoryObligations(t *testing.T) {
 	for _, test := range []struct {
 		name, want string
-		change     func([]ResourceContract, []OperationContract, []EffectContract)
+		change     func(
+			[]ResourceContract,
+			[]OperationContract,
+			[]EffectContract,
+		)
 	}{
-		{"unsafe SQL", "safe SQL", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) {
+		{"unsafe SQL", "safe SQL", func(
+			r []ResourceContract,
+			_ []OperationContract,
+			_ []EffectContract,
+		) {
 			r[0].Table = "invoices;drop table tenants"
 		}},
-		{"namespace", "namespace", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].Namespace = "" }},
-		{"version", "version", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].Version = 0 }},
-		{"normalization", "normalization", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].Normalize = "" }},
-		{"visibility", "visibility", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].Visibility = "" }},
-		{"unbounded page", "bounded", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].PageLimit = 0 }},
-		{"unbounded export", "bounded", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].ExportLimit = 10001 }},
-		{"unbounded cache", "bounded", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].CacheTTLSeconds = 3601 }},
-		{"initial state", "initial state", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].InitialState = "unknown" }},
-		{"ambiguous transition", "nondeterministic", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) {
-			r[0].Transitions = append(r[0].Transitions, ResourceTransition{From: "draft", Event: "approve", To: "draft"})
+		{
+			"namespace",
+			"namespace",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].Namespace = ""
+			},
+		},
+		{
+			"version",
+			"version",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].Version = 0
+			},
+		},
+		{
+			"normalization",
+			"normalization",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].Normalize = ""
+			},
+		},
+		{
+			"visibility",
+			"visibility",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].Visibility = ""
+			},
+		},
+		{
+			"unbounded page",
+			"bounded",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].PageLimit = 0
+			},
+		},
+		{
+			"unbounded export",
+			"bounded",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].ExportLimit = 10001
+			},
+		},
+		{
+			"unbounded cache",
+			"bounded",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].CacheTTLSeconds = 3601
+			},
+		},
+		{
+			"initial state",
+			"initial state",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].InitialState = "unknown"
+			},
+		},
+		{"ambiguous transition", "nondeterministic", func(
+			r []ResourceContract,
+			_ []OperationContract,
+			_ []EffectContract,
+		) {
+			r[0].Transitions = append(r[0].Transitions, ResourceTransition{
+				From:  "draft",
+				Event: "approve",
+				To:    "draft",
+			})
 		}},
-		{"unknown transition target", "undeclared", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) {
+		{"unknown transition target", "undeclared", func(
+			r []ResourceContract,
+			_ []OperationContract,
+			_ []EffectContract,
+		) {
 			r[0].Transitions[0].To = "missing"
 		}},
-		{"missing transition guard", "transition guard", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) { r[0].Transitions[0].Guard = "" }},
-		{"unknown transition guard", "transition guard", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) {
+		{
+			"missing transition guard",
+			"transition guard",
+			func(
+				r []ResourceContract,
+				_ []OperationContract,
+				_ []EffectContract,
+			) {
+				r[0].Transitions[0].Guard = ""
+			},
+		},
+		{"unknown transition guard", "transition guard", func(
+			r []ResourceContract,
+			_ []OperationContract,
+			_ []EffectContract,
+		) {
 			r[0].Transitions[0].Guard = "sometimes"
 		}},
-		{"inconsistent event guards", "consistent guard", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) {
-			r[0].Transitions = append(r[0].Transitions, ResourceTransition{From: "approved", Event: "approve", To: "draft", Guard: "not_owner"})
+		{"inconsistent event guards", "consistent guard", func(
+			r []ResourceContract,
+			_ []OperationContract,
+			_ []EffectContract,
+		) {
+			r[0].Transitions = append(r[0].Transitions, ResourceTransition{
+				From:  "approved",
+				Event: "approve",
+				To:    "draft",
+				Guard: "not_owner",
+			})
 		}},
-		{"unknown resource", "undeclared resource", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[0].Resource = "other.Missing" }},
-		{"public resource", "protected", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[0].Public = true }},
-		{"missing permission", "permission", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[0].Permission = "" }},
-		{"missing policy", "resource policy", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[0].ResourcePolicy = "" }},
-		{"visibility bypass", "query visibility", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[1].ResourcePolicy = "tenant" }},
-		{"wrong creation policy", "create policy", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[3].ResourcePolicy = "owner" }},
-		{"unknown event", "transition event", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[4].Event = "delete" }},
-		{"contradictory owner guard", "contradicts", func(r []ResourceContract, _ []OperationContract, _ []EffectContract) {
+		{
+			"unknown resource",
+			"undeclared resource",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[0].Resource = "other.Missing"
+			},
+		},
+		{
+			"public resource",
+			"protected",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[0].Public = true
+			},
+		},
+		{
+			"missing permission",
+			"permission",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[0].Permission = ""
+			},
+		},
+		{
+			"missing policy",
+			"resource policy",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[0].ResourcePolicy = ""
+			},
+		},
+		{
+			"visibility bypass",
+			"query visibility",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[1].ResourcePolicy = "tenant"
+			},
+		},
+		{
+			"wrong creation policy",
+			"create policy",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[3].ResourcePolicy = "owner"
+			},
+		},
+		{
+			"unknown event",
+			"transition event",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[4].Event = "delete"
+			},
+		},
+		{"contradictory owner guard", "contradicts", func(
+			r []ResourceContract,
+			_ []OperationContract,
+			_ []EffectContract,
+		) {
 			r[0].Transitions[0].Guard = "not_owner"
 		}},
-		{"read event", "non-transition", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[0].Event = "approve" }},
-		{"missing replay", "replay semantics", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[4].Idempotency = "none" }},
-		{"empty exemption", "exemption reason", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) { o[5].ExemptionReason = "" }},
-		{"reason without exemption", "without exemption", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) {
+		{
+			"read event",
+			"non-transition",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[0].Event = "approve"
+			},
+		},
+		{
+			"missing replay",
+			"replay semantics",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[4].Idempotency = "none"
+			},
+		},
+		{
+			"empty exemption",
+			"exemption reason",
+			func(
+				_ []ResourceContract,
+				o []OperationContract,
+				_ []EffectContract,
+			) {
+				o[5].ExemptionReason = ""
+			},
+		},
+		{"reason without exemption", "without exemption", func(
+			_ []ResourceContract,
+			o []OperationContract,
+			_ []EffectContract,
+		) {
 			o[3].ExemptionReason = "Ignored because there is no exemption."
 		}},
-		{"read delivery", "atomic mutation", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) {
+		{"read delivery", "atomic mutation", func(
+			_ []ResourceContract,
+			o []OperationContract,
+			_ []EffectContract,
+		) {
 			o[0].Effects = []string{"approval-notice"}
 		}},
-		{"undeclared delivery", "undeclared", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) {
+		{"undeclared delivery", "undeclared", func(
+			_ []ResourceContract,
+			o []OperationContract,
+			_ []EffectContract,
+		) {
 			o[4].Effects = []string{"unknown"}
 		}},
-		{"delivery duplication", "duplicate effect", func(_ []ResourceContract, o []OperationContract, _ []EffectContract) {
+		{"delivery duplication", "duplicate effect", func(
+			_ []ResourceContract,
+			o []OperationContract,
+			_ []EffectContract,
+		) {
 			o[4].Effects = append(o[4].Effects, "approval-notice")
 		}},
-		{"unbounded retries", "finite", func(_ []ResourceContract, _ []OperationContract, e []EffectContract) { e[0].MaxAttempts = 0 }},
-		{"recursive effect", "effect operation", func(_ []ResourceContract, _ []OperationContract, e []EffectContract) {
+		{
+			"unbounded retries",
+			"finite",
+			func(
+				_ []ResourceContract,
+				_ []OperationContract,
+				e []EffectContract,
+			) {
+				e[0].MaxAttempts = 0
+			},
+		},
+		{"recursive effect", "effect operation", func(
+			_ []ResourceContract,
+			_ []OperationContract,
+			e []EffectContract,
+		) {
 			e[0].Operation = "sales.Approve"
 		}},
 	} {
@@ -306,7 +568,15 @@ func TestContractsRejectMissingAndContradictoryObligations(t *testing.T) {
 }
 
 func TestContractsRejectCollisionsAndOrphanedEffects(t *testing.T) {
-	for _, kind := range []string{"empty", "resource", "table", "namespace", "operation", "effect", "orphan"} {
+	for _, kind := range []string{
+		"empty",
+		"resource",
+		"table",
+		"namespace",
+		"operation",
+		"effect",
+		"orphan",
+	} {
 		t.Run(kind, func(t *testing.T) {
 			r, o, e := contractFixture()
 
@@ -341,7 +611,12 @@ func TestContractsRejectCollisionsAndOrphanedEffects(t *testing.T) {
 }
 
 func TestContractsReserveFrameworkTables(t *testing.T) {
-	for _, table := range []string{"pluto_jobs", "pluto_idempotency", "pluto_resource_audit", "pluto_future"} {
+	for _, table := range []string{
+		"pluto_jobs",
+		"pluto_idempotency",
+		"pluto_resource_audit",
+		"pluto_future",
+	} {
 		r, o, e := contractFixture()
 
 		r[0].Table = table

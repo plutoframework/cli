@@ -13,7 +13,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type wizardRun func(context.Context, io.Reader, io.Writer, wizardModel) (wizardModel, error)
+type wizardRun func(
+	context.Context,
+	io.Reader,
+	io.Writer,
+	wizardModel,
+) (
+	wizardModel,
+	error,
+)
 
 func terminalStreams(in io.Reader, out io.Writer) bool {
 	input, ok := in.(*os.File)
@@ -33,7 +41,18 @@ func runTea(
 	out io.Writer,
 	model wizardModel,
 ) (wizardModel, error) {
-	result, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out)).
+	result, err := tea.NewProgram(
+		model,
+		tea.WithContext(
+			ctx,
+		),
+		tea.WithInput(
+			in,
+		),
+		tea.WithOutput(
+			out,
+		),
+	).
 		Run()
 	if err != nil {
 		return wizardModel{}, err
@@ -79,7 +98,8 @@ func decorateWizard(
 
 		disabled, _ := cmd.Root().PersistentFlags().GetBool("no-input")
 		if forced && disabled {
-			return errors.New("--interactive and --no-input cannot be combined")
+			return errors.New("--interactive and --no-input cannot be " +
+				"combined")
 		}
 
 		if interactiveRequested(cmd, options, args, automatic) {
@@ -101,10 +121,20 @@ func decorateWizard(
 			return cmd.Help()
 		}
 
-		for _, name := range []string{"boundary-profile", "candidate-auth-source", "candidate-rbac-source", "candidate-core-source", "candidate-jobs-source", "resource-source", "max-attempts", "approval"} {
+		for _, name := range []string{
+			"boundary-profile",
+			"candidate-auth-source",
+			"candidate-rbac-source",
+			"candidate-core-source",
+			"candidate-jobs-source",
+			"resource-source",
+			"max-attempts",
+			"approval",
+		} {
 			if flag := cmd.Flags().Lookup(name); flag != nil && flag.Changed {
 				return fmt.Errorf(
-					"--%s requires --no-input; this candidate choice is not supported by the wizard",
+					"--%s requires --no-input; this candidate choice is not "+
+						"supported by the wizard",
 					name,
 				)
 			}
@@ -112,7 +142,8 @@ func decorateWizard(
 
 		if !options.terminal(cmd.InOrStdin(), cmd.OutOrStdout()) {
 			return errors.New(
-				"wizard requires terminal input and output; use explicit arguments with --no-input",
+				"wizard requires terminal input and output; use explicit " +
+					"arguments with --no-input",
 			)
 		}
 
@@ -145,8 +176,10 @@ func decorateWizard(
 				continue
 			}
 
-			// Rebuild and validate after terminal cleanup. The wizard shares the
-			// same Cobra validation, preflight and generator as scripted commands.
+			// Rebuild and validate after terminal cleanup. The wizard shares
+			// the
+			// same Cobra validation, preflight and generator as scripted
+			// commands.
 			plan, err := result.plan()
 			if err != nil {
 				return err

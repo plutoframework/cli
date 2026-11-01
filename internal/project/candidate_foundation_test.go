@@ -46,7 +46,13 @@ func TestCandidateFoundationOwnsInitialProductionPaths(t *testing.T) {
 			production := func(path string) bool {
 				return strings.HasSuffix(path, ".go") &&
 					!strings.HasSuffix(path, "_test.go") &&
-					(strings.HasPrefix(path, "cmd/") || strings.HasPrefix(path, "internal/")) ||
+					(strings.HasPrefix(
+						path,
+						"cmd/",
+					) || strings.HasPrefix(
+						path,
+						"internal/",
+					)) ||
 					strings.HasPrefix(path, "db/migrations/") &&
 						strings.HasSuffix(path, ".sql")
 			}
@@ -58,7 +64,8 @@ func TestCandidateFoundationOwnsInitialProductionPaths(t *testing.T) {
 
 				if _, owned := foundation[path]; !owned {
 					t.Errorf(
-						"initial production file lacks candidate foundation ownership: %s",
+						"initial production file lacks candidate foundation "+
+							"ownership: %s",
 						path,
 					)
 				}
@@ -68,7 +75,8 @@ func TestCandidateFoundationOwnsInitialProductionPaths(t *testing.T) {
 				if _, initialPath := initial[path]; !initialPath ||
 					!production(path) {
 					t.Errorf(
-						"foundation includes non-production or unrelated output: %s",
+						"foundation includes non-production or unrelated "+
+							"output: %s",
 						path,
 					)
 				}

@@ -67,17 +67,47 @@ func addOperationCommand(options Options) *cobra.Command {
 		},
 	}
 	command.Flags().
-		StringVar(&operation.Permission, "permission", "", "Required use-case permission")
+		StringVar(
+			&operation.Permission,
+			"permission",
+			"",
+			"Required use-case permission",
+		)
 	command.Flags().
-		BoolVar(&operation.Public, "public", false, "Explicit single-tenant unauthenticated use case")
+		BoolVar(
+			&operation.Public,
+			"public",
+			false,
+			"Explicit single-tenant unauthenticated use case",
+		)
 	command.Flags().
-		BoolVar(&operation.Write, "write", false, "Declare mutation authority (permission required)")
+		BoolVar(
+			&operation.Write,
+			"write",
+			false,
+			"Declare mutation authority (permission required)",
+		)
 	command.Flags().
-		StringVar(&operation.Idempotency, "idempotency", "", "Operation replay contract: required, exempt or none")
+		StringVar(
+			&operation.Idempotency,
+			"idempotency",
+			"",
+			"Operation replay contract: required, exempt or none",
+		)
 	command.Flags().
-		StringVar(&operation.ReplayReason, "replay-reason", "", "Required justification for write replay exemption")
+		StringVar(
+			&operation.ReplayReason,
+			"replay-reason",
+			"",
+			"Required justification for write replay exemption",
+		)
 	command.Flags().
-		BoolVar(&operation.Collection, "collection", false, "Declare paginated result contracts")
+		BoolVar(
+			&operation.Collection,
+			"collection",
+			false,
+			"Declare paginated result contracts",
+		)
 	command.Flags().BoolVar(&dry, "dry-run", false, "Preflight without writes")
 
 	return command
@@ -116,7 +146,8 @@ func applyOperationChange(
 
 	if !dry {
 		cmd.Println(
-			"Operation contracts created; author only the private implementation and domain logic.",
+			"Operation contracts created; author only the private " +
+				"implementation and domain logic.",
 		)
 	}
 

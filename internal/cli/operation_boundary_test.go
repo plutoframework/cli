@@ -53,7 +53,9 @@ func TestManagedOperationGateConsumer(t *testing.T) {
 		t,
 		path,
 		"return widgets.CreateData{}, domain.ErrNotImplemented",
-		"if operation.dependencies.Calls != nil { *operation.dependencies.Calls++ }; return widgets.CreateData{}, domain.ErrNotImplemented",
+		"if operation.dependencies.Calls != nil { "+
+			"*operation.dependencies.Calls++ }; return "+
+			"widgets.CreateData{}, domain.ErrNotImplemented",
 	)
 
 	fixture, err := os.ReadFile("testdata/operation_boundary.go.tmpl")
@@ -86,7 +88,9 @@ func TestManagedOperationGateConsumer(t *testing.T) {
 	)
 
 	privateBypass := []byte(
-		"package widgets\nimport ops \"example.test/boundary/internal/operations/widgets\"\nfunc bypass(op *ops.Create) { _ = op.execute }\n",
+		"package widgets\nimport ops \"example.test/boundary/internal/" +
+			"operations/widgets\"\nfunc bypass(op *ops.Create) { _ = " +
+			"op.execute }\n",
 	)
 	if err := os.WriteFile(bypassPath, privateBypass, 0o644); err != nil {
 		t.Fatal(err)
@@ -109,14 +113,31 @@ func TestManagedOperationGateConsumer(t *testing.T) {
 	}
 
 	embeddingBypass := []byte(`package widgets
+
 import (
- "context"
- "example.test/boundary/internal/domain"
- models "example.test/boundary/internal/models/widgets"
- ops "example.test/boundary/internal/operations/widgets"
+	"context"
+	"example.test/boundary/internal/domain"
+	models "example.test/boundary/internal/models/widgets"
+	ops "example.test/boundary/internal/operations/widgets"
 )
-type alternate struct { ops.CreateBoundary }
-func (alternate) Execute(context.Context,domain.Principal,models.CreateRequest)(models.CreateData,error){ return models.CreateData{},nil }
+
+type alternate struct {
+	ops.CreateBoundary
+}
+
+func (alternate) Execute(
+	context.Context,
+	domain.Principal,
+	models.CreateRequest,
+
+) (
+	models.CreateData,
+	error,
+
+) {
+	return models.CreateData{}, nil
+}
+
 var _ CreateOperations = alternate{}
 `)
 	if err := os.WriteFile(bypassPath, embeddingBypass, 0o644); err != nil {
@@ -150,7 +171,8 @@ var _ CreateOperations = alternate{}
 	namedBypass := strings.Replace(
 		string(embeddingBypass),
 		"type alternate struct { ops.CreateBoundary }",
-		"type inherited (ops.CreateBoundary)\ntype alternate struct { inherited }",
+		"type inherited (ops.CreateBoundary)\ntype alternate struct { "+
+			"inherited }",
 		1,
 	)
 	if err := os.WriteFile(bypassPath, []byte(namedBypass), 0o644); err != nil {

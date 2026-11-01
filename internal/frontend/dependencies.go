@@ -104,9 +104,15 @@ func packageJSON(m project.Manifest) ([]byte, error) {
 			"api:generate":   "node scripts/generate-api.mjs",
 			"api:check":      "node scripts/generate-api.mjs --check",
 			"fmt":            "node scripts/format.mjs && eslint .",
-			"lint":           "eslint . && node scripts/format.mjs --check && node scripts/architecture.mjs && node scripts/check.mjs",
-			"test":           "vitest run --passWithNoTests && node --test scripts/architecture.test.mjs scripts/theme.test.mjs scripts/format.test.mjs",
-			"check":          "npm run theme:check && npm run api:check && npm run lint && tsc --noEmit && npm test && npm run build",
+			"lint": "eslint . && node scripts/format.mjs --check " +
+				"&& node scripts/architecture.mjs && node scripts/" +
+				"check.mjs",
+			"test": "vitest run --passWithNoTests && node --test " +
+				"scripts/architecture.test.mjs scripts/theme.test.mjs " +
+				"scripts/format.test.mjs",
+			"check": "npm run theme:check && npm run api:check && " +
+				"npm run lint && tsc --noEmit && npm test && npm run " +
+				"build",
 		},
 		"dependencies":    d["dependencies"],
 		"devDependencies": d["devDependencies"],

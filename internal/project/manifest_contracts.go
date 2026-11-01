@@ -5,9 +5,11 @@ import (
 	"strings"
 )
 
-// ValidateManifestContracts joins independent authority, domain/data behavior and
+// ValidateManifestContracts joins independent authority, domain/data behavior
+// and
 // transport declarations before generating any files. It does not establish
-// runtime identity or prove arbitrary SQL: managed code and conformance do that.
+// runtime identity or prove arbitrary SQL: managed code and conformance do
+// that.
 func ValidateManifestContracts(m Manifest) error {
 	if err := ValidateBoundaryProfile(
 		m.Boundary,
@@ -58,7 +60,8 @@ func ValidateManifestContracts(m Manifest) error {
 			endpoint.Public && !operation.Public ||
 			endpoint.Collection && !operation.Collection {
 			return fmt.Errorf(
-				"HTTP entry cannot override operation authority or collection contract: %s",
+				"HTTP entry cannot override operation authority or "+
+					"collection contract: %s",
 				endpoint.Operation,
 			)
 		}
@@ -127,7 +130,8 @@ func ValidateManifestContracts(m Manifest) error {
 			m.Roles,
 		) != 0 {
 			return fmt.Errorf(
-				"published compatibility profile cannot enforce candidate resource, role or behavior contracts",
+				"published compatibility profile cannot enforce candidate " +
+					"resource, role or behavior contracts",
 			)
 		}
 
@@ -136,7 +140,8 @@ func ValidateManifestContracts(m Manifest) error {
 			if operation.Write || operation.Collection ||
 				agent.Approval != "" && agent.Approval != "none" {
 				return fmt.Errorf(
-					"published compatibility tools support protected reads only",
+					"published compatibility tools support protected reads " +
+						"only",
 				)
 			}
 		}
@@ -146,7 +151,9 @@ func ValidateManifestContracts(m Manifest) error {
 
 	if m.Capabilities.LocalCredentials || m.Capabilities.OIDC {
 		return fmt.Errorf(
-			"candidate profile currently requires session-only identity ingress; local credentials and OIDC need managed credential and delivery contracts before adoption",
+			"candidate profile currently requires session-only identity " +
+				"ingress; local credentials and OIDC need managed " +
+				"credential and delivery contracts before adoption",
 		)
 	}
 
@@ -215,7 +222,8 @@ func ValidateManifestContracts(m Manifest) error {
 	for id := range operations {
 		if _, ok := contracts[id]; !ok {
 			return fmt.Errorf(
-				"candidate operation %s requires exactly one typed behavior contract",
+				"candidate operation %s requires exactly one typed behavior "+
+					"contract",
 				id,
 			)
 		}
@@ -225,13 +233,15 @@ func ValidateManifestContracts(m Manifest) error {
 		contract := contracts[endpoint.Operation]
 		if endpoint.Feature != "" || endpoint.ClientVisible {
 			return fmt.Errorf(
-				"candidate feature flags require an operation-owned shared gate; route-only flags are unsupported",
+				"candidate feature flags require an operation-owned shared " +
+					"gate; route-only flags are unsupported",
 			)
 		}
 
 		if contract.Kind == "effect" {
 			return fmt.Errorf(
-				"effect operations require managed worker delivery, not HTTP entries",
+				"effect operations require managed worker delivery, not HTTP " +
+					"entries",
 			)
 		}
 
@@ -251,7 +261,8 @@ func ValidateManifestContracts(m Manifest) error {
 	for id, contract := range contracts {
 		if contract.Kind == "effect" && !effectTargets[id] {
 			return fmt.Errorf(
-				"effect operation %s requires a declared transactional producer and delivery binding",
+				"effect operation %s requires a declared transactional "+
+					"producer and delivery binding",
 				id,
 			)
 		}
@@ -270,7 +281,8 @@ func ValidateManifestContracts(m Manifest) error {
 		contract := contracts[job.Operation]
 		if contract.Kind == "list" || contract.Kind == "export" {
 			return fmt.Errorf(
-				"candidate worker collections require a separately supported delivery contract",
+				"candidate worker collections require a separately supported " +
+					"delivery contract",
 			)
 		}
 
@@ -279,7 +291,8 @@ func ValidateManifestContracts(m Manifest) error {
 			if job.Operation != effect.Operation ||
 				job.MaxAttempts != effect.MaxAttempts {
 				return fmt.Errorf(
-					"job %s disagrees with declared effect target or retry budget",
+					"job %s disagrees with declared effect target or retry "+
+						"budget",
 					job.Kind,
 				)
 			}
@@ -314,12 +327,14 @@ func ValidateManifestContracts(m Manifest) error {
 		case "create", "transition":
 			if agent.Approval != "host" || contract.Idempotency != "required" {
 				return fmt.Errorf(
-					"write tool requires host approval and required operation idempotency",
+					"write tool requires host approval and required " +
+						"operation idempotency",
 				)
 			}
 		default:
 			return fmt.Errorf(
-				"candidate tools support resource loads or approved create/transition operations",
+				"candidate tools support resource loads or approved create/" +
+					"transition operations",
 			)
 		}
 	}
@@ -430,7 +445,8 @@ func validateResourceSource(
 	if contract.Kind == "list" || contract.Kind == "export" {
 		if endpoint.ResourceSource != "collection" || len(params) != 0 {
 			return fmt.Errorf(
-				"collection entry requires collection resource_source and no record path parameters",
+				"collection entry requires collection resource_source and no " +
+					"record path parameters",
 			)
 		}
 
@@ -439,10 +455,14 @@ func validateResourceSource(
 
 	switch {
 	case endpoint.ResourceSource == "body":
-		if (endpoint.Method != "POST" && endpoint.Method != "PUT" && endpoint.Method != "PATCH") ||
+		if (endpoint.Method != "POST" &&
+			endpoint.Method != "PUT" &&
+			endpoint.Method != "PATCH") ||
+
 			len(params) != 0 {
 			return fmt.Errorf(
-				"body resource_source requires POST, PUT or PATCH and no unused path parameters",
+				"body resource_source requires POST, PUT or PATCH and no " +
+					"unused path parameters",
 			)
 		}
 	case strings.HasPrefix(endpoint.ResourceSource, "path:"):
@@ -450,19 +470,22 @@ func validateResourceSource(
 		if len(params) != 1 || params[0] != name ||
 			!contractLabel.MatchString(name) {
 			return fmt.Errorf(
-				"path resource_source must identify the one declared record path parameter",
+				"path resource_source must identify the one declared record " +
+					"path parameter",
 			)
 		}
 	case strings.HasPrefix(endpoint.ResourceSource, "query:"):
 		name := strings.TrimPrefix(endpoint.ResourceSource, "query:")
 		if !contractLabel.MatchString(name) || len(params) != 0 {
 			return fmt.Errorf(
-				"query resource_source requires a safe explicit label and no unused path parameters",
+				"query resource_source requires a safe explicit label and no " +
+					"unused path parameters",
 			)
 		}
 	default:
 		return fmt.Errorf(
-			"record entry requires explicit body, path:<param> or query:<param> resource_source",
+			"record entry requires explicit body, path:<param> or " +
+				"query:<param> resource_source",
 		)
 	}
 

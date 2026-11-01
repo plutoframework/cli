@@ -8,18 +8,46 @@ import (
 )
 
 func TestUnmanagedEntryFactories(t *testing.T) {
-	for _, tc := range []struct{ name, source, id string }{
+	for _, tc := range []struct {
+		name, source, id string
+	}{
 		{"raw worker constructor", `package app
+
 import jobs "github.com/plutoframework/pluto-jobs"
-func bypass(store jobs.Store) { _,_ = jobs.NewWorker(store,nil,jobs.DefaultConfig()) }
+
+func bypass(
+	store jobs.Store,
+
+) {
+
+	_, _ = jobs.NewWorker(
+		store,
+		nil,
+		jobs.DefaultConfig(),
+	)
+}
 `, "ARCH211"},
 		{"constructor capture", `package app
 import jobs "github.com/plutoframework/pluto-jobs"
 var factory = jobs.NewWorker
 `, "ARCH211"},
 		{"typed bind", `package app
+
 import jobs "github.com/plutoframework/pluto-jobs"
-func bypass(){definition,_:=jobs.NewDefinition[string]("kind",func(string)error{return nil});_ = definition.Bind}
+
+func bypass() {
+	definition, _ := jobs.NewDefinition[string](
+		"kind",
+		func(
+			string,
+
+		) error {
+
+			return nil
+		},
+	)
+	_ = definition.Bind
+}
 `, "ARCH211"},
 		{"agent tool factory", `package app
 import agent "github.com/plutoframework/pluto-agent"
@@ -45,7 +73,12 @@ var factory = agent.NewTool[int,int,int]
 
 			found := false
 
-			for _, d := range inspectEntryBoundaries(root, []byte("schema_version=1\n")) {
+			for _, d := range inspectEntryBoundaries(
+				root,
+				[]byte(
+					"schema_version=1\n",
+				),
+			) {
 				if d.ID == tc.id && d.File == "internal/app/bypass.go" {
 					found = true
 				}
@@ -67,8 +100,22 @@ func TestDefinitionPrepareIsDataNotWorkerBinding(t *testing.T) {
 	}
 
 	source := `package storage
+
 import jobs "github.com/plutoframework/pluto-jobs"
-func prepare(){definition,_:=jobs.NewDefinition[string]("kind",func(string)error{return nil});_ = definition.Prepare}
+
+func prepare() {
+	definition, _ := jobs.NewDefinition[string](
+		"kind",
+		func(
+			string,
+
+		) error {
+
+			return nil
+		},
+	)
+	_ = definition.Prepare
+}
 `
 	if err := os.WriteFile(
 		filepath.Join(dir, "effect.go"),
@@ -78,7 +125,12 @@ func prepare(){definition,_:=jobs.NewDefinition[string]("kind",func(string)error
 		t.Fatal(err)
 	}
 
-	for _, d := range inspectEntryBoundaries(root, []byte("schema_version=1\n")) {
+	for _, d := range inspectEntryBoundaries(
+		root,
+		[]byte(
+			"schema_version=1\n",
+		),
+	) {
 		if strings.HasPrefix(d.ID, "ARCH21") {
 			t.Fatalf("effect preparation misclassified as worker: %+v", d)
 		}

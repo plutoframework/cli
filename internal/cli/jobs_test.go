@@ -72,7 +72,8 @@ func TestGeneratedJobs(t *testing.T) {
 			source = append(
 				source,
 				[]byte(
-					"\n// Authored marker must survive subsequent jobs/endpoints.\n",
+					"\n// Authored marker must survive subsequent jobs/"+
+						"endpoints.\n",
 				)...)
 			if err := os.WriteFile(path, source, 0o644); err != nil {
 				t.Fatal(err)
@@ -189,7 +190,8 @@ func TestGeneratedJobs(t *testing.T) {
 				mustVetPublishedCompatibility(t, root)
 			}
 
-			// Managed handler registration must be checked before the next write.
+			// Managed handler registration must be checked before the next
+			// write.
 			registry := filepath.Join(
 				root,
 				"internal/background/handlers_gen.go",
@@ -217,7 +219,8 @@ func TestGeneratedJobs(t *testing.T) {
 
 			assertUnchanged(t, before, snapshot(t, root))
 
-			// Verify Docker publishes both binaries without auto-running an empty worker.
+			// Verify Docker publishes both binaries without auto-running an
+			// empty worker.
 			compose, err := os.ReadFile(filepath.Join(root, "compose.yaml"))
 			if err != nil ||
 				!strings.Contains(string(compose), "profiles: [\"worker\"]") {

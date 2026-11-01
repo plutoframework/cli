@@ -12,8 +12,9 @@ import (
 func architectureCommand(options Options) *cobra.Command {
 	directory, format := options.Directory, "text"
 	command := &cobra.Command{
-		Use:   "architecture",
-		Short: "Inspect production source dependency boundaries without migration",
+		Use: "architecture",
+		Short: "Inspect production source dependency boundaries without " +
+			"migration",
 	}
 	check := &cobra.Command{
 		Use:  "check",
@@ -57,7 +58,12 @@ func architectureCommand(options Options) *cobra.Command {
 		},
 	}
 	check.Flags().
-		StringVar(&directory, "directory", directory, "Project directory to inspect (read-only)")
+		StringVar(
+			&directory,
+			"directory",
+			directory,
+			"Project directory to inspect (read-only)",
+		)
 	check.Flags().
 		StringVar(&format, "format", format, "Output format: text or json")
 	command.AddCommand(check)

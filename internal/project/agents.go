@@ -61,7 +61,8 @@ func agentData(m Manifest, a Agent) (templateData, error) {
 			Permission: operation.Permission,
 		},
 	)
-	data.OperationGroup, data.OperationAction = operation.Group, operation.Action
+	data.OperationGroup = operation.Group
+	data.OperationAction = operation.Action
 	data.AgentProvider = a.Provider
 
 	return data, nil
@@ -79,7 +80,22 @@ func AgentFiles(m Manifest, a Agent) (map[string][]byte, error) {
 
 	files := map[string][]byte{}
 
-	for _, item := range []struct{ path, template string }{{"internal/agents/" + a.Group + "/" + strings.ToLower(a.Action) + "_test.go", "agent_test.go"}, {"internal/app/" + a.Group + "_" + strings.ToLower(a.Action) + "_provider.go", "agent_provider.go"}} {
+	for _, item := range []struct {
+		path, template string
+	}{
+		{
+			"internal/agents/" + a.Group + "/" + strings.ToLower(
+				a.Action,
+			) + "_test.go",
+			"agent_test.go",
+		},
+		{
+			"internal/app/" + a.Group + "_" + strings.ToLower(
+				a.Action,
+			) + "_provider.go",
+			"agent_provider.go",
+		},
+	} {
 		source, err := render(item.template, data)
 		if err != nil {
 			return nil, err
@@ -105,7 +121,9 @@ func managedAgents(m Manifest) (map[string][]byte, error) {
 			return nil, err
 		}
 
-		files["internal/agents/"+a.Group+"/"+strings.ToLower(a.Action)+".go"] = source
+		files["internal/agents/"+a.Group+"/"+strings.ToLower(
+			a.Action,
+		)+".go"] = source
 	}
 
 	return files, nil

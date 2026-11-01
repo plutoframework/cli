@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
-	"go/format"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -93,7 +92,9 @@ func render(name string, data templateData) ([]byte, error) {
 	}
 
 	tmpl, err := template.New(name).
-		Funcs(template.FuncMap{"q": strconv.Quote, "upperFirst": func(value string) string {
+		Funcs(template.FuncMap{"q": strconv.Quote, "upperFirst": func(
+			value string,
+		) string {
 			if value == "" {
 				return ""
 			}
@@ -117,7 +118,7 @@ func render(name string, data templateData) ([]byte, error) {
 	}
 
 	if strings.HasSuffix(name, ".go") {
-		return format.Source(out.Bytes())
+		return formatGenerated(out.Bytes(), data.Module)
 	}
 
 	return out.Bytes(), nil
@@ -171,7 +172,9 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 			return nil, err
 		}
 
-		files["internal/operations/"+operation.Group+"/"+strings.ToLower(operation.Action)+"_gate_gen.go"] = source
+		files["internal/operations/"+operation.Group+"/"+strings.ToLower(
+			operation.Action,
+		)+"_gate_gen.go"] = source
 	}
 
 	for _, endpoint := range m.Endpoints {
@@ -180,7 +183,9 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 			return nil, err
 		}
 
-		files["internal/handlers/"+endpoint.Group+"/"+strings.ToLower(endpoint.Action)+".go"] = source
+		files["internal/handlers/"+endpoint.Group+"/"+strings.ToLower(
+			endpoint.Action,
+		)+".go"] = source
 	}
 
 	agentFiles, err := managedAgents(m)
@@ -239,7 +244,8 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 
 	var catalog, composition, definitions strings.Builder
 	catalog.WriteString(
-		"package paths\nfunc All() []Endpoint { return []Endpoint{Health, GetFeatures, GetSession, DeleteSession,",
+		"package paths\nfunc All() []Endpoint { return []Endpoint{\nHealth,\n" +
+			"GetFeatures,\nGetSession,\nDeleteSession,\n",
 	)
 	composition.WriteString(
 		"package app\nimport (\n" + strconv.Quote(
@@ -256,7 +262,8 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 	}
 
 	composition.WriteString(
-		")\nfunc RegisterGenerated(reg transport.Registrar,dependencies Dependencies) {\n",
+		")\nfunc RegisterGenerated(reg transport.Registrar,dependencies " +
+			"Dependencies) {\n",
 	)
 
 	featureMap := map[string]bool{}
@@ -266,7 +273,9 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 		paths.WriteString(
 			"package paths\nimport (" + strconv.Quote(
 				m.Project.Module+"/internal/models/"+name,
-			) + "\n" + strconv.Quote(m.Project.Module+"/internal/access") + ")\n",
+			) + "\n" + strconv.Quote(
+				m.Project.Module+"/internal/access",
+			) + ")\n",
 		)
 		register.WriteString(
 			"package " + name + "\nimport " + strconv.Quote(
@@ -284,7 +293,8 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 		}
 
 		register.WriteString(
-			"}\nfunc Register(reg transport.Registrar,operations Operations,bodyLimit int64) {\n",
+			"}\nfunc Register(reg transport.Registrar,operations Operations," +
+				"bodyLimit int64) {\n",
 		)
 		fmt.Fprintf(
 			&composition,
@@ -303,7 +313,12 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 
 			fmt.Fprintf(
 				&paths,
-				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\nMethod:%q,\nPath:%q,\nAuthenticated:%t,\nPermission:access.%sPermission,\nFeature:%q,\nRequest:%s,\nResponse:%s.%sResponse{},\nSuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n}\n",
+				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\n"+
+					"Method:%q,\nPath:%q,\nAuthenticated:%t,\n"+
+					"Permission:access.%sPermission,\nFeature:%q,\n"+
+					"Request:%s,\nResponse:%s.%sResponse{},\n"+
+					"SuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n"+
+					"}\n",
 				d.Symbol,
 				e.Group+"."+e.Action,
 				e.Name,
@@ -350,18 +365,20 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 
 	if m.Capabilities.LocalCredentials {
 		catalog.WriteString(
-			"Enroll,RequestVerification,VerifyEmail,SignIn,RequestRecovery,ResetPassword,Logout,\n",
+			"Enroll,\nRequestVerification,\nVerifyEmail,\nSignIn,\n" +
+				"RequestRecovery,\nResetPassword,\nLogout,\n",
 		)
 	}
 
 	if m.Capabilities.OIDC {
-		catalog.WriteString("OIDCBegin,OIDCCallback,OIDCProviders,\n")
+		catalog.WriteString("OIDCBegin,\nOIDCCallback,\nOIDCProviders,\n")
 	}
 
 	catalog.WriteString("}\n}\n")
 	composition.WriteString("}\n")
 	definitions.WriteString(
-		"package features\nfunc Declarations() []Definition { return []Definition{\n",
+		"package features\nfunc Declarations() []Definition { return " +
+			"[]Definition{\n",
 	)
 
 	keys := []string{}
@@ -389,7 +406,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 
 	files["internal/app/routes_gen.go"] = []byte(composition.String())
 	for path, source := range files {
-		formatted, err := format.Source(source)
+		formatted, err := formatGenerated(source, m.Project.Module)
 		if err != nil {
 			return nil, fmt.Errorf("generate %s: %w", path, err)
 		}
@@ -420,14 +437,29 @@ func EndpointFiles(m Manifest, e Endpoint) (map[string][]byte, error) {
 		return nil, err
 	}
 
-	files[filepath.ToSlash(filepath.Join("internal", "handlers", e.Group, strings.ToLower(e.Action)+"_test.go"))] = source
+	files[filepath.ToSlash(
+		filepath.Join(
+			"internal",
+			"handlers",
+			e.Group,
+			strings.ToLower(
+				e.Action,
+			)+"_test.go",
+		),
+	)] = source
 
 	binding, err := render("binding.go", dataFor(m, e))
 	if err != nil {
 		return nil, err
 	}
 
-	files[filepath.Join("internal", "app", e.Group+"_"+strings.ToLower(e.Action)+".go")] = binding
+	files[filepath.Join(
+		"internal",
+		"app",
+		e.Group+"_"+strings.ToLower(
+			e.Action,
+		)+".go",
+	)] = binding
 
 	return files, nil
 }
@@ -487,9 +519,12 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		layout["internal/transport/credentials.go"] = "credentials.go"
 		layout["internal/paths/credentials.go"] = "credentials_paths.go"
 		layout["cmd/api/credentials.go"] = "credentials_main.go"
-		layout["db/migrations/004_local_credentials.sql"] = "credentials_schema.sql"
-		layout["db/migrations/006_authentication.sql"] = "authentication_schema.sql"
-		layout["db/migrations/007_external_accounts.sql"] = "external_accounts.sql"
+		layout["db/migrations/004_local_credentials.sql"] = "credentials_" +
+			"schema.sql"
+		layout["db/migrations/006_authentication.sql"] = "authentication_" +
+			"schema.sql"
+		layout["db/migrations/007_external_accounts.sql"] = "external_" +
+			"accounts.sql"
 	}
 
 	if m.Capabilities.OIDC {

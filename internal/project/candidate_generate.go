@@ -2,7 +2,6 @@ package project
 
 import (
 	"fmt"
-	"go/format"
 	"path/filepath"
 	"strings"
 )
@@ -61,12 +60,39 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 			}
 		}
 
-		for _, item := range []struct{ path, name string }{
-			{"internal/domain/" + resource.Group + "/" + strings.ToLower(resource.Name) + "_contract_gen.go", "candidate_domain.go"},
-			{"internal/ports/" + resource.Group + "/" + strings.ToLower(resource.Name) + "_ports_gen.go", "candidate_ports.go"},
-			{"internal/storage/" + resource.Group + "/" + strings.ToLower(resource.Name) + "_data_gen.go", "candidate_data.go"},
-			{"internal/storage/" + resource.Group + "/" + strings.ToLower(resource.Name) + "_reads_gen.go", "candidate_reads.go"},
-			{"db/migrations/100_" + resource.Group + "_" + strings.ToLower(resource.Name) + ".sql", "candidate_schema.sql"},
+		for _, item := range []struct {
+			path, name string
+		}{
+			{
+				"internal/domain/" + resource.Group + "/" + strings.ToLower(
+					resource.Name,
+				) + "_contract_gen.go",
+				"candidate_domain.go",
+			},
+			{
+				"internal/ports/" + resource.Group + "/" + strings.ToLower(
+					resource.Name,
+				) + "_ports_gen.go",
+				"candidate_ports.go",
+			},
+			{
+				"internal/storage/" + resource.Group + "/" + strings.ToLower(
+					resource.Name,
+				) + "_data_gen.go",
+				"candidate_data.go",
+			},
+			{
+				"internal/storage/" + resource.Group + "/" + strings.ToLower(
+					resource.Name,
+				) + "_reads_gen.go",
+				"candidate_reads.go",
+			},
+			{
+				"db/migrations/100_" + resource.Group + "_" + strings.ToLower(
+					resource.Name,
+				) + ".sql",
+				"candidate_schema.sql",
+			},
 		} {
 			source, err := render(item.name, data)
 			if err != nil {
@@ -89,10 +115,37 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		data.Contract = contract
 
 		data.ContractEffects = m.Effects
-		for _, item := range []struct{ path, name string }{
-			{"internal/models/" + operation.Group + "/" + strings.ToLower(operation.Action) + ".go", "candidate_models.go"},
-			{"internal/operations/" + operation.Group + "/" + strings.ToLower(operation.Action) + "_gate_gen.go", "candidate_gate.go"},
-			{"internal/operations/" + operation.Group + "/" + strings.ToLower(operation.Action) + "_workflow_gen.go", "candidate_workflow.go"},
+		for _, item := range []struct {
+			path, name string
+		}{
+			{
+				"internal/models/" + operation.Group + "/" + strings.ToLower(
+					operation.Action,
+				) + ".go",
+				"candidate_models.go",
+			},
+			{
+				"internal/operations/" +
+					operation.Group +
+					"/" +
+					strings.ToLower(
+
+						operation.Action,
+					) + "_gate_gen.go",
+
+				"candidate_gate.go",
+			},
+			{
+				"internal/operations/" +
+					operation.Group +
+					"/" +
+					strings.ToLower(
+
+						operation.Action,
+					) + "_workflow_gen.go",
+
+				"candidate_workflow.go",
+			},
 		} {
 			source, err := render(item.name, data)
 			if err != nil {
@@ -108,7 +161,10 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 				return nil, err
 			}
 
-			files["internal/infrastructure/"+data.Resource.Group+"/"+operation.Group+"_"+strings.ToLower(operation.Action)+"_delivery_gen.go"] = source
+			path := "internal/infrastructure/" + data.Resource.Group + "/" +
+				operation.Group + "_" + strings.ToLower(operation.Action) +
+				"_delivery_gen.go"
+			files[path] = source
 		}
 	}
 
@@ -127,7 +183,9 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 			return nil, err
 		}
 
-		files["internal/handlers/"+entry.Group+"/"+strings.ToLower(entry.Action)+".go"] = source
+		files["internal/handlers/"+entry.Group+"/"+strings.ToLower(
+			entry.Action,
+		)+".go"] = source
 	}
 
 	for _, job := range m.Jobs {
@@ -145,7 +203,9 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 			return nil, err
 		}
 
-		files["internal/jobs/"+job.Group+"/"+strings.ToLower(job.Action)+".go"] = source
+		files["internal/jobs/"+job.Group+"/"+strings.ToLower(
+			job.Action,
+		)+".go"] = source
 	}
 
 	for _, entry := range m.Agents {
@@ -162,7 +222,9 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 			return nil, err
 		}
 
-		files["internal/agents/"+entry.Group+"/"+strings.ToLower(entry.Action)+".go"] = source
+		files["internal/agents/"+entry.Group+"/"+strings.ToLower(
+			entry.Action,
+		)+".go"] = source
 	}
 
 	caller, err := render("candidate_caller.go", dataFor(m, Endpoint{}))
@@ -206,10 +268,25 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 
 	files["internal/storage/identity/memberships_gen.go"] = memberships
 	files["db/migrations/099_memberships.sql"] = []byte(
-		`CREATE TABLE "pluto_resource_memberships" ("tenant_id" text NOT NULL,"actor_id" text NOT NULL,"roles" text[] NOT NULL,PRIMARY KEY("tenant_id","actor_id"));`,
+		`CREATE TABLE "pluto_resource_memberships" (` +
+			`"tenant_id" text NOT NULL,` +
+			`"actor_id" text NOT NULL,` +
+			`"roles" text[] NOT NULL,` +
+			`PRIMARY KEY("tenant_id","actor_id"));`,
 	)
 
-	for _, item := range []struct{ path, name string }{{"cmd/api/main.go", "candidate_main.go"}, {"cmd/worker/main.go", "candidate_worker_main.go"}} {
+	for _, item := range []struct {
+		path, name string
+	}{
+		{
+			"cmd/api/main.go",
+			"candidate_main.go",
+		},
+		{
+			"cmd/worker/main.go",
+			"candidate_worker_main.go",
+		},
+	} {
 		source, err := render(item.name, dataFor(m, Endpoint{}))
 		if err != nil {
 			return nil, err
@@ -220,7 +297,7 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 
 	for path, source := range files {
 		if strings.HasSuffix(path, ".go") {
-			formatted, err := format.Source(source)
+			formatted, err := formatGenerated(source, m.Project.Module)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", path, err)
 			}

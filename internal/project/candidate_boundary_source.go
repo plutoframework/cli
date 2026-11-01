@@ -76,7 +76,10 @@ func inspectCandidateFile(
 
 	var resolve func(ast.Expr, map[string]candidateType) candidateType
 
-	resolve = func(expression ast.Expr, variables map[string]candidateType) candidateType {
+	resolve = func(
+		expression ast.Expr,
+		variables map[string]candidateType,
+	) candidateType {
 		switch value := expression.(type) {
 		case *ast.Ident:
 			return variables[value.Name]
@@ -154,7 +157,10 @@ func inspectCandidateFile(
 
 		return candidateType{}
 	}
-	recordValues := func(spec *ast.ValueSpec, variables map[string]candidateType) {
+	recordValues := func(
+		spec *ast.ValueSpec,
+		variables map[string]candidateType,
+	) {
 		for index, name := range spec.Names {
 			if spec.Type != nil {
 				variables[name.Name] = candidateType{spec.Type, file}
@@ -191,13 +197,18 @@ func inspectCandidateFile(
 	inspect := func(node ast.Node, variables map[string]candidateType) {
 		switch value := node.(type) {
 		case *ast.Ident:
-			if owner := rules.privateNames[file.directory][value.Name]; owner != "" &&
+			owner := rules.privateNames[file.directory][value.Name]
+			if owner != "" &&
+
 				owner != file.path {
 				emit(
 					"ARCH604",
 					value.Pos(),
-					"reserved private candidate field referenced outside its owner: "+value.Name,
-					"Use the declared domain constructor, getters and operation workflow; do not assign or capture generated private storage.",
+					"reserved private candidate field referenced outside its "+
+						"owner: "+value.Name,
+					"Use the declared domain constructor, getters and "+
+						"operation workflow; do not assign or capture "+
+						"generated private storage.",
 				)
 			}
 
@@ -205,25 +216,36 @@ func inspectCandidateFile(
 				return
 			}
 
-			if owners, restricted := rules.capabilities[file.namespace+"."+value.Name]; restricted &&
+			capabilityName := file.namespace + "." + value.Name
+
+			owners, restricted := rules.capabilities[capabilityName]
+			if restricted &&
+
 				!owners[file.path] {
 				emit(
 					"ARCH603",
 					value.Pos(),
-					"candidate capability referenced outside its exact owner: "+value.Name,
-					"Invoke the managed operation or composition factory; do not capture, redeclare or alias restricted constructors/evaluators.",
+					"candidate capability referenced outside its exact "+
+						"owner: "+value.Name,
+					"Invoke the managed operation or composition factory; do "+
+						"not capture, redeclare or alias restricted "+
+						"constructors/evaluators.",
 				)
 			}
 		case *ast.SelectorExpr:
 			key := candidateExpressionName(value, file)
 			if key == "github.com/plutoframework/pluto-auth.Manager" ||
 				key == "github.com/plutoframework/pluto-auth.SessionStore" ||
-				key == "github.com/plutoframework/pluto-auth.AccountSessionStore" {
+				key == "github.com/plutoframework/pluto-auth.AccountSessionSt"+
+					"ore" {
 				emit(
 					"ARCH606",
 					value.Pos(),
-					"trusted session issuer escapes canonical authentication composition",
-					"Use CandidateRuntime.WithSession or the managed HTTP/job caller bridge; production extensions must not receive or replace the session issuer.",
+					"trusted session issuer escapes canonical authentication "+
+						"composition",
+					"Use CandidateRuntime.WithSession or the managed HTTP/"+
+						"job caller bridge; production extensions must "+
+						"not receive or replace the session issuer.",
 				)
 			}
 
@@ -237,7 +259,9 @@ func inspectCandidateFile(
 					"ARCH606",
 					value.Pos(),
 					"trusted session issuer value escapes its managed owner",
-					"Keep the concrete Manager private; an interface or alias must not expose string-based session issuance.",
+					"Keep the concrete Manager private; an interface or "+
+						"alias must not expose string-based session "+
+						"issuance.",
 				)
 			}
 
@@ -252,8 +276,10 @@ func inspectCandidateFile(
 					emit(
 						"ARCH606",
 						value.Pos(),
-						"session issuer getter referenced outside managed composition",
-						"Use the managed runtime's opaque caller flow; do not capture the issuer getter.",
+						"session issuer getter referenced outside managed "+
+							"composition",
+						"Use the managed runtime's opaque caller flow; do "+
+							"not capture the issuer getter.",
 					)
 				}
 			}
@@ -273,8 +299,11 @@ func inspectCandidateFile(
 					emit(
 						"ARCH606",
 						value.Pos(),
-						"session issuer method referenced outside its managed authentication owner",
-						"Use the configured credential flow and runtime caller adapter; do not mint identity from application-supplied subject strings.",
+						"session issuer method referenced outside its "+
+							"managed authentication owner",
+						"Use the configured credential flow and runtime "+
+							"caller adapter; do not mint identity from "+
+							"application-supplied subject strings.",
 					)
 				}
 			}
@@ -284,8 +313,11 @@ func inspectCandidateFile(
 				emit(
 					"ARCH603",
 					value.Pos(),
-					"candidate capability referenced outside its exact owner: "+key,
-					"Keep rehydration in managed data, lifecycle evaluation in the owning workflow and construction in managed composition.",
+					"candidate capability referenced outside its exact "+
+						"owner: "+key,
+					"Keep rehydration in managed data, lifecycle evaluation "+
+						"in the owning workflow and construction in "+
+						"managed composition.",
 				)
 			}
 
@@ -295,7 +327,9 @@ func inspectCandidateFile(
 					"ARCH604",
 					value.Pos(),
 					"raw candidate data port escapes managed construction",
-					"Consume the sealed operation boundary; do not substitute, alias or implement a raw resource data interface in production extensions.",
+					"Consume the sealed operation boundary; do not "+
+						"substitute, alias or implement a raw resource "+
+						"data interface in production extensions.",
 				)
 			}
 
@@ -314,15 +348,26 @@ func inspectCandidateFile(
 					emit(
 						"ARCH603",
 						value.Pos(),
-						"raw lifecycle evaluation escapes the managed domain/workflow boundary",
-						"Use the declared resource evaluator and its scoped evaluated change; do not capture raw Machine methods.",
+						"raw lifecycle evaluation escapes the managed domain/"+
+							"workflow boundary",
+						"Use the declared resource evaluator and its scoped "+
+							"evaluated change; do not capture raw "+
+							"Machine methods.",
 					)
-				} else if _, known := types[receiver]; receiver == "" || (!known && !strings.HasPrefix(receiver, "builtin.")) {
+				} else if _, known := types[receiver]; receiver == "" ||
+					(!known &&
+						!strings.HasPrefix(
+							receiver,
+							"builtin.",
+						)) {
 					emit(
 						"ARCH608",
 						value.Pos(),
-						"candidate evaluator receiver cannot be resolved safely",
-						"Use an explicit typed domain receiver or the declared resource evaluator; unresolved lifecycle factories are unsupported.",
+						"candidate evaluator receiver cannot be resolved "+
+							"safely",
+						"Use an explicit typed domain receiver or the "+
+							"declared resource evaluator; unresolved "+
+							"lifecycle factories are unsupported.",
 					)
 				}
 			}
@@ -337,8 +382,10 @@ func inspectCandidateFile(
 				emit(
 					"ARCH603",
 					value.Pos(),
-					"raw machine type is aliased outside its managed lifecycle owner",
-					"Use the declared resource evaluator rather than hiding a raw Machine behind local or defined aliases.",
+					"raw machine type is aliased outside its managed "+
+						"lifecycle owner",
+					"Use the declared resource evaluator rather than hiding "+
+						"a raw Machine behind local or defined aliases.",
 				)
 			}
 
@@ -346,8 +393,11 @@ func inspectCandidateFile(
 				emit(
 					"ARCH604",
 					value.Pos(),
-					"candidate capability type is aliased or redefined outside its owner",
-					"Use the concrete managed boundary directly; aliases and structurally equivalent wrappers are unsupported.",
+					"candidate capability type is aliased or redefined "+
+						"outside its owner",
+					"Use the concrete managed boundary directly; aliases and "+
+						"structurally equivalent wrappers are "+
+						"unsupported.",
 				)
 			}
 		case *ast.StructType:
@@ -362,8 +412,11 @@ func inspectCandidateFile(
 						emit(
 							"ARCH604",
 							field.Pos(),
-							"embedded candidate capability can replace its managed entry",
-							"Keep a named sealed-boundary dependency; do not promote private methods through embedded or aliased capability types.",
+							"embedded candidate capability can replace its "+
+								"managed entry",
+							"Keep a named sealed-boundary dependency; do not "+
+								"promote private methods through "+
+								"embedded or aliased capability types.",
 						)
 					}
 				}
@@ -380,8 +433,11 @@ func inspectCandidateFile(
 						emit(
 							"ARCH604",
 							field.Pos(),
-							"candidate capability interface is embedded outside its owner",
-							"Use the canonical sealed interface directly rather than creating a replacement authority interface.",
+							"candidate capability interface is embedded "+
+								"outside its owner",
+							"Use the canonical sealed interface directly "+
+								"rather than creating a replacement "+
+								"authority interface.",
 						)
 					}
 				}
@@ -396,8 +452,11 @@ func inspectCandidateFile(
 				emit(
 					"ARCH604",
 					value.Pos(),
-					"candidate state or capability constructed outside its owner",
-					"Use the configured issuer, managed factory or declared domain constructor; zero/composite values do not establish authority.",
+					"candidate state or capability constructed outside its "+
+						"owner",
+					"Use the configured issuer, managed factory or declared "+
+						"domain constructor; zero/composite values do "+
+						"not establish authority.",
 				)
 			}
 		case *ast.CallExpr:
@@ -419,8 +478,10 @@ func inspectCandidateFile(
 				emit(
 					"ARCH604",
 					value.Pos(),
-					"candidate state or capability converted/allocated outside its owner",
-					"Use the managed constructor rather than conversions, new or a forged structurally equivalent value.",
+					"candidate state or capability converted/allocated "+
+						"outside its owner",
+					"Use the managed constructor rather than conversions, "+
+						"new or a forged structurally equivalent value.",
 				)
 			}
 		}
@@ -440,12 +501,18 @@ func inspectCandidateFile(
 		}
 
 		if file.imports[prefix.Name] == lifecycleStatePackage &&
-			(selector.Sel.Name == "New" || selector.Sel.Name == "Definition" || selector.Sel.Name == "Transition" || selector.Sel.Name == "Evaluated") {
+			(selector.Sel.Name == "New" ||
+				selector.Sel.Name == "Definition" ||
+				selector.Sel.Name == "Transition" ||
+				selector.Sel.Name == "Evaluated") {
 			emit(
 				"ARCH603",
 				selector.Pos(),
-				"raw lifecycle construction exists outside the declared managed domain",
-				"Declare the lifecycle in resource metadata; do not mint another machine or transition catalog in application extensions.",
+				"raw lifecycle construction exists outside the declared "+
+					"managed domain",
+				"Declare the lifecycle in resource metadata; do not mint "+
+					"another machine or transition catalog in "+
+					"application extensions.",
 			)
 		}
 
@@ -555,7 +622,10 @@ func inspectCandidateFile(
 				variables[name] = value
 			}
 
-			for _, list := range []*ast.FieldList{function.Recv, function.Type.Params} {
+			for _, list := range []*ast.FieldList{
+				function.Recv,
+				function.Type.Params,
+			} {
 				if list != nil {
 					for _, field := range list.List {
 						for _, name := range field.Names {
@@ -568,7 +638,8 @@ func inspectCandidateFile(
 				}
 			}
 
-			// Inspect the signature too: method expressions/capability aliases are not
+			// Inspect the signature too: method expressions/capability aliases
+			// are not
 			// exempt merely because they occur outside the function body.
 			inspect(function, variables)
 			ast.Inspect(function.Type, func(node ast.Node) bool {

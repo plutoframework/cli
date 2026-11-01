@@ -12,7 +12,8 @@ import (
 func permissionDeclarations(m Manifest) ([]byte, error) {
 	var source strings.Builder
 	source.WriteString(
-		"package access\nimport rbac \"github.com/plutoframework/pluto-rbac\"\n",
+		"package access\nimport rbac \"github.com/plutoframework/" +
+			"pluto-rbac\"\n",
 	)
 
 	permissions := map[string]bool{}
@@ -38,7 +39,8 @@ func permissionDeclarations(m Manifest) ([]byte, error) {
 
 	sort.Strings(keys)
 	source.WriteString(
-		"func GeneratedPermissions() []rbac.Permission { return []rbac.Permission{\n",
+		"func GeneratedPermissions() []rbac.Permission { return " +
+			"[]rbac.Permission{\n",
 	)
 
 	for _, permission := range keys {

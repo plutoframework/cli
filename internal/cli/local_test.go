@@ -77,7 +77,9 @@ func TestGeneratedLocalApplications(t *testing.T) {
 			var output bytes.Buffer
 			if err := tmpl.Execute(
 				&output,
-				struct{ Multi bool }{multi},
+				struct {
+					Multi bool
+				}{multi},
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -120,7 +122,11 @@ func TestGeneratedLocalApplications(t *testing.T) {
 				"records.signin",
 				"--description",
 				"Must not replace the lifecycle.",
-			); err == nil || !strings.Contains(err.Error(), "duplicate/reserved endpoint") {
+			); err == nil ||
+				!strings.Contains(
+					err.Error(),
+					"duplicate/reserved endpoint",
+				) {
 				t.Fatalf(
 					"auth namespace reservation was not the rejection: %v",
 					err,

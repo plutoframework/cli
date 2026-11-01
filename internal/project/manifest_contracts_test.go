@@ -98,7 +98,9 @@ func TestManifestContractsJoinAllEntryAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, test := range []struct{ kind, method, path, source string }{
+	for _, test := range []struct {
+		kind, method, path, source string
+	}{
 		{"load", "GET", "/api/invoices/{id}", "path:id"},
 		{"load", "GET", "/api/invoices", "query:id"},
 		{"load", "POST", "/api/invoices/read", "body"},
@@ -114,11 +116,12 @@ func TestManifestContractsJoinAllEntryAuthority(t *testing.T) {
 
 			m.Endpoints = []Endpoint{
 				{
-					Group:          group,
-					Action:         action,
-					Operation:      contract.ID,
-					Name:           "Read invoice",
-					Description:    "Read through a declared scoped data contract.",
+					Group:     group,
+					Action:    action,
+					Operation: contract.ID,
+					Name:      "Read invoice",
+					Description: "Read through a declared scoped data " +
+						"contract.",
 					Method:         test.method,
 					Path:           test.path,
 					ResourceSource: test.source,
@@ -148,26 +151,121 @@ func TestManifestContractsRejectIndependentAuthorityDrift(t *testing.T) {
 		name, want string
 		change     func(*Manifest)
 	}{
-		{"missing contract", "exactly one", func(m *Manifest) { m.OperationContracts = m.OperationContracts[1:] }},
-		{"unsupported credential ingress", "session-only identity ingress", func(m *Manifest) { m.Capabilities.LocalCredentials = true }},
-		{"unsupported OIDC ingress", "session-only identity ingress", func(m *Manifest) { m.Capabilities.OIDC = true }},
+		{
+			"missing contract",
+			"exactly one",
+			func(m *Manifest) {
+				m.OperationContracts = m.OperationContracts[1:]
+			},
+		},
+		{
+			"unsupported credential ingress",
+			"session-only identity ingress",
+			func(m *Manifest) {
+				m.Capabilities.LocalCredentials = true
+			},
+		},
+		{
+			"unsupported OIDC ingress",
+			"session-only identity ingress",
+			func(m *Manifest) {
+				m.Capabilities.OIDC = true
+			},
+		},
 		{"orphan contract", "undeclared operation", func(m *Manifest) {
 			copy := m.OperationContracts[0]
 			copy.ID = "sales.Orphan"
 			m.OperationContracts = append(m.OperationContracts, copy)
 		}},
-		{"permission disagreement", "disagree", func(m *Manifest) { m.OperationContracts[0].Permission = "invoice:approve" }},
-		{"write disagreement", "disagree", func(m *Manifest) { m.Operations[3].Write = false; m.Operations[3].Idempotency = "none" }},
-		{"collection disagreement", "disagree", func(m *Manifest) { m.Operations[1].Collection = false }},
-		{"exemption disagreement", "disagree", func(m *Manifest) { m.Operations[5].ReplayReason = "A different unverified delivery guarantee." }},
-		{"unknown role grant", "unknown permission", func(m *Manifest) { m.Roles[0].Permissions = append(m.Roles[0].Permissions, "invoice:destroy") }},
-		{"entry permission override", "cannot override", func(m *Manifest) { m.Endpoints[0].Permission = "invoice:read" }},
-		{"entry public override", "cannot override", func(m *Manifest) { m.Endpoints[0].Public = true }},
-		{"entry replay override", "replay contract", func(m *Manifest) { m.Endpoints[0].Idempotency = "exempt" }},
-		{"route-only feature", "operation-owned shared gate", func(m *Manifest) { m.Endpoints[0].Feature = "invoice.approve" }},
-		{"missing resource source", "explicit", func(m *Manifest) { m.Endpoints[0].ResourceSource = "" }},
-		{"wrong resource path", "one declared", func(m *Manifest) { m.Endpoints[0].ResourceSource = "path:other" }},
-		{"unused resource path", "unused path", func(m *Manifest) { m.Endpoints[0].ResourceSource = "body" }},
+		{
+			"permission disagreement",
+			"disagree",
+			func(m *Manifest) {
+				m.OperationContracts[0].Permission = "invoice:approve"
+			},
+		},
+		{
+			"write disagreement",
+			"disagree",
+			func(m *Manifest) {
+				m.Operations[3].Write = false
+				m.Operations[3].Idempotency = "none"
+			},
+		},
+		{
+			"collection disagreement",
+			"disagree",
+			func(m *Manifest) {
+				m.Operations[1].Collection = false
+			},
+		},
+		{
+			"exemption disagreement",
+			"disagree",
+			func(m *Manifest) {
+				m.Operations[5].ReplayReason = "A different unverified " +
+					"delivery guarantee."
+			},
+		},
+		{
+			"unknown role grant",
+			"unknown permission",
+			func(m *Manifest) {
+				m.Roles[0].Permissions = append(
+					m.Roles[0].Permissions,
+					"invoice:destroy",
+				)
+			},
+		},
+		{
+			"entry permission override",
+			"cannot override",
+			func(m *Manifest) {
+				m.Endpoints[0].Permission = "invoice:read"
+			},
+		},
+		{
+			"entry public override",
+			"cannot override",
+			func(m *Manifest) {
+				m.Endpoints[0].Public = true
+			},
+		},
+		{
+			"entry replay override",
+			"replay contract",
+			func(m *Manifest) {
+				m.Endpoints[0].Idempotency = "exempt"
+			},
+		},
+		{
+			"route-only feature",
+			"operation-owned shared gate",
+			func(m *Manifest) {
+				m.Endpoints[0].Feature = "invoice.approve"
+			},
+		},
+		{
+			"missing resource source",
+			"explicit",
+			func(m *Manifest) {
+				m.Endpoints[0].ResourceSource = ""
+			},
+		},
+		{
+			"wrong resource path",
+			"one declared",
+			func(m *Manifest) {
+				m.Endpoints[0].ResourceSource = "path:other"
+			},
+		},
+		{
+			"unused resource path",
+			"unused path",
+			func(m *Manifest) {
+				m.Endpoints[0].ResourceSource = "body"
+			},
+		},
 		{"unsupported DELETE body", "POST, PUT or PATCH", func(m *Manifest) {
 			m.Endpoints[0].Method = "DELETE"
 			m.Endpoints[0].Path = "/api/invoices"
@@ -177,21 +275,113 @@ func TestManifestContractsRejectIndependentAuthorityDrift(t *testing.T) {
 			m.Endpoints[0].Path = "/api/invoices"
 			m.Endpoints[0].ResourceSource = "query:id&tenant"
 		}},
-		{"worker unknown target", "protected declared", func(m *Manifest) { m.Jobs[0].Operation = "delivery.Missing" }},
-		{"missing effect binding", "matching managed", func(m *Manifest) { m.Jobs = m.Jobs[1:] }},
-		{"orphan effect operation", "transactional producer", func(m *Manifest) { m.Effects = nil; m.OperationContracts[4].Effects = nil; m.Jobs = m.Jobs[1:] }},
-		{"effect budget disagreement", "retry budget", func(m *Manifest) { m.Jobs[0].MaxAttempts++ }},
-		{"unbounded worker", "bounded max_attempts", func(m *Manifest) { m.Jobs[0].MaxAttempts = 0 }},
-		{"effect target disagreement", "target or retry", func(m *Manifest) { m.Jobs[0].Operation = "sales.Approve" }},
-		{"effect kind disagreement", "no declared delivery", func(m *Manifest) { m.Jobs[0].Kind = "invoice.unknown" }},
-		{"worker collection", "worker collections", func(m *Manifest) { m.Jobs[1].Operation = "sales.List" }},
-		{"tool unknown target", "protected declared", func(m *Manifest) { m.Agents[0].Operation = "sales.Unknown" }},
-		{"tool permission override", "cannot override", func(m *Manifest) { m.Agents[0].Permission = "invoice:read" }},
-		{"tool no host approval", "host approval", func(m *Manifest) { m.Agents[0].Approval = "none" }},
-		{"tool model approval", "host approval", func(m *Manifest) { m.Agents[0].Approval = "model" }},
-		{"tool read approval claim", "unsupported approval", func(m *Manifest) { m.Agents[0].Operation = "sales.Read" }},
-		{"effect tool", "tools support", func(m *Manifest) { m.Agents[0].Operation = "delivery.Notify" }},
-		{"collection tool", "tools support", func(m *Manifest) { m.Agents[0].Operation = "sales.List" }},
+		{
+			"worker unknown target",
+			"protected declared",
+			func(m *Manifest) {
+				m.Jobs[0].Operation = "delivery.Missing"
+			},
+		},
+		{
+			"missing effect binding",
+			"matching managed",
+			func(m *Manifest) {
+				m.Jobs = m.Jobs[1:]
+			},
+		},
+		{
+			"orphan effect operation",
+			"transactional producer",
+			func(m *Manifest) {
+				m.Effects = nil
+				m.OperationContracts[4].Effects = nil
+				m.Jobs = m.Jobs[1:]
+			},
+		},
+		{
+			"effect budget disagreement",
+			"retry budget",
+			func(m *Manifest) {
+				m.Jobs[0].MaxAttempts++
+			},
+		},
+		{
+			"unbounded worker",
+			"bounded max_attempts",
+			func(m *Manifest) {
+				m.Jobs[0].MaxAttempts = 0
+			},
+		},
+		{
+			"effect target disagreement",
+			"target or retry",
+			func(m *Manifest) {
+				m.Jobs[0].Operation = "sales.Approve"
+			},
+		},
+		{
+			"effect kind disagreement",
+			"no declared delivery",
+			func(m *Manifest) {
+				m.Jobs[0].Kind = "invoice.unknown"
+			},
+		},
+		{
+			"worker collection",
+			"worker collections",
+			func(m *Manifest) {
+				m.Jobs[1].Operation = "sales.List"
+			},
+		},
+		{
+			"tool unknown target",
+			"protected declared",
+			func(m *Manifest) {
+				m.Agents[0].Operation = "sales.Unknown"
+			},
+		},
+		{
+			"tool permission override",
+			"cannot override",
+			func(m *Manifest) {
+				m.Agents[0].Permission = "invoice:read"
+			},
+		},
+		{
+			"tool no host approval",
+			"host approval",
+			func(m *Manifest) {
+				m.Agents[0].Approval = "none"
+			},
+		},
+		{
+			"tool model approval",
+			"host approval",
+			func(m *Manifest) {
+				m.Agents[0].Approval = "model"
+			},
+		},
+		{
+			"tool read approval claim",
+			"unsupported approval",
+			func(m *Manifest) {
+				m.Agents[0].Operation = "sales.Read"
+			},
+		},
+		{
+			"effect tool",
+			"tools support",
+			func(m *Manifest) {
+				m.Agents[0].Operation = "delivery.Notify"
+			},
+		},
+		{
+			"collection tool",
+			"tools support",
+			func(m *Manifest) {
+				m.Agents[0].Operation = "sales.List"
+			},
+		},
 		{"effect HTTP", "managed worker", func(m *Manifest) {
 			m.Endpoints[0].Group = "delivery"
 			m.Endpoints[0].Action = "Notify"
@@ -213,7 +403,13 @@ func TestManifestContractsRejectIndependentAuthorityDrift(t *testing.T) {
 }
 
 func TestManifestContractsRejectCaseFoldedFiles(t *testing.T) {
-	for _, kind := range []string{"operation", "resource", "HTTP entry", "worker entry", "tool entry"} {
+	for _, kind := range []string{
+		"operation",
+		"resource",
+		"HTTP entry",
+		"worker entry",
+		"tool entry",
+	} {
 		t.Run(kind, func(t *testing.T) {
 			m := manifestContractFixture(t)
 
@@ -294,7 +490,11 @@ func TestManifestContractsBootstrapAndPublishedDrafts(t *testing.T) {
 }
 
 func TestManifestRejectsGeneratedOperationSymbolCollisions(t *testing.T) {
-	for _, name := range []string{"CreateBoundary", "CreateIntent", "NewCreate"} {
+	for _, name := range []string{
+		"CreateBoundary",
+		"CreateIntent",
+		"NewCreate",
+	} {
 		m := Manifest{
 			Boundary: BoundaryProfile{Mode: "candidate"},
 			Operations: []Operation{

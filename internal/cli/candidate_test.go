@@ -59,7 +59,58 @@ func candidateBlueprint() operationBlueprint {
 		},
 	}
 
-	for _, entry := range []struct{ action, kind, permission, policy, event, idem string }{{"Create", "create", "documents.create", "create", "", "required"}, {"Load", "load", "documents.load", "tenant", "", "none"}, {"List", "list", "documents.list", "tenant", "", "none"}, {"Export", "export", "documents.export", "tenant", "", "none"}, {"Approve", "transition", "documents.approve", "tenant", "submit", "required"}, {"Deliver", "effect", "documents.deliver", "tenant", "", "required"}} {
+	for _, entry := range []struct {
+		action, kind, permission, policy, event, idem string
+	}{
+		{
+			"Create",
+			"create",
+			"documents.create",
+			"create",
+			"",
+			"required",
+		},
+		{
+			"Load",
+			"load",
+			"documents.load",
+			"tenant",
+			"",
+			"none",
+		},
+		{
+			"List",
+			"list",
+			"documents.list",
+			"tenant",
+			"",
+			"none",
+		},
+		{
+			"Export",
+			"export",
+			"documents.export",
+			"tenant",
+			"",
+			"none",
+		},
+		{
+			"Approve",
+			"transition",
+			"documents.approve",
+			"tenant",
+			"submit",
+			"required",
+		},
+		{
+			"Deliver",
+			"effect",
+			"documents.deliver",
+			"tenant",
+			"",
+			"required",
+		},
+	} {
 		id := "documents." + entry.action
 		blueprint.Operations = append(
 			blueprint.Operations,
@@ -128,7 +179,40 @@ func candidateBlueprint() operationBlueprint {
 			Approval:   "host",
 		},
 	}
-	for _, entry := range []struct{ action, method, path, source string }{{"Create", "POST", "/records", "body"}, {"Approve", "POST", "/records/approve", "body"}, {"Load", "GET", "/records/{id}", "path:id"}, {"List", "GET", "/records", "collection"}, {"Export", "GET", "/records/export", "collection"}} {
+	for _, entry := range []struct {
+		action, method, path, source string
+	}{
+		{
+			"Create",
+			"POST",
+			"/records",
+			"body",
+		},
+		{
+			"Approve",
+			"POST",
+			"/records/approve",
+			"body",
+		},
+		{
+			"Load",
+			"GET",
+			"/records/{id}",
+			"path:id",
+		},
+		{
+			"List",
+			"GET",
+			"/records",
+			"collection",
+		},
+		{
+			"Export",
+			"GET",
+			"/records/export",
+			"collection",
+		},
+	} {
 		blueprint.Endpoints = append(
 			blueprint.Endpoints,
 			project.Endpoint{
@@ -174,7 +258,25 @@ func TestCandidateGeneratedConsumer(t *testing.T) {
 		}
 	}
 
-	for _, profile := range []struct{ guard, visibility, table string }{{"not_owner", "tenant", "records"}, {"owner", "tenant", "select"}, {"none", "owner", "order"}} {
+	for _, profile := range []struct {
+		guard, visibility, table string
+	}{
+		{
+			"not_owner",
+			"tenant",
+			"records",
+		},
+		{
+			"owner",
+			"tenant",
+			"select",
+		},
+		{
+			"none",
+			"owner",
+			"order",
+		},
+	} {
 		t.Run(profile.guard, func(t *testing.T) {
 			t.Setenv("PLUTO_CLI_TEST_GUARD_MODE", profile.guard)
 			t.Setenv("PLUTO_CLI_TEST_VISIBILITY", profile.visibility)
@@ -275,35 +377,82 @@ func runCandidateGeneratedConsumer(
 		mustInvoke(t, root, "fmt")
 		mustInvoke(t, root, "openapi")
 		mustInvoke(t, root, "vet")
+
+		lintConfig, err := os.ReadFile(filepath.Join(root, ".golangci.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Linters must inspect managed output, not merely trust its banner.
+		lintConfig = []byte(
+			strings.Replace(
+				string(lintConfig),
+				"generated: strict",
+				"generated: disable",
+				1,
+			),
+		)
+
+		lintPath := filepath.Join(t.TempDir(), "candidate-lint.yml")
+		if err := os.WriteFile(lintPath, lintConfig, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		external(
+			t,
+			root,
+			"golangci-lint",
+			"run",
+			"--config",
+			lintPath,
+			"--enable-only",
+			"govet,ineffassign,staticcheck,unused,wsl_v5",
+			"./cmd/...",
+			"./internal/...",
+		)
 	}
 
 	external(t, root, "go", "test", "./...")
 
-	fixture, err := os.ReadFile("testdata/candidate_sql.go.tmpl")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(
-		filepath.Join(root, "internal/app/candidate_sql_test.go"),
-		fixture,
-		0o644,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	if guard == "not_owner" {
-		runtimeFixture, err := os.ReadFile("testdata/candidate_runtime.go.tmpl")
+	for _, fixtureName := range []string{
+		"candidate_sql",
+		"candidate_sql_atomic",
+		"candidate_sql_reads",
+	} {
+		fixture, err := os.ReadFile("testdata/" + fixtureName + ".go.tmpl")
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		if err := os.WriteFile(
-			filepath.Join(root, "internal/app/candidate_runtime_test.go"),
-			runtimeFixture,
+			filepath.Join(
+				root,
+				"internal/app/"+fixtureName+"_test.go",
+			),
+			fixture,
 			0o644,
 		); err != nil {
 			t.Fatal(err)
+		}
+	}
+
+	if guard == "not_owner" {
+		for _, name := range []string{
+			"candidate_runtime",
+			"candidate_runtime_negative",
+		} {
+			runtimeFixture, err := os.ReadFile("testdata/" + name + ".go.tmpl")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.WriteFile(
+				filepath.Join(root, "internal/app/"+name+"_test.go"),
+				runtimeFixture,
+				0o644,
+			); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -348,7 +497,9 @@ func assertCandidateCases(t *testing.T, output string, runtime bool) {
 	decoder := json.NewDecoder(strings.NewReader(output))
 
 	for {
-		var event struct{ Action, Test string }
+		var event struct {
+			Action, Test string
+		}
 
 		err := decoder.Decode(&event)
 		if errors.Is(err, io.EOF) {

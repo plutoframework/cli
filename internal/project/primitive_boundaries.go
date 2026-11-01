@@ -24,7 +24,8 @@ type primitiveType struct {
 	file       *primitiveSource
 }
 
-// inspectPrimitiveBoundaries checks concrete capability placement and declaration
+// inspectPrimitiveBoundaries checks concrete capability placement and
+// declaration
 // prerequisites. It never infers that arbitrary SQL implements visibility or
 // atomic replay merely because a corresponding primitive was imported.
 func inspectPrimitiveBoundaries(
@@ -33,7 +34,10 @@ func inspectPrimitiveBoundaries(
 ) ([]ArchitectureDiagnostic, []string) {
 	diagnostics := []ArchitectureDiagnostic{}
 	unassessed := []string{
-		"primitive inspection checks known source capabilities and declaration prerequisites; arbitrary normalization, SQL visibility, cache authority and transaction semantics require typed adapters and runtime proofs",
+		"primitive inspection checks known source capabilities and " +
+			"declaration prerequisites; arbitrary normalization, SQL " +
+			"visibility, cache authority and transaction semantics " +
+			"require typed adapters and runtime proofs",
 	}
 
 	var declaration struct {
@@ -137,7 +141,11 @@ func inspectPrimitiveBoundaries(
 
 	var unboundedSlice func(ast.Expr, *primitiveSource, map[string]bool) bool
 
-	unboundedSlice = func(expression ast.Expr, file *primitiveSource, seen map[string]bool) bool {
+	unboundedSlice = func(
+		expression ast.Expr,
+		file *primitiveSource,
+		seen map[string]bool,
+	) bool {
 		key := ""
 
 		switch value := expression.(type) {
@@ -177,7 +185,8 @@ func inspectPrimitiveBoundaries(
 
 	// Unclassified helpers retain the restrictions of their operation consumer.
 	// A recognized domain/data boundary keeps its own role; normal dependency
-	// checks independently reject an operation reaching a concrete data package.
+	// checks independently reject an operation reaching a concrete data
+	// package.
 	reached := map[string]bool{}
 
 	var visit func(string)
@@ -228,7 +237,12 @@ func inspectPrimitiveBoundaries(
 		}
 	}
 
-	add := func(id string, file *primitiveSource, pos token.Pos, message, repair string) {
+	add := func(
+		id string,
+		file *primitiveSource,
+		pos token.Pos,
+		message, repair string,
+	) {
 		diagnostics = append(
 			diagnostics,
 			ArchitectureDiagnostic{
@@ -247,13 +261,17 @@ func inspectPrimitiveBoundaries(
 			file.role == "unknown" && reached[file.directory]
 		for alias, dependency := range file.imports {
 			if alias == "." &&
-				(dependency == "strings" || strings.HasPrefix(dependency, "github.com/plutoframework/pluto-core/") || dependency == "github.com/plutoframework/pluto-jobs") {
+				(dependency == "strings" || strings.HasPrefix(
+					dependency,
+					"github.com/plutoframework/pluto-core/",
+				) || dependency == "github.com/plutoframework/pluto-jobs") {
 				add(
 					"ARCH509",
 					file,
 					file.tree.Pos(),
 					"dot import hides primitive capability ownership",
-					"Use an explicit import name so the canonical capability checks can resolve the owning package.",
+					"Use an explicit import name so the canonical capability "+
+						"checks can resolve the owning package.",
 				)
 			}
 		}
@@ -269,8 +287,12 @@ func inspectPrimitiveBoundaries(
 							"ARCH505",
 							file,
 							field.Pos(),
-							"operation entry exposes an unbounded slice result",
-							"Expose a declared bounded collection or capped export result through the operation contract; apply visibility in the scoped query before limiting rows.",
+							"operation entry exposes an unbounded slice "+
+								"result",
+							"Expose a declared bounded collection or capped "+
+								"export result through the operation "+
+								"contract; apply visibility in the "+
+								"scoped query before limiting rows.",
 						)
 					}
 				}
@@ -301,8 +323,12 @@ func inspectPrimitiveBoundaries(
 						"ARCH501",
 						file,
 						selector.Pos(),
-						"normalization capability is authored outside the domain owner",
-						"Normalize and validate through a domain constructor producing a controlled value; operations consume that value instead of repeating normalization.",
+						"normalization capability is authored outside the "+
+							"domain owner",
+						"Normalize and validate through a domain constructor "+
+							"producing a controlled value; operations "+
+							"consume that value instead of repeating "+
+							"normalization.",
 					)
 				}
 			}
@@ -321,7 +347,10 @@ func inspectPrimitiveBoundaries(
 						file,
 						selector.Pos(),
 						"cache mechanics escape the data boundary",
-						"Inject a restricted scoped data port; the data adapter owns keys, TTL and loading, with live authorization before every access including hits.",
+						"Inject a restricted scoped data port; the data "+
+							"adapter owns keys, TTL and loading, with "+
+							"live authorization before every access "+
+							"including hits.",
 					)
 				}
 			}
@@ -334,20 +363,30 @@ func inspectPrimitiveBoundaries(
 					"ARCH503",
 					file,
 					selector.Pos(),
-					"HTTP replay lacks declared operation idempotency semantics",
-					"Declare each write operation's idempotency mode and checked exemption where applicable; transactional completion requires the constrained data commit, not HTTP response capture.",
+					"HTTP replay lacks declared operation idempotency "+
+						"semantics",
+					"Declare each write operation's idempotency mode and "+
+						"checked exemption where applicable; "+
+						"transactional completion requires the "+
+						"constrained data commit, not HTTP response "+
+						"capture.",
 				)
 			}
 
 			if operationCode &&
-				dependency == "github.com/plutoframework/pluto-core/pagination" &&
+				dependency == "github.com/plutoframework/pluto-core/"+
+					"pagination" &&
+
 				capability == "Finish" {
 				add(
 					"ARCH504",
 					file,
 					selector.Pos(),
 					"collection finishing escapes the scoped data contract",
-					"Use a bounded data query port that applies resource visibility before pagination and returns the declared page; use the same visibility contract for capped exports.",
+					"Use a bounded data query port that applies resource "+
+						"visibility before pagination and returns the "+
+						"declared page; use the same visibility contract "+
+						"for capped exports.",
 				)
 			}
 
@@ -358,8 +397,12 @@ func inspectPrimitiveBoundaries(
 					"ARCH506",
 					file,
 					selector.Pos(),
-					"job payload handling lacks a declared operation-bound effect",
-					"Declare the typed effect and its target operation; use the managed entry binding, strict payload validation, transactional enqueue and bounded retry contract.",
+					"job payload handling lacks a declared operation-bound "+
+						"effect",
+					"Declare the typed effect and its target operation; use "+
+						"the managed entry binding, strict payload "+
+						"validation, transactional enqueue and bounded "+
+						"retry contract.",
 				)
 			}
 

@@ -9,29 +9,31 @@ import (
 func candidateRoleSource(m Manifest) ([]byte, error) {
 	var source bytes.Buffer
 	source.WriteString(
-		"package access\nimport rbac \"github.com/plutoframework/pluto-rbac\"\nfunc Roles()[]rbac.Role{return []rbac.Role{\n",
+		"package access\nimport rbac \"github.com/plutoframework/" +
+			"pluto-rbac\"\nfunc Roles()[]rbac.Role{return []rbac.Role{\n",
 	)
 
 	for _, role := range m.Roles {
 		fmt.Fprintf(
 			&source,
-			"{ID:%q,Name:%q,Description:%q,Permissions:[]rbac.PermissionID{",
+			"{\nID:%q,\nName:%q,\nDescription:%q,\n"+
+				"Permissions:[]rbac.PermissionID{\n",
 			role.ID,
 			role.Name,
 			role.Description,
 		)
 
 		for _, permission := range role.Permissions {
-			fmt.Fprintf(&source, "%q,", permission)
+			fmt.Fprintf(&source, "%q,\n", permission)
 		}
 
-		source.WriteString("},Inherits:[]rbac.RoleID{")
+		source.WriteString("},\nInherits:[]rbac.RoleID{\n")
 
 		for _, parent := range role.Inherits {
-			fmt.Fprintf(&source, "%q,", parent)
+			fmt.Fprintf(&source, "%q,\n", parent)
 		}
 
-		source.WriteString("}},\n")
+		source.WriteString("},\n},\n")
 	}
 
 	source.WriteString("}}\n")

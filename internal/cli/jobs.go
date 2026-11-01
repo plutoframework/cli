@@ -19,8 +19,9 @@ func addJobCommand(options Options) *cobra.Command {
 	)
 
 	command := &cobra.Command{
-		Use:     "job GROUP ACTION",
-		Short:   "Add a typed job, handler, tests and explicit worker registration",
+		Use: "job GROUP ACTION",
+		Short: "Add a typed job, handler, tests and explicit worker " +
+			"registration",
 		Example: "  pluto add job invoices Send --kind invoice.send",
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -124,22 +125,48 @@ func addJobCommand(options Options) *cobra.Command {
 			}
 
 			cmd.Println(
-				"Job added; implement its handler before enqueueing. Run pluto fmt and pluto vet.",
+				"Job added; implement its handler before enqueueing. Run " +
+					"pluto fmt and pluto vet.",
 			)
 
 			return nil
 		},
 	}
 	command.Flags().
-		IntVar(&maxAttempts, "max-attempts", 0, "Explicit finite candidate delivery attempt budget (1..100)")
+		IntVar(
+			&maxAttempts,
+			"max-attempts",
+			0,
+			"Explicit finite candidate delivery attempt budget (1..100)",
+		)
 	command.Flags().
-		StringVar(&operationID, "operation", "", "Declared gated operation to invoke")
+		StringVar(
+			&operationID,
+			"operation",
+			"",
+			"Declared gated operation to invoke",
+		)
 	command.Flags().
-		StringVar(&permission, "permission", "", "Permission for a newly declared write operation")
+		StringVar(
+			&permission,
+			"permission",
+			"",
+			"Permission for a newly declared write operation",
+		)
 	command.Flags().
-		StringVar(&kind, "kind", "", "Stable lowercase delivery kind (required)")
+		StringVar(
+			&kind,
+			"kind",
+			"",
+			"Stable lowercase delivery kind (required)",
+		)
 	command.Flags().
-		BoolVar(&dry, "dry-run", false, "Preflight and list files without writing")
+		BoolVar(
+			&dry,
+			"dry-run",
+			false,
+			"Preflight and list files without writing",
+		)
 
 	return command
 }

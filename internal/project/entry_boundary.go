@@ -48,8 +48,11 @@ func inspectEntryBoundaries(
 				"ARCH213",
 				"pluto.toml",
 				1,
-				"worker entry has no protected independent operation reference: "+job.Group+"."+job.Action,
-				"Declare the operation once and set the job operation reference; persisted actor identifiers do not confer authority.",
+				"worker entry has no protected independent operation "+
+					"reference: "+job.Group+"."+job.Action,
+				"Declare the operation once and set the job operation "+
+					"reference; persisted actor identifiers do not "+
+					"confer authority.",
 			)
 		}
 	}
@@ -57,14 +60,20 @@ func inspectEntryBoundaries(
 	for _, agent := range m.Agents {
 		if operation, ok := m.Operation(
 			agent.Operation,
-		); !ok || operation.Public || (operation.Write && m.Boundary.Mode != "candidate") ||
+		); !ok ||
+			operation.Public ||
+			(operation.Write &&
+				m.Boundary.Mode != "candidate") ||
+
 			operation.Permission == "" {
 			add(
 				"ARCH214",
 				"pluto.toml",
 				1,
-				"agent tool has no supported protected read operation reference: "+agent.Group+"."+agent.Action,
-				"Declare a protected read operation and migrate tool behavior into its private implementation.",
+				"agent tool has no supported protected read operation "+
+					"reference: "+agent.Group+"."+agent.Action,
+				"Declare a protected read operation and migrate tool "+
+					"behavior into its private implementation.",
 			)
 		}
 	}
@@ -129,7 +138,8 @@ func inspectEntryBoundaries(
 
 				imports[name] = value
 				if name == "." &&
-					(value == "github.com/plutoframework/pluto-jobs" || value == "github.com/plutoframework/pluto-agent") {
+					(value == "github.com/plutoframework/pluto-jobs" ||
+						value == "github.com/plutoframework/pluto-agent") {
 					id := "ARCH211"
 					if strings.HasSuffix(value, "pluto-agent") {
 						id = "ARCH212"
@@ -139,15 +149,33 @@ func inspectEntryBoundaries(
 						id,
 						relative,
 						set.Position(spec.Pos()).Line,
-						"dot-imported entry capabilities hide their declared adapter ownership",
-						"Use qualified framework-owned entry adapters; dot-imported worker/tool capabilities are unsupported.",
+						"dot-imported entry capabilities hide their declared "+
+							"adapter ownership",
+						"Use qualified framework-owned entry adapters; "+
+							"dot-imported worker/tool capabilities are "+
+							"unsupported.",
 					)
 				}
 			}
 
 			worker, tool := false, false
 			allowedWorker := managed[relative] &&
-				(strings.HasPrefix(relative, "internal/jobs/") || strings.HasPrefix(relative, "internal/background/") || strings.HasPrefix(relative, "internal/jobcontracts/") || relative == "internal/app/worker_runtime_gen.go" || (m.Boundary.Mode == "candidate" && (relative == "internal/app/candidate_operations_gen.go" || relative == "internal/access/caller_gen.go")))
+				(strings.HasPrefix(
+					relative,
+					"internal/jobs/",
+				) || strings.HasPrefix(
+					relative,
+					"internal/background/",
+				) || strings.HasPrefix(
+					relative,
+					"internal/jobcontracts/",
+				) ||
+					relative == "internal/app/worker_runtime_gen.go" ||
+					(m.Boundary.Mode == "candidate" &&
+						(relative == "internal/app/candidate_operations_"+
+							"gen.go" ||
+
+							relative == "internal/access/caller_gen.go")))
 			allowedTool := managed[relative] &&
 				strings.HasPrefix(relative, "internal/agents/")
 
@@ -163,8 +191,11 @@ func inspectEntryBoundaries(
 						"ARCH211",
 						relative,
 						set.Position(selector.Pos()).Line,
-						"Jobs-definition package exposes an unmanaged worker Bind path",
-						"Bind typed deliveries only inside the declared managed worker adapter; arbitrary callback bindings cannot replace operation gates.",
+						"Jobs-definition package exposes an unmanaged worker "+
+							"Bind path",
+						"Bind typed deliveries only inside the declared "+
+							"managed worker adapter; arbitrary callback "+
+							"bindings cannot replace operation gates.",
 					)
 
 					worker = true
@@ -178,13 +209,19 @@ func inspectEntryBoundaries(
 				imported := imports[qualifier.Name]
 				if !worker && !allowedWorker &&
 					imported == "github.com/plutoframework/pluto-jobs" &&
-					(selector.Sel.Name == "Handler" || selector.Sel.Name == "Job" || selector.Sel.Name == "Delivery") {
+					(selector.Sel.Name == "Handler" ||
+						selector.Sel.Name == "Job" ||
+						selector.Sel.Name == "Delivery") {
 					add(
 						"ARCH211",
 						relative,
 						set.Position(selector.Pos()).Line,
-						"worker handler binding exists outside a declared managed operation adapter",
-						"Declare job.operation and move business behavior behind the shared operation gate; keep payload contracts separate from worker handlers.",
+						"worker handler binding exists outside a declared "+
+							"managed operation adapter",
+						"Declare job.operation and move business behavior "+
+							"behind the shared operation gate; keep "+
+							"payload contracts separate from worker "+
+							"handlers.",
 					)
 
 					worker = true
@@ -192,14 +229,24 @@ func inspectEntryBoundaries(
 
 				if imported == "github.com/plutoframework/pluto-jobs" &&
 					selector.Sel.Name == "NewWorker" &&
-					relative != "internal/app/worker_runtime_gen.go" && (m.Boundary.Mode != "candidate" || relative != "internal/app/candidate_operations_gen.go" || !managed[relative]) &&
+					relative != "internal/app/worker_runtime_gen.go" &&
+					(m.Boundary.Mode != "candidate" ||
+						relative != "internal/app/"+
+							"candidate_operations_gen.go" ||
+
+						!managed[relative]) &&
+
 					!worker {
 					add(
 						"ARCH211",
 						relative,
 						set.Position(selector.Pos()).Line,
-						"raw worker construction bypasses the immutable managed dispatch path",
-						"Construct workers through the generated app wrapper; inject sealed operation dependencies, never replacement handler maps.",
+						"raw worker construction bypasses the immutable "+
+							"managed dispatch path",
+						"Construct workers through the generated app "+
+							"wrapper; inject sealed operation "+
+							"dependencies, never replacement handler "+
+							"maps.",
 					)
 
 					worker = true
@@ -207,13 +254,17 @@ func inspectEntryBoundaries(
 
 				if !tool && !allowedTool &&
 					imported == "github.com/plutoframework/pluto-agent" &&
-					(selector.Sel.Name == "ToolConfig" || selector.Sel.Name == "NewTool") {
+					(selector.Sel.Name == "ToolConfig" ||
+						selector.Sel.Name == "NewTool") {
 					add(
 						"ARCH212",
 						relative,
 						set.Position(selector.Pos()).Line,
-						"agent tool binding exists outside a declared managed operation adapter",
-						"Declare agent.operation and use the generated tool adapter; remove authored business Handle/Read callbacks.",
+						"agent tool binding exists outside a declared "+
+							"managed operation adapter",
+						"Declare agent.operation and use the generated tool "+
+							"adapter; remove authored business Handle/"+
+							"Read callbacks.",
 					)
 
 					tool = true
@@ -289,7 +340,8 @@ func workerDefinitionPackages(root string) map[string]bool {
 
 				name, ok := selector.X.(*ast.Ident)
 				if ok && qualifiers[name.Name] &&
-					(selector.Sel.Name == "Definition" || selector.Sel.Name == "NewDefinition") {
+					(selector.Sel.Name == "Definition" ||
+						selector.Sel.Name == "NewDefinition") {
 					packages[filepath.Dir(path)] = true
 				}
 

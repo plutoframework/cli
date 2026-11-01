@@ -1,6 +1,7 @@
 package project
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,20 +26,52 @@ func primitiveFixture(t *testing.T, files map[string]string) string {
 }
 
 func TestPrimitivePlacementAndHelperBypasses(t *testing.T) {
-	for _, test := range []struct{ name, source, id string }{
-		{"normalizer", `import s "strings"; var normalize=s.TrimSpace`, "ARCH501"},
-		{"cache", `import c "github.com/plutoframework/pluto-core/cache"; var newLoader=c.NewLoader[string]`, "ARCH502"},
-		{"collection", `import p "github.com/plutoframework/pluto-core/pagination"; var finish=p.Finish[string]`, "ARCH504"},
+	for _, test := range []struct {
+		name, source, id string
+	}{
+		{
+			"normalizer",
+			`
+import s "strings"
+
+var normalize = s.TrimSpace
+`,
+			"ARCH501",
+		},
+		{
+			"cache",
+			`
+import c "github.com/plutoframework/pluto-core/cache"
+
+var newLoader = c.NewLoader[string]
+`,
+			"ARCH502",
+		},
+		{
+			"collection",
+			`
+import p "github.com/plutoframework/pluto-core/pagination"
+
+var finish = p.Finish[string]
+`,
+			"ARCH504",
+		},
 	} {
 		for _, helper := range []bool{false, true} {
 			t.Run(
-				test.name+map[bool]string{true: " helper", false: " direct"}[helper],
+				test.name+map[bool]string{
+					true:  " helper",
+					false: " direct",
+				}[helper],
 				func(t *testing.T) {
 					path := "internal/operations/use.go"
 
 					files := map[string]string{}
 					if helper {
-						files[path] = `package operations; import _ "example.test/app/internal/helper"`
+						files[path] = `package operations
+
+import _ "example.test/app/internal/helper"
+`
 						path = "internal/helper/use.go"
 					}
 
@@ -69,11 +102,42 @@ func TestPrimitivePlacementAndHelperBypasses(t *testing.T) {
 
 func TestPrimitiveOwnersRemainAllowed(t *testing.T) {
 	root := primitiveFixture(t, map[string]string{
-		"internal/domain/value.go":            `package domain; import "strings"; func Normalize(v string)string{return strings.TrimSpace(v)}`,
-		"internal/storage/value.go":           `package storage; import c "github.com/plutoframework/pluto-core/cache"; var factory=c.NewLoader[string]`,
-		"internal/storage/page.go":            `package storage; import p "github.com/plutoframework/pluto-core/pagination"; var finish=p.Finish[string]`,
-		"internal/operations/use.go":          `package operations; import "example.test/app/internal/domain"; func Work(v string)string{return domain.Normalize(v)}`,
-		"internal/operations/ignored_test.go": `package operations; import "strings"; var normalize=strings.TrimSpace`,
+		"internal/domain/value.go": `package domain
+
+import "strings"
+
+func Normalize(v string) string {
+
+	return strings.TrimSpace(v)
+}
+`,
+		"internal/storage/value.go": `package storage
+
+import c "github.com/plutoframework/pluto-core/cache"
+
+var factory = c.NewLoader[string]
+`,
+		"internal/storage/page.go": `package storage
+
+import p "github.com/plutoframework/pluto-core/pagination"
+
+var finish = p.Finish[string]
+`,
+		"internal/operations/use.go": `package operations
+
+import "example.test/app/internal/domain"
+
+func Work(v string) string {
+
+	return domain.Normalize(v)
+}
+`,
+		"internal/operations/ignored_test.go": `package operations
+
+import "strings"
+
+var normalize = strings.TrimSpace
+`,
 	})
 
 	diagnostics, _ := inspectPrimitiveBoundaries(root, "example.test/app", nil)
@@ -84,9 +148,22 @@ func TestPrimitiveOwnersRemainAllowed(t *testing.T) {
 
 func TestPrimitiveDeclarationPrerequisites(t *testing.T) {
 	root := primitiveFixture(t, map[string]string{
-		"internal/operations/work.go":  `package operations; func Work(){}`,
-		"internal/transport/replay.go": `package transport; import replay "github.com/plutoframework/pluto-core/httpidem"; var build=replay.New`,
-		"internal/jobs/job.go":         `package jobs; import queue "github.com/plutoframework/pluto-jobs"; var decode=queue.Decode[string]`,
+		"internal/operations/work.go": `package operations
+
+func Work() {}
+`,
+		"internal/transport/replay.go": `package transport
+
+import replay "github.com/plutoframework/pluto-core/httpidem"
+
+var build = replay.New
+`,
+		"internal/jobs/job.go": `package jobs
+
+import queue "github.com/plutoframework/pluto-jobs"
+
+var decode = queue.Decode[string]
+`,
 	})
 
 	valid := []byte(`[[operations]]
@@ -104,9 +181,33 @@ operation="records.Update"
 	}{
 		{"legacy", nil, true, true},
 		{"declared", valid, false, false},
-		{"missing replay", []byte("[[operations]]\ngroup='records'\naction='Update'\nwrite=true\n"), true, true},
-		{"write without replay", []byte("[[operations]]\ngroup='records'\naction='Update'\nwrite=true\nidempotency='none'\n"), true, true},
-		{"unknown effect", []byte("[[operations]]\ngroup='records'\naction='Read'\n[[jobs]]\noperation='other.Unknown'\n"), false, true},
+		{
+			"missing replay",
+			[]byte(
+				"[[operations]]\ngroup='records'\naction='Update'\n" +
+					"write=true\n",
+			),
+			true,
+			true,
+		},
+		{
+			"write without replay",
+			[]byte(
+				"[[operations]]\ngroup='records'\naction='Update'\n" +
+					"write=true\nidempotency='none'\n",
+			),
+			true,
+			true,
+		},
+		{
+			"unknown effect",
+			[]byte(
+				"[[operations]]\ngroup='records'\naction='Read'\n[[jobs]]\n" +
+					"operation='other.Unknown'\n",
+			),
+			false,
+			true,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			diagnostics, _ := inspectPrimitiveBoundaries(
@@ -150,16 +251,30 @@ func Export() []string {return nil}
 }
 
 func TestPrimitiveNamedSliceCannotHideExportBound(t *testing.T) {
-	for _, result := range []string{"Rows", "Alias", "*Alias", "shared.Rows", "Generic[string,int]"} {
+	for _, result := range []string{
+		"Rows",
+		"Alias",
+		"*Alias",
+		"shared.Rows",
+		"Generic[string,int]",
+	} {
 		root := primitiveFixture(t, map[string]string{
-			"internal/operations/export.go": `package operations
+			"internal/operations/export.go": fmt.Sprintf(`package operations
+
 import "example.test/app/internal/shared"
+
 type Rows []string
 type Alias = Rows
-type Generic[K comparable,V any] []V
-func Export() ` + result + ` {return nil}
+type Generic[K comparable, V any] []V
+
+func Export() %s {
+ return nil
+}
+`, result),
+			"internal/shared/rows.go": `package shared
+
+type Rows []string
 `,
-			"internal/shared/rows.go": `package shared; type Rows []string`,
 		})
 		diagnostics, _ := inspectPrimitiveBoundaries(
 			root,

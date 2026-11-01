@@ -95,7 +95,8 @@ func (m Manifest) Validate() error {
 
 	if m.Capabilities.OIDC && !m.Capabilities.LocalCredentials {
 		return fmt.Errorf(
-			"OIDC requires --local-credentials for the shared account/session profile",
+			"OIDC requires --local-credentials for the shared account/" +
+				"session profile",
 		)
 	}
 
@@ -120,7 +121,8 @@ func (m Manifest) Validate() error {
 
 	if !prefixName.MatchString(m.Project.EnvPrefix) {
 		return fmt.Errorf(
-			"env_prefix must be uppercase with one trailing underscore (MY_API_)",
+			"env_prefix must be uppercase with one trailing underscore (MY_" +
+				"API_)",
 		)
 	}
 
@@ -177,7 +179,10 @@ func (m Manifest) Validate() error {
 
 		route := e.Method + " " + canonicalRoute(e.Path)
 		if seenID[id] || seenRoute[route] || e.Path == "/api/features" ||
-			e.Path == "/healthz" || e.Path == "/auth" || strings.HasPrefix(e.Path, "/auth/") {
+			e.Path == "/healthz" || e.Path == "/auth" || strings.HasPrefix(
+			e.Path,
+			"/auth/",
+		) {
 			return fmt.Errorf("duplicate/reserved endpoint %s (%s)", id, route)
 		}
 
@@ -248,11 +253,17 @@ func (e Endpoint) Validate(multi bool) error {
 	if e.Idempotency == "required" &&
 		(e.Public || !e.isWrite()) {
 		return fmt.Errorf(
-			"required idempotency needs an authenticated business write; public writes require explicit app policy",
+			"required idempotency needs an authenticated business write; " +
+				"public writes require explicit app policy",
 		)
 	}
 
-	reserved := " break default func interface select case defer go map struct chan else goto package switch const fallthrough if range type continue for import return var init main internal paths app operations models features config domain transport context http strings testing io slog chi errors time fmt bytes json reflect "
+	reserved := " break default func interface select case defer go map " +
+		"struct chan else goto package switch const fallthrough if range " +
+		"type continue for import return var init main internal paths " +
+		"app operations models features config domain transport context " +
+		"http strings testing io slog chi errors time fmt bytes json " +
+		"reflect "
 	if !packageName.MatchString(e.Group) ||
 		strings.Contains(reserved, " "+e.Group+" ") {
 		return fmt.Errorf(
@@ -267,7 +278,8 @@ func (e Endpoint) Validate(multi bool) error {
 	if e.Name == "" || e.Description == "" || len(e.Name) > 200 ||
 		len(e.Description) > 2000 {
 		return fmt.Errorf(
-			"endpoint requires name (<=200 bytes) and description (<=2000 bytes)",
+			"endpoint requires name (<=200 bytes) and description (<=2000 " +
+				"bytes)",
 		)
 	}
 
@@ -304,12 +316,14 @@ func (e Endpoint) Validate(multi bool) error {
 
 	if e.Public && (e.Permission != "" || multi) {
 		return fmt.Errorf(
-			"public endpoints cannot require permissions or multi-tenant scope",
+			"public endpoints cannot require permissions or multi-tenant " +
+				"scope",
 		)
 	}
 
 	if !e.Public && e.isWrite() && e.Permission == "" {
-		return fmt.Errorf("authenticated writes require an explicit permission")
+		return fmt.Errorf("authenticated writes require an explicit " +
+			"permission")
 	}
 
 	if e.Permission != "" {
@@ -414,4 +428,6 @@ func Decode(data []byte) (Manifest, error) {
 	return m, nil
 }
 
-func Encode(m Manifest) ([]byte, error) { return toml.Marshal(m) }
+func Encode(m Manifest) ([]byte, error) {
+	return toml.Marshal(m)
+}

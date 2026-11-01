@@ -19,7 +19,9 @@ type Operation struct {
 	ReplayReason string `toml:"replay_reason,omitempty"`
 }
 
-func (o Operation) ID() string { return o.Group + "." + o.Action }
+func (o Operation) ID() string {
+	return o.Group + "." + o.Action
+}
 
 func (o Operation) Endpoint() Endpoint {
 	method := "GET"
@@ -75,12 +77,16 @@ func (m Manifest) OperationEndpoint(entry Endpoint) (Endpoint, error) {
 
 	if operation.Write && !entry.isWrite() {
 		return entry, fmt.Errorf(
-			"write operation %s cannot be exposed through a read-only HTTP method",
+			"write operation %s cannot be exposed through a read-only HTTP "+
+				"method",
 			operation.ID(),
 		)
 	}
 
-	entry.Permission, entry.Public, entry.Collection = operation.Permission, operation.Public, operation.Collection
+	entry.Permission = operation.Permission
+	entry.Public = operation.Public
+
+	entry.Collection = operation.Collection
 	if operation.Write {
 		entry.Idempotency = operation.Idempotency
 	} else {
@@ -100,13 +106,40 @@ func OperationFiles(
 
 	files := map[string][]byte{}
 
-	for _, item := range []struct{ directory, template, suffix string }{{"models", "models.go", ".go"}, {"operations", "operation.go", ".go"}, {"operations", "operation_test.go", "_test.go"}} {
+	for _, item := range []struct {
+		directory, template, suffix string
+	}{
+		{
+			"models",
+			"models.go",
+			".go",
+		},
+		{
+			"operations",
+			"operation.go",
+			".go",
+		},
+		{
+			"operations",
+			"operation_test.go",
+			"_test.go",
+		},
+	} {
 		data, err := render(item.template, dataFor(m, operation.Endpoint()))
 		if err != nil {
 			return nil, err
 		}
 
-		files[filepath.ToSlash(filepath.Join("internal", item.directory, operation.Group, strings.ToLower(operation.Action)+item.suffix))] = data
+		files[filepath.ToSlash(
+			filepath.Join(
+				"internal",
+				item.directory,
+				operation.Group,
+				strings.ToLower(
+					operation.Action,
+				)+item.suffix,
+			),
+		)] = data
 	}
 
 	return files, nil
@@ -115,14 +148,16 @@ func OperationFiles(
 func (operation Operation) Validate(multi bool) error {
 	if operation.Public && operation.Write {
 		return fmt.Errorf(
-			"public write operations require a separately supported authority contract",
+			"public write operations require a separately supported " +
+				"authority contract",
 		)
 	}
 
 	if operation.Write && operation.Idempotency != "required" &&
 		(operation.Idempotency != "exempt" || operation.ReplayReason == "") {
 		return fmt.Errorf(
-			"write operation %s requires explicit idempotency=required or a reasoned exemption",
+			"write operation %s requires explicit idempotency=required or a "+
+				"reasoned exemption",
 			operation.ID(),
 		)
 	}

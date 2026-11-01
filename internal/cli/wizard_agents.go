@@ -28,7 +28,8 @@ func agentForm(model wizardModel, m project.Manifest,
 		textField(
 			"permission",
 			"RBAC permission",
-			"Explicit capability; resource access is checked by the injected operation.",
+			"Explicit capability; resource access is checked by the injected "+
+				"operation.",
 			seed(cmd, "permission", ""),
 		),
 		choiceField(

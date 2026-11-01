@@ -43,13 +43,16 @@ func TestCrossEntryOperationConsumer(t *testing.T) {
 		"type ReadDependencies struct{}",
 		"type ReadDependencies struct{Calls *int}",
 	)
-	replaceSource(t, path, "_ reports.ReadRequest", "input reports.ReadRequest")
+	replaceSource(t, path, "_ reports.ReadRequest", "input reports.ReadReques"+
+		"t")
 
 	private := replaceSource(
 		t,
 		path,
 		"return reports.ReadData{}, domain.ErrNotImplemented",
-		"if operation.dependencies.Calls==nil{return reports.ReadData{},domain.ErrNotImplemented}; *operation.dependencies.Calls++; return reports.ReadData{Value:input.ResourceID},nil",
+		"if operation.dependencies.Calls==nil{return reports.ReadData{},"+
+			"domain.ErrNotImplemented}; *operation.dependencies.Calls++; "+
+			"return reports.ReadData{Value:input.ResourceID},nil",
 	)
 	mustInvoke(
 		t,
@@ -126,19 +129,23 @@ func TestCrossEntryOperationConsumer(t *testing.T) {
 	external(t, root, "go", "test", "-race", "./...")
 	assertPublishedDraft(t, root)
 
-	// A separately constructed worker can compile but cannot enter the supported
-	// app through an authored registry replacement, even without Handler/Job types.
+	// A separately constructed worker can compile but cannot enter the
+	// supported
+	// app through an authored registry replacement, even without Handler/Job
+	// types.
 	rogue := filepath.Join(root, "internal/app/rogue_worker.go")
 
 	rawWorker := []byte(`package app
+
 import (
- "example.test/cross/internal/background"
- jobs "github.com/plutoframework/pluto-jobs"
+	"example.test/cross/internal/background"
+	jobs "github.com/plutoframework/pluto-jobs"
 )
-func rogueWorker(store jobs.Store) (*jobs.Worker,error) {
- handlers:=background.Handlers(background.Dependencies{})
- handlers["alternate"]=handlers["reports.read"]
- return jobs.NewWorker(store,handlers,jobs.DefaultConfig())
+
+func rogueWorker(store jobs.Store) (*jobs.Worker, error) {
+	handlers := background.Handlers(background.Dependencies{})
+	handlers["alternate"] = handlers["reports.read"]
+	return jobs.NewWorker(store, handlers, jobs.DefaultConfig())
 }
 `)
 	if err := os.WriteFile(rogue, rawWorker, 0o644); err != nil {
@@ -170,7 +177,10 @@ func rogueWorker(store jobs.Store) (*jobs.Worker,error) {
 	}
 
 	// Every entry adapter is managed; deleting its gate reference is rejected.
-	for _, relative := range []string{"internal/jobs/deliveries/read.go", "internal/agents/reviews/inspect.go"} {
+	for _, relative := range []string{
+		"internal/jobs/deliveries/read.go",
+		"internal/agents/reviews/inspect.go",
+	} {
 		target := filepath.Join(root, relative)
 
 		before, err := os.ReadFile(target)

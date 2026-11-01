@@ -57,20 +57,91 @@ func TestRoleContractsRejectInvalidDeclarations(t *testing.T) {
 		name   string
 		change func([]RoleContract) []RoleContract
 	}{
-		{"unknown grant", func(r []RoleContract) []RoleContract { r[0].Permissions = []string{"record:destroy"}; return r }},
+		{
+			"unknown grant",
+			func(r []RoleContract) []RoleContract {
+				r[0].Permissions = []string{
+					"record:destroy",
+				}
+
+				return r
+			},
+		},
 		{"duplicate grant", func(r []RoleContract) []RoleContract {
 			r[0].Permissions = append(r[0].Permissions, "record:read")
 			return r
 		}},
-		{"unknown parent", func(r []RoleContract) []RoleContract { r[1].Inherits = []string{"missing"}; return r }},
-		{"duplicate parent", func(r []RoleContract) []RoleContract { r[1].Inherits = append(r[1].Inherits, "reader"); return r }},
-		{"cycle", func(r []RoleContract) []RoleContract { r[0].Inherits = []string{"approver"}; return r }},
-		{"self cycle", func(r []RoleContract) []RoleContract { r[0].Inherits = []string{"reader"}; return r }},
-		{"duplicate role", func(r []RoleContract) []RoleContract { return append(r, r[0]) }},
-		{"invalid identifier", func(r []RoleContract) []RoleContract { r[0].ID = "Admin!"; return r }},
-		{"missing name", func(r []RoleContract) []RoleContract { r[0].Name = ""; return r }},
-		{"control metadata", func(r []RoleContract) []RoleContract { r[0].Description = "Allow\nanything"; return r }},
-		{"oversized metadata", func(r []RoleContract) []RoleContract { r[0].Description = strings.Repeat("x", 1025); return r }},
+		{
+			"unknown parent",
+			func(r []RoleContract) []RoleContract {
+				r[1].Inherits = []string{
+					"missing",
+				}
+
+				return r
+			},
+		},
+		{
+			"duplicate parent",
+			func(r []RoleContract) []RoleContract {
+				r[1].Inherits = append(r[1].Inherits, "reader")
+				return r
+			},
+		},
+		{
+			"cycle",
+			func(r []RoleContract) []RoleContract {
+				r[0].Inherits = []string{
+					"approver",
+				}
+
+				return r
+			},
+		},
+		{
+			"self cycle",
+			func(r []RoleContract) []RoleContract {
+				r[0].Inherits = []string{
+					"reader",
+				}
+
+				return r
+			},
+		},
+		{
+			"duplicate role",
+			func(r []RoleContract) []RoleContract {
+				return append(r, r[0])
+			},
+		},
+		{
+			"invalid identifier",
+			func(r []RoleContract) []RoleContract {
+				r[0].ID = "Admin!"
+				return r
+			},
+		},
+		{
+			"missing name",
+			func(r []RoleContract) []RoleContract {
+				r[0].Name = ""
+				return r
+			},
+		},
+		{
+			"control metadata",
+			func(r []RoleContract) []RoleContract {
+				r[0].Description = "Allow\nanything"
+				return r
+			},
+		},
+		{
+			"oversized metadata",
+			func(r []RoleContract) []RoleContract {
+				r[0].Description = strings.Repeat("x", 1025)
+				return r
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := CompileRoleContracts(

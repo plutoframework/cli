@@ -32,9 +32,12 @@ type ResourceTransition struct {
 	Guard string `toml:"guard"`
 }
 
-func (r ResourceContract) ID() string { return r.Group + "." + r.Name }
+func (r ResourceContract) ID() string {
+	return r.Group + "." + r.Name
+}
 
-// OperationContract declares required behavior independently of entry transport.
+// OperationContract declares required behavior independently of entry
+// transport.
 // CLI integration also checks equality with the owning authority declaration.
 type OperationContract struct {
 	ID              string   `toml:"id"`
@@ -74,7 +77,15 @@ func validOperationID(id string) bool {
 // Reuse the canonical generated name and permission rules. The placeholder
 // route is validation input only and is never emitted as an HTTP entry.
 func contractAuthority(group, action, permission string) error {
-	return (Endpoint{Group: group, Action: action, Name: "Contract", Description: "Declared operation contract.", Method: "GET", Path: "/contract", Permission: permission}).Validate(
+	return (Endpoint{
+		Group:       group,
+		Action:      action,
+		Name:        "Contract",
+		Description: "Declared operation contract.",
+		Method:      "GET",
+		Path:        "/contract",
+		Permission:  permission,
+	}).Validate(
 		false,
 	)
 }
@@ -92,7 +103,8 @@ func validateResource(r ResourceContract) error {
 		r.Version < 1 ||
 		r.Version > 1_000_000 {
 		return fmt.Errorf(
-			"resource %s requires valid owner/name, safe SQL table, namespace and positive bounded version",
+			"resource %s requires valid owner/name, safe SQL table, "+
+				"namespace and positive bounded version",
 			r.ID(),
 		)
 	}
@@ -164,7 +176,8 @@ func validateResource(r ResourceContract) error {
 		if transition.Guard != "none" && transition.Guard != "owner" &&
 			transition.Guard != "not_owner" {
 			return fmt.Errorf(
-				"resource %s requires explicit none, owner or not_owner transition guard",
+				"resource %s requires explicit none, owner or not_owner "+
+					"transition guard",
 				r.ID(),
 			)
 		}
@@ -172,7 +185,8 @@ func validateResource(r ResourceContract) error {
 		if guard, exists := guards[transition.Event]; exists &&
 			guard != transition.Guard {
 			return fmt.Errorf(
-				"resource %s requires one consistent guard per event for replay authorization",
+				"resource %s requires one consistent guard per event for "+
+					"replay authorization",
 				r.ID(),
 			)
 		}
@@ -184,7 +198,8 @@ func validateResource(r ResourceContract) error {
 	return nil
 }
 
-// ValidateContracts rejects unsupported or incomplete behavior before generation.
+// ValidateContracts rejects unsupported or incomplete behavior before
+// generation.
 // Bounds and references are checked here; exact managed implementations, typed
 // ports and real data tests establish the corresponding runtime guarantees.
 func ValidateContracts(
@@ -286,9 +301,11 @@ func ValidateContracts(
 					operation.ID,
 				)
 			}
-		} else if operation.ResourcePolicy != "owner" && operation.ResourcePolicy != "tenant" {
+		} else if operation.ResourcePolicy != "owner" &&
+			operation.ResourcePolicy != "tenant" {
 			return fmt.Errorf(
-				"operation %s requires explicit owner or tenant resource policy",
+				"operation %s requires explicit owner or tenant resource "+
+					"policy",
 				operation.ID,
 			)
 		}
@@ -309,7 +326,8 @@ func ValidateContracts(
 					if operation.ResourcePolicy == "owner" &&
 						transition.Guard == "not_owner" {
 						return fmt.Errorf(
-							"operation %s owner policy contradicts its not_owner transition guard",
+							"operation %s owner policy contradicts its not_"+
+								"owner transition guard",
 							operation.ID,
 						)
 					}
@@ -335,7 +353,8 @@ func ValidateContracts(
 			if operation.Idempotency != "required" &&
 				operation.Idempotency != "exempt" {
 				return fmt.Errorf(
-					"write/effect operation %s requires replay semantics or an explicit exemption",
+					"write/effect operation %s requires replay semantics or "+
+						"an explicit exemption",
 					operation.ID,
 				)
 			}
@@ -351,7 +370,8 @@ func ValidateContracts(
 			if len(reason) < 12 || len(reason) > 512 ||
 				reason != operation.ExemptionReason {
 				return fmt.Errorf(
-					"operation %s requires a specific bounded exemption reason",
+					"operation %s requires a specific bounded exemption "+
+						"reason",
 					operation.ID,
 				)
 			}
@@ -371,7 +391,8 @@ func ValidateContracts(
 
 		if len(operation.Effects) > 0 && resource.MaxValueBytes > 8192 {
 			return fmt.Errorf(
-				"effect-producing resource %s requires max_value_bytes at most 8192 to bound serialized delivery payloads",
+				"effect-producing resource %s requires max_value_bytes at "+
+					"most 8192 to bound serialized delivery payloads",
 				operation.Resource,
 			)
 		}
@@ -435,7 +456,8 @@ func ValidateContracts(
 
 			if operationByID[effect.Operation].Resource != operation.Resource {
 				return fmt.Errorf(
-					"effect %s crosses resource ownership without a supported mapping",
+					"effect %s crosses resource ownership without a "+
+						"supported mapping",
 					name,
 				)
 			}

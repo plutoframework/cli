@@ -27,7 +27,8 @@ func validateJobs(jobs []Job) error {
 			!actionName.MatchString(job.Action) ||
 			!metadataKey.MatchString(job.Kind) || len(job.Kind) > 128 {
 			return fmt.Errorf(
-				"job requires a Go group/action and lowercase kind (<=128 bytes)",
+				"job requires a Go group/action and lowercase kind (<=128 " +
+					"bytes)",
 			)
 		}
 
@@ -47,7 +48,9 @@ func validateJobs(jobs []Job) error {
 
 func jobRegistry(m Manifest) ([]byte, error) {
 	jobs := append([]Job(nil), m.Jobs...)
-	sort.Slice(jobs, func(i, j int) bool { return jobs[i].Kind < jobs[j].Kind })
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].Kind < jobs[j].Kind
+	})
 
 	groups := map[string]bool{}
 	for _, job := range jobs {
@@ -63,7 +66,8 @@ func jobRegistry(m Manifest) ([]byte, error) {
 
 	var source strings.Builder
 	source.WriteString(
-		"package background\nimport (\njobs \"github.com/plutoframework/pluto-jobs\"\n",
+		"package background\nimport (\njobs \"github.com/plutoframework/" +
+			"pluto-jobs\"\n",
 	)
 
 	for _, name := range names {
@@ -76,7 +80,9 @@ func jobRegistry(m Manifest) ([]byte, error) {
 	}
 
 	source.WriteString(
-		")\nfunc Handlers(dependencies Dependencies) map[jobs.Kind]jobs.Handler {\nreturn map[jobs.Kind]jobs.Handler{\n",
+		")\nfunc Handlers(dependencies Dependencies) " +
+			"map[jobs.Kind]jobs.Handler {\nreturn " +
+			"map[jobs.Kind]jobs.Handler{\n",
 	)
 
 	for _, job := range jobs {
@@ -104,7 +110,8 @@ func jobData(m Manifest, job Job) (templateData, error) {
 	}
 
 	data := dataFor(m, Endpoint{Group: job.Group, Action: job.Action})
-	data.OperationGroup, data.OperationAction = operation.Group, operation.Action
+	data.OperationGroup = operation.Group
+	data.OperationAction = operation.Action
 	data.JobKind = job.Kind
 
 	return data, nil
@@ -126,7 +133,9 @@ func JobFiles(m Manifest, job Job) (map[string][]byte, error) {
 	}
 
 	return map[string][]byte{
-		"internal/jobs/" + job.Group + "/" + strings.ToLower(job.Action) + "_test.go": source,
+		"internal/jobs/" + job.Group + "/" + strings.ToLower(
+			job.Action,
+		) + "_test.go": source,
 	}, nil
 }
 
@@ -139,10 +148,27 @@ func managedJobs(m Manifest) (map[string][]byte, error) {
 			return nil, err
 		}
 
-		for _, item := range []struct{ path, template string }{
-			{"internal/jobcontracts/" + job.Group + "/" + strings.ToLower(job.Action) + ".go", "job.go"},
-			{"internal/jobs/" + job.Group + "/" + strings.ToLower(job.Action) + ".go", "job_handler.go"},
-			{"internal/background/" + job.Group + "_" + strings.ToLower(job.Action) + ".go", "job_binding.go"},
+		for _, item := range []struct {
+			path, template string
+		}{
+			{
+				"internal/jobcontracts/" + job.Group + "/" + strings.ToLower(
+					job.Action,
+				) + ".go",
+				"job.go",
+			},
+			{
+				"internal/jobs/" + job.Group + "/" + strings.ToLower(
+					job.Action,
+				) + ".go",
+				"job_handler.go",
+			},
+			{
+				"internal/background/" + job.Group + "_" + strings.ToLower(
+					job.Action,
+				) + ".go",
+				"job_binding.go",
+			},
 		} {
 			source, err := render(item.template, data)
 			if err != nil {
@@ -214,7 +240,8 @@ func jobDependencies(m Manifest) ([]byte, error) {
 		symbol := symbol(Endpoint{Group: job.Group, Action: job.Action})
 		fmt.Fprintf(
 			&source,
-			"%sOperation %soperations.%sBoundary\n%sIdentity %sjobs.%sIdentity\n",
+			"%sOperation %soperations.%sBoundary\n%sIdentity "+
+				"%sjobs.%sIdentity\n",
 			symbol,
 			op.Group,
 			op.Action,

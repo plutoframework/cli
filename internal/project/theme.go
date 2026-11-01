@@ -37,13 +37,15 @@ func (f Frontend) ValidateTheme() error {
 
 	if t.Radius != "" && !themeRadius.MatchString(t.Radius) {
 		return fmt.Errorf(
-			"frontend.theme.radius must be 0 or a nonnegative px/rem length (up to 99.999)",
+			"frontend.theme.radius must be 0 or a nonnegative px/rem length " +
+				"(up to 99.999)",
 		)
 	}
 
 	if t.FontFamily != "" && !themeFont.MatchString(t.FontFamily) {
 		return fmt.Errorf(
-			"frontend.theme.font_family must be a plain CSS family list without quotes or URLs",
+			"frontend.theme.font_family must be a plain CSS family list " +
+				"without quotes or URLs",
 		)
 	}
 
@@ -53,7 +55,8 @@ func (f Frontend) ValidateTheme() error {
 			!strings.HasSuffix(t.Overrides, ".css") ||
 			strings.Contains(t.Overrides, "/generated/") {
 			return fmt.Errorf(
-				"frontend.theme.overrides must be a CSS file below %ssrc outside generated directories",
+				"frontend.theme.overrides must be a CSS file below %ssrc "+
+					"outside generated directories",
 				f.Directory+"/",
 			)
 		}
@@ -65,7 +68,8 @@ func (f Frontend) ValidateTheme() error {
 		for _, part := range parts {
 			if !themeSegment.MatchString(part) {
 				return fmt.Errorf(
-					"frontend.theme.overrides requires safe lowercase path segments",
+					"frontend.theme.overrides requires safe lowercase path " +
+						"segments",
 				)
 			}
 		}
@@ -89,7 +93,8 @@ func (f Frontend) ValidateTheme() error {
 		for key, value := range colors {
 			if !allowed[key] || !themeColor.MatchString(value) {
 				return fmt.Errorf(
-					"invalid frontend theme token %q: use a supported token with #RRGGBB or #RRGGBBAA",
+					"invalid frontend theme token %q: use a supported token "+
+						"with #RRGGBB or #RRGGBBAA",
 					key,
 				)
 			}

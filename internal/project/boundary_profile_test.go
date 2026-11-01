@@ -20,9 +20,17 @@ func boundaryProfileFixture(t *testing.T) BoundaryProfile {
 		JobsSource: filepath.Join(root, "pluto-jobs"),
 	}
 	for _, relative := range []string{
-		"pluto-auth", "pluto-auth/stores/postgres", "pluto-auth/methods/password",
-		"pluto-rbac", "pluto-rbac/identity", "pluto-core", "pluto-core/stores/postgres",
-		"pluto-jobs", "pluto-jobs/stores/postgres",
+		"pluto-auth",
+		"pluto-auth/stores/postgres",
+		"pluto-auth/methods/password",
+
+		"pluto-rbac",
+		"pluto-rbac/identity",
+		"pluto-core",
+		"pluto-core/stores/postgres",
+
+		"pluto-jobs",
+		"pluto-jobs/stores/postgres",
 	} {
 		directory := filepath.Join(root, filepath.FromSlash(relative))
 		if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -104,7 +112,16 @@ func TestBoundaryProfileExplicitCandidateModules(t *testing.T) {
 }
 
 func TestBoundaryProfileRejectsUntrustedSourceLayout(t *testing.T) {
-	for _, name := range []string{"mode", "missing", "relative", "file", "wrong root", "wrong nested", "missing nested", "nested escape"} {
+	for _, name := range []string{
+		"mode",
+		"missing",
+		"relative",
+		"file",
+		"wrong root",
+		"wrong nested",
+		"missing nested",
+		"nested escape",
+	} {
 		t.Run(name, func(t *testing.T) {
 			profile := boundaryProfileFixture(t)
 			write := func(path, body string) {
@@ -178,11 +195,18 @@ func TestBoundaryModuleIdentityCommentsAndQuoting(t *testing.T) {
 	}
 
 	for _, data := range []string{
-		"// module " + expected + "\n", "/* module " + expected + " */\n",
-		"module\n" + expected + "\n", "module " + expected + "\nmodule " + expected + "\n",
+		"// module " + expected + "\n",
+		"/* module " + expected + " */\n",
+
+		"module\n" + expected + "\n",
+		"module " + expected + "\nmodule " + expected + "\n",
+
 		"module github.com/plutoframework/ pluto-core\n",
+
 		"module github.com/plutoframework/ /* gap */ pluto-core\n",
-		"module \"" + expected + "\" trailing\n", "module \"unterminated\n",
+
+		"module \"" + expected + "\" trailing\n",
+		"module \"unterminated\n",
 	} {
 		if actual, err := boundaryModulePath([]byte(data)); err == nil {
 			t.Fatalf("malformed module accepted %q=%q", data, actual)
