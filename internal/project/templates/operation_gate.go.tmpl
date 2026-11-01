@@ -1,0 +1,60 @@
+package {{.Group}}
+
+import (
+    "context"
+
+    "{{.Module}}/internal/domain"
+    "{{.Module}}/internal/models/{{.Group}}"
+    "{{.Module}}/internal/access"
+
+    rbac "github.com/plutoframework/pluto-rbac"
+)
+
+// {{.Action}}Boundary is sealed to the managed operation gate. Entry adapters
+// consume this contract; authored production implementations cannot replace it.
+type {{.Action}}Boundary interface {
+    sealed{{.Action}}()
+    Execute(context.Context, domain.Principal, {{.Group}}.{{.Action}}Request) ({{.Group}}.{{.Action}}Data, error)
+}
+
+type {{.Action}} struct {
+    authorizer *rbac.Authorizer
+    memberships access.MembershipResolver
+    dependencies {{.Action}}Dependencies
+}
+
+func New{{.Action}}(authorizer *rbac.Authorizer, memberships access.MembershipResolver) *{{.Action}} {
+    return New{{.Action}}WithDependencies(authorizer, memberships, {{.Action}}Dependencies{})
+}
+
+func New{{.Action}}WithDependencies(authorizer *rbac.Authorizer, memberships access.MembershipResolver, dependencies {{.Action}}Dependencies) *{{.Action}} {
+    return &{{.Action}}{authorizer: authorizer, memberships:memberships, dependencies: dependencies}
+}
+
+func (*{{.Action}}) sealed{{.Action}}() {}
+
+// Execute always gates the private authored implementation. A supplied Principal
+// must already come from trusted authentication; this does not prove its origin
+// or replace resource authorization inside the operation.
+func (operation *{{.Action}}) Execute(
+    ctx context.Context,
+    principal domain.Principal,
+    input {{.Group}}.{{.Action}}Request,
+) ({{.Group}}.{{.Action}}Data, error) {
+    if ctx == nil { return {{.Group}}.{{.Action}}Data{}, domain.ErrUnauthenticated }
+    if err := ctx.Err(); err != nil { return {{.Group}}.{{.Action}}Data{}, err }
+    if operation == nil { return {{.Group}}.{{.Action}}Data{}, domain.ErrForbidden }
+{{if not .Public}}    if !principal.Verified() {
+        return {{.Group}}.{{.Action}}Data{}, domain.ErrUnauthenticated
+    }
+    if operation.memberships == nil {return {{.Group}}.{{.Action}}Data{},domain.ErrUnauthenticated}
+    current,identityErr:=operation.memberships.Resolve(ctx,principal.ActorID{{if .Multi}},principal.TenantID{{end}})
+    if err:=ctx.Err();err!=nil {return {{.Group}}.{{.Action}}Data{},err}
+    if identityErr!=nil || !current.Verified() || current.ActorID!=principal.ActorID{{if .Multi}} || current.TenantID!=principal.TenantID{{end}} {return {{.Group}}.{{.Action}}Data{},domain.ErrUnauthenticated}
+    principal=current
+{{end}}
+{{if .Permission}}    if err := operation.authorizer.Authorize(ctx,rbac.Request{SubjectID:principal.ActorID,Scope:rbac.Scope{ {{if .Multi}}TenantID:principal.TenantID,{{end}} },Permission:access.{{.Symbol}}Permission});err!=nil {
+        return {{.Group}}.{{.Action}}Data{}, err
+    }
+{{end}}    return operation.execute(ctx, principal, input)
+}

@@ -3,17 +3,22 @@
 Read README.md first. Run pluto fmt and pluto vet before submitting changes.
 Keep every file <=1,000 lines; prefer expanded readable Go and 80 columns.
 
-pluto.toml schema 7 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
-Handlers, models, operations, composition root and transport helpers are authored
-and created once. Never add magic init registration. Add endpoints with the CLI.
+pluto.toml schema 9 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
+Per-endpoint handlers and operation *_gate_gen.go are managed. Models, private
+operation execute methods, composition and transport helpers are authored and
+created once. Never add magic init registration. Add endpoints with the CLI.
 Do not import HTTP/storage from operations or database adapters from handlers,
 even indirectly. Define narrow interfaces in consumers; inject constructors.
 
 HTTP primitives are app-local. Authorization uses the pinned published
 pluto-rbac module. Authored access.Roles starts empty; adding endpoints must never
 grant roles automatically. Keep one compiled policy injected into route and
-operation checks through Dependencies.Policy. Resolve Principal.Roles from trusted
-membership; unknown roles and nil policies must deny capability checks.
+managed operation gates through Dependencies.Authorizer and Dependencies.Memberships.
+Every protected Execute refreshes exact actor/tenant membership; declared
+permissions use published Authorizer.Authorize with current assignments. Caller
+Principal.Roles never confers a grant. Do not call or export private execute,
+embed/alias a sealed boundary, or add an alternate exported operation entry.
+Unknown roles, nil authorizers and missing resolvers deny.
 Use the published Pluto session manager and HTTP adapter; preserve exact Origin
 checks for cookie writes and reject ambiguous credentials. Supply a trusted credential provider;
 verify membership before creating a tenant principal. Preserve verified tenant
@@ -31,8 +36,8 @@ operation/HTTP behavior tests. PostgreSQL connectivity is optional; generated
 operations explicitly return not implemented and do not persist data.
 
 Per-endpoint `internal/app/<group>_<action>.go` bindings are authored constructor
-choices. Change the operation constructor and this binding together when adding
-repositories. Add typed fields to app.Dependencies and construct/inject them in
+choices. Add consumer-owned ports to <Action>Dependencies and use the managed
+New<Action>WithDependencies constructor from this binding when adding repositories. Add typed fields to app.Dependencies and construct/inject them in
 app.New. Generated group registries accept narrow Operations interfaces and never
 choose concrete implementations; additions preserve authored constructor wiring.
 

@@ -267,13 +267,6 @@ func TestGeneratedApplications(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			original = bytes.Replace(
-				original,
-				[]byte("NewCreate(policy *rbac.Policy)"),
-				[]byte("NewCreate(policy *rbac.Policy, _ string)"),
-				1,
-			)
-
 			original = append(
 				original,
 				[]byte(
@@ -287,17 +280,8 @@ func TestGeneratedApplications(t *testing.T) {
 			bindingOriginal := replaceSource(
 				t,
 				bindingPath,
-				"NewCreate(dependencies.Policy)",
-				`NewCreate(dependencies.Policy, "authored-dependency")`,
-			)
-			replaceSource(
-				t,
-				filepath.Join(
-					root,
-					"internal/operations/widgets/create_test.go",
-				),
-				"NewCreate(policy)",
-				`NewCreate(policy, "unit-fixture")`,
+				"NewCreate(dependencies.Authorizer, dependencies.Memberships)",
+				"NewCreateWithDependencies(dependencies.Authorizer, dependencies.Memberships, widgetsoperations.CreateDependencies{})",
 			)
 
 			mustInvoke(
@@ -508,6 +492,7 @@ func TestGeneratedApplications(t *testing.T) {
 					"Duplicate",
 					"--description",
 					"Duplicate identifier",
+					"--permission", "widgets.write",
 				},
 				{
 					"add",
@@ -520,6 +505,7 @@ func TestGeneratedApplications(t *testing.T) {
 					"Duplicate",
 					"--description",
 					"Duplicate route shape",
+					"--permission", "widgets.write",
 				},
 				{
 					"add",

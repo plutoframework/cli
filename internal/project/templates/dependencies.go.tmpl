@@ -2,6 +2,7 @@ package app
 
 import (
  "{{.Module}}/internal/config"
+ "{{.Module}}/internal/access"
  rbac "github.com/plutoframework/pluto-rbac"
  "github.com/plutoframework/pluto-core/cache"
 )
@@ -12,5 +13,7 @@ import (
 type Dependencies struct {
  Config config.Config
  Policy *rbac.Policy
+ Authorizer *rbac.Authorizer
+ Memberships access.MembershipResolver
  Cache cache.Store
 }

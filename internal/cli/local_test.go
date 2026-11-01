@@ -116,6 +116,8 @@ func TestGeneratedLocalApplications(t *testing.T) {
 				"/auth/signin",
 				"--name",
 				"Unsafe duplicate",
+				"--permission",
+				"records.signin",
 				"--description",
 				"Must not replace the lifecycle.",
 			); err == nil || !strings.Contains(err.Error(), "duplicate/reserved endpoint") {

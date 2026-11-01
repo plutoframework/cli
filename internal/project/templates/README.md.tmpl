@@ -115,10 +115,29 @@ local credentials are enabled before changing schema_version to 7.
 
 Authorization imports `github.com/plutoframework/pluto-rbac` at the exact version
 in go.mod/go.sum, with no sibling checkout or local replacement. Startup compiles
-one immutable policy and injects it into the router and operations.
+one immutable policy and injects it into the router. Managed operation gates
+receive a published RBAC Authorizer plus the same trusted membership resolver.
+They refresh exact actor/tenant identity and resolve current grants before
+invoking the private authored execute implementation; caller-supplied Roles do
+not confer authority. Protected writes require explicit permission metadata.
 `internal/access/permissions_gen.go` declares capabilities and named endpoint
 permission constants from the manifest. Authored `internal/access/roles.go`
 starts empty: adding a permission does not automatically grant it to anyone.
+
+Schema 9 makes each declared handler and `<action>_gate_gen.go` managed. Keep
+business orchestration in authored `(*Action).execute`, and consumer-owned ports
+in `ActionDependencies`; wire them with `NewActionWithDependencies` from the
+authored app binding. Both direct and transport calls use `Execute`. The gate
+checks capability, not resource ownership or restricted persistence-write proof.
+A Principal remains an application trust contract, not unforgeable identity.
+
+Upgrading an older authored app is explicit: inventory all use cases in endpoint
+metadata, move business bodies behind private execute methods, retain typed
+ports, update constructor wiring with Authorizer/Memberships, and review the
+managed handler/gate diff before changing schema_version to 9. Do not relabel an
+old schema or overwrite authored business logic. The standalone architecture
+inspection still reports absent gates on legacy packages without endpoint
+metadata; optional Authorize calls are not a supported replacement boundary.
 
 After adding the sample widgets Create endpoint, edit `access.Roles()`:
 
@@ -140,11 +159,12 @@ Authored `access.Permissions()` can customize capability names/descriptions or
 append capabilities outside HTTP. Unknown grants, parents or cycles fail startup.
 The authenticator resolves `Principal.Roles` from verified server-side membership;
 never trust an arbitrary role header/claim. A subject can have different roles
-in different tenants. Route and direct operation checks use `principal.Can` with
-the same injected policy. Unknown roles (even alongside known roles), absent
-grants and a missing policy deny permission checks. Scope/ownership checks and
-membership freshness remain application responsibilities. The library evaluates
-trusted role IDs; this adapter uses the membership snapshot returned by auth.
+in different tenants. Routes apply an early policy check. Managed direct operation
+gates refresh membership and invoke the published Authorizer against current
+assignments. Unknown roles (even alongside known roles), absent grants, missing
+authorizers/resolvers and mismatched subject/scope deny. Resource ownership and
+transaction-time revalidation remain application responsibilities; this does not
+make Principal an unforgeable identity or prove restricted write adoption.
 `pluto fmt` and `pluto vet` validate the resulting app and exercise both boundaries.
 
 Metadata in `[[endpoints]]` is the generation source for CLI-owned permissions, paths,

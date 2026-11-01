@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"{{.Module}}/internal/domain"
+ operationgates "{{.Module}}/internal/operations/{{.Group}}"
 "{{.Module}}/internal/access"
 	"{{.Module}}/internal/features"
 	"{{.Module}}/internal/models/{{.Group}}"
@@ -21,7 +22,7 @@ rbac "github.com/plutoframework/pluto-rbac"
  {{if not .Public}}"github.com/plutoframework/pluto-core/idempotency/memory"{{end}}
 )
 
-type fake{{.Action}} struct{ calls int }
+type fake{{.Action}} struct{ operationgates.{{.Action}}Boundary; calls int }
 
 func (f *fake{{.Action}}) Execute(
 	_ context.Context,

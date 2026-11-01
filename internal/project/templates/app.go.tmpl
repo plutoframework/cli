@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"{{.Module}}/internal/config"
+ "{{.Module}}/internal/access"
 	"{{.Module}}/internal/features"
 	"{{.Module}}/internal/paths"
 	"{{.Module}}/internal/transport"
@@ -89,7 +90,9 @@ func NewWithCache(
  })
  {{end}}
  transport.RegisterSessions(reg,authentication)
- RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy, Cache: dataCache})
+ authorizer, authorizationErr := access.NewAuthorizer(policy,authentication.Memberships)
+ if authorizationErr != nil {logger.Error("operation authorization unavailable")}
+ RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy, Authorizer:authorizer, Memberships:authentication.Memberships, Cache: dataCache})
 	router.NotFound(
 		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 404, "not_found") },
 	)

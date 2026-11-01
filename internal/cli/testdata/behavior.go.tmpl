@@ -17,6 +17,8 @@ import (
  "{{.Module}}/internal/features"
  "{{.Module}}/internal/handlers/widgets"
  "{{.Module}}/internal/handlers/reports"
+ widgetoperations "{{.Module}}/internal/operations/widgets"
+ reportoperations "{{.Module}}/internal/operations/reports"
  reportmodels "{{.Module}}/internal/models/reports"
  "github.com/plutoframework/pluto-core/pagination"
  widgetmodels "{{.Module}}/internal/models/widgets"
@@ -44,7 +46,12 @@ func (auth trustedAuth) Authenticate(_ context.Context,token string{{if .Multi}}
  },nil
 }
 
-type recordingOperation struct { calls int; principal domain.Principal; input widgetmodels.CreateRequest }
+func (auth trustedAuth) Resolve(ctx context.Context,subject string{{if .Multi}},tenant string{{end}})(domain.Principal,error) {
+ if subject!="actor" {return domain.Principal{},domain.ErrUnauthenticated}
+ return auth.Authenticate(ctx,"trusted"{{if .Multi}},tenant{{end}})
+}
+
+type recordingOperation struct { widgetoperations.CreateBoundary; calls int; principal domain.Principal; input widgetmodels.CreateRequest }
 func (operation *recordingOperation) Execute(_ context.Context,principal domain.Principal,input widgetmodels.CreateRequest) (widgetmodels.CreateData,error) {
  operation.calls++
  operation.principal=principal
@@ -103,7 +110,7 @@ func TestResolvedFlagsAndIncompleteOperation(t *testing.T) {
  enabled:=true
  cfg.Features["widgets-create"]=&enabled
  cfg.Features["private-report"]=&enabled
- router:=app.New(cfg,transport.Authentication{Verifier:trustedAuth{permission:true},Idempotency:localIdempotency(t)},slog.New(slog.NewTextHandler(io.Discard,nil)),publishedPolicy(t))
+ router:=app.New(cfg,transport.Authentication{Verifier:trustedAuth{permission:true},Memberships:trustedAuth{permission:true},Idempotency:localIdempotency(t)},slog.New(slog.NewTextHandler(io.Discard,nil)),publishedPolicy(t))
  request:=httptest.NewRequest("GET","/api/features",nil)
  request.Header.Set("Authorization","Bearer trusted")
  request.Header.Set("Idempotency-Key","fixture-key")
@@ -192,7 +199,7 @@ func TestWriteReplayAndCurrentGates(t *testing.T) {
  }
 }
 
-type listReports struct{calls int}
+type listReports struct{reportoperations.ListBoundary; calls int}
 func (f *listReports) Execute(_ context.Context,_ domain.Principal,input reportmodels.ListRequest) (reportmodels.ListData,error) {
  f.calls++
  rows:=[]reportmodels.ListItem{ {Value:"a"},{Value:"b"},{Value:"c"}}

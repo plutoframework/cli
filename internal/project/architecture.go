@@ -59,12 +59,12 @@ func InspectArchitecture(directory string) ArchitectureReport {
 	root, err := filepath.Abs(directory)
 	r := ArchitectureReport{
 		Version:      1,
-		CheckedScope: "passed means only the implemented production Go source dependency, inventory, manifest and local invocation checks have no diagnostics; unassessed guarantees are never implied",
+		CheckedScope: "passed means only implemented production Go dependency, inventory, manifest, managed operation/entry ownership, source-derived lifecycle boundary and local invocation checks have no diagnostics; unassessed guarantees are never implied",
 		Directory:    root,
 		Packages:     []ArchitecturePackage{},
 		Diagnostics:  []ArchitectureDiagnostic{},
 		Unassessed: []string{
-			"semantic business-rule placement, lifecycle writes, authorization and required CI execution are not assessed",
+			"semantic business-rule placement, lifecycle commit enforcement, principal provenance, resource authorization and required CI execution are not assessed; generated capability gates do not establish restricted write adoption",
 			"external dependency internals and frontend source dependencies are not traversed",
 			"contract classification is a syntactic declaration inventory, not proof of purity; build-tag variants are inspected together without type checking",
 		},
@@ -396,6 +396,15 @@ func InspectArchitecture(directory string) ArchitectureReport {
 		)
 	}
 
+	r.Diagnostics = append(
+		r.Diagnostics,
+		operationBoundaryDiagnostics(root, manifest)...)
+	lifecycleDiagnostics, lifecycleUnassessed := inspectLifecycleBoundaries(
+		root,
+		module,
+	)
+	r.Diagnostics = append(r.Diagnostics, lifecycleDiagnostics...)
+	r.Unassessed = append(r.Unassessed, lifecycleUnassessed...)
 	sort.SliceStable(r.Diagnostics, func(i, j int) bool {
 		a, b := r.Diagnostics[i], r.Diagnostics[j]
 		if a.File != b.File {

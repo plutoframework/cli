@@ -1,6 +1,7 @@
 package project
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,10 @@ func TestArchitectureInspection(t *testing.T) {
 				}
 			}
 			write("go.mod", "module example.test/app\n")
-			write("pluto.toml", "schema_version = 8\n")
+			write(
+				"pluto.toml",
+				fmt.Sprintf("schema_version = %d\n", SchemaVersion),
+			)
 			write("scripts/check.sh", "pluto vet\n")
 
 			dep := tc.dependency

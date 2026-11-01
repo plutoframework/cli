@@ -9,6 +9,29 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 mutations = [
     (
+        "public lifecycle field inspection",
+        "internal/project/lifecycle_boundary.go",
+        "if fieldName.IsExported() {",
+        "if fieldName.IsExported() && false {",
+        "TestLifecycleArchitectureCheck",
+    ),
+    (
+        "raw lifecycle writer inspection",
+        "internal/project/lifecycle_boundary.go",
+        "lifecycleType{parameter.Type, file, false}",
+        "lifecycleType{nil, file, false}",
+        "TestLifecycleArchitectureCheck",
+    ),
+
+    (
+        "managed operation gate integrity",
+        "internal/project/operation_boundary.go",
+        "if !Equivalent(actual, expected) {",
+        "if !Equivalent(actual, expected) && false {",
+        "TestManagedOperationGateConsumer",
+    ),
+
+    (
         "OIDC account profile guard",
         "internal/project/manifest.go",
         "if m.Capabilities.OIDC && !m.Capabilities.LocalCredentials {",
@@ -122,9 +145,9 @@ mutations = [
     ),
     (
         "direct operation RBAC gate",
-        "internal/project/templates/operation.go.tmpl",
-        "if !principal.Can(operation.policy, access.{{.Symbol}}Permission) {",
-        "if false && !principal.Can(operation.policy, access.{{.Symbol}}Permission) {",
+        "internal/project/templates/operation_gate.go.tmpl",
+        "});err!=nil {",
+        "});false {",
         "TestGeneratedApplications/single",
     ),
 ]

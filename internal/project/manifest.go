@@ -13,7 +13,7 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 type Manifest struct {
 	Agents        []Agent      `toml:"agents,omitempty"`
@@ -84,8 +84,7 @@ func (m Manifest) Validate() error {
 		)
 	}
 
-	if m.SchemaVersion != SchemaVersion &&
-		(m.SchemaVersion != 7 || len(m.Agents) != 0) {
+	if m.SchemaVersion != SchemaVersion {
 		return fmt.Errorf(
 			"unsupported schema_version %d (need %d); no implicit migration",
 			m.SchemaVersion,
@@ -279,6 +278,10 @@ func (e Endpoint) Validate(multi bool) error {
 		return fmt.Errorf(
 			"public endpoints cannot require permissions or multi-tenant scope",
 		)
+	}
+
+	if !e.Public && e.isWrite() && e.Permission == "" {
+		return fmt.Errorf("authenticated writes require an explicit permission")
 	}
 
 	if e.Permission != "" {

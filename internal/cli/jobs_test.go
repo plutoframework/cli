@@ -140,7 +140,10 @@ func TestGeneratedJobs(t *testing.T) {
 			}
 
 			if report := project.InspectArchitecture(root); !report.Passed {
-				t.Fatalf("generated job consumer has architecture diagnostics: %+v", report.Diagnostics)
+				t.Fatalf(
+					"generated job consumer has architecture diagnostics: %+v",
+					report.Diagnostics,
+				)
 			}
 
 			before = snapshot(t, root)

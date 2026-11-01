@@ -21,6 +21,7 @@ type AccountDisabler interface {
 
 // Authentication is explicit wiring shared by protected routes and logout.
 type Authentication struct {
+ Memberships MembershipResolver
  {{if .OIDC}}OIDC http.Handler{{end}}
     Accounts AccountDisabler
     Credentials http.Handler
@@ -63,5 +64,5 @@ func NewAuthentication(settings config.Auth, store plutoauth.SessionStore, membe
 		WriteError:func(w http.ResponseWriter,r *http.Request,status int,code string) { Error(w,r,status,code) },
 	})
 	if err != nil { return Authentication{},err }
-	return Authentication{Verifier:sessionPrincipal{memberships:memberships},HTTP:transport,Manager:manager},nil
+	return Authentication{Memberships:memberships,Verifier:sessionPrincipal{memberships:memberships},HTTP:transport,Manager:manager},nil
 }

@@ -105,6 +105,27 @@ func render(name string, data templateData) ([]byte, error) {
 func Managed(m Manifest) (map[string][]byte, error) {
 	files := map[string][]byte{}
 
+	authorization, err := render("authorization.go", dataFor(m, Endpoint{}))
+	if err != nil {
+		return nil, err
+	}
+
+	files["internal/access/authorization_gen.go"] = authorization
+
+	for _, endpoint := range m.Endpoints {
+		for _, item := range []struct{ directory, template, suffix string }{
+			{"operations", "operation_gate.go", "_gate_gen.go"},
+			{"handlers", "handler.go", ".go"},
+		} {
+			source, err := render(item.template, dataFor(m, endpoint))
+			if err != nil {
+				return nil, err
+			}
+
+			files[filepath.ToSlash(filepath.Join("internal", item.directory, endpoint.Group, strings.ToLower(endpoint.Action)+item.suffix))] = source
+		}
+	}
+
 	jobs, err := jobRegistry(m)
 	if err != nil {
 		return nil, err
@@ -306,7 +327,6 @@ func EndpointFiles(m Manifest, e Endpoint) (map[string][]byte, error) {
 		{"models", "models.go"},
 		{"operations", "operation.go"},
 		{"operations", "operation_test.go"},
-		{"handlers", "handler.go"},
 		{"handlers", "handler_test.go"},
 	} {
 		suffix := ".go"

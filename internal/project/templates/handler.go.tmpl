@@ -1,24 +1,17 @@
 package {{.Group}}
 
 import (
-	"context"
-	"net/http"
+		"net/http"
 
-	"{{.Module}}/internal/domain"
+	operationgates "{{.Module}}/internal/operations/{{.Group}}"
 	"{{.Module}}/internal/models/{{.Group}}"
 	"{{.Module}}/internal/paths"
 	"{{.Module}}/internal/transport"
  {{if .Params}}"github.com/go-chi/chi/v5"{{end}}
 )
 
-// {{.Action}}Operations is a narrow consumer-owned interface.
-type {{.Action}}Operations interface {
-	Execute(
-		context.Context,
-		domain.Principal,
-		{{.Group}}.{{.Action}}Request,
-	) ({{.Group}}.{{.Action}}Data, error)
-}
+// {{.Action}}Operations is the managed, sealed operation boundary.
+type {{.Action}}Operations = operationgates.{{.Action}}Boundary
 
 func Register{{.Action}}(
 	reg transport.Registrar,
