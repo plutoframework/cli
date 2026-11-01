@@ -3,7 +3,7 @@
 Read README.md first. Run pluto fmt and pluto vet before submitting changes.
 Keep every file <=1,000 lines; prefer expanded readable Go and 80 columns.
 
-pluto.toml schema 9 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
+pluto.toml schema 10 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
 Per-endpoint handlers and operation *_gate_gen.go are managed. Models, private
 operation execute methods, composition and transport helpers are authored and
 created once. Never add magic init registration. Add endpoints with the CLI.
@@ -56,3 +56,9 @@ password, cookie or token belongs in durable job payloads. Preserve authored job
 handlers and CLI-owned explicit registration. Run cmd/worker separately; no
 startup DDL or implicit goroutines. Empty/unimplemented workers must not fake
 successful delivery. Apply 005_jobs.sql explicitly to existing databases.
+
+Declare use-case authority in independent operations. HTTP, jobs and tools must
+reference one operation and use managed adapters. Portable job contracts belong
+in internal/jobcontracts; no authored worker or agent business callbacks. Worker
+construction and handler registration are managed; supply typed gate dependencies
+through app workerDependencies. Never call raw jobs.NewWorker or Bind callbacks.

@@ -3,6 +3,7 @@ package transport
 
 import (
 	"encoding/json"
+ "unicode/utf8"
  "bytes"
 	"errors"
 	"io"
@@ -75,6 +76,7 @@ func Decode(
 	defer body.Close()
 
  data,err:=io.ReadAll(body)
+ if err==nil && !utf8.Valid(data){err=errors.New("invalid UTF-8 JSON")}
  if err==nil && (len(bytes.TrimSpace(data))==0 || bytes.TrimSpace(data)[0]!='{') {
   err=errors.New("expected JSON object")
  }

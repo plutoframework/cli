@@ -399,12 +399,22 @@ func InspectArchitecture(directory string) ArchitectureReport {
 	r.Diagnostics = append(
 		r.Diagnostics,
 		operationBoundaryDiagnostics(root, manifest)...)
+	r.Diagnostics = append(
+		r.Diagnostics,
+		inspectEntryBoundaries(root, manifest)...)
 	lifecycleDiagnostics, lifecycleUnassessed := inspectLifecycleBoundaries(
 		root,
 		module,
 	)
 	r.Diagnostics = append(r.Diagnostics, lifecycleDiagnostics...)
 	r.Unassessed = append(r.Unassessed, lifecycleUnassessed...)
+	primitiveDiagnostics, primitiveUnassessed := inspectPrimitiveBoundaries(
+		root,
+		module,
+		manifest,
+	)
+	r.Diagnostics = append(r.Diagnostics, primitiveDiagnostics...)
+	r.Unassessed = append(r.Unassessed, primitiveUnassessed...)
 	sort.SliceStable(r.Diagnostics, func(i, j int) bool {
 		a, b := r.Diagnostics[i], r.Diagnostics[j]
 		if a.File != b.File {
@@ -428,7 +438,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 }
 
 func architectureRole(path string) string {
-	for _, item := range []struct{ root, role string }{{"cmd", "composition"}, {"internal/app", "composition"}, {"internal/config", "configuration"}, {"internal/access", "policy"}, {"internal/features", "domain"}, {"internal/pluto", "entry"}, {"internal/development", "composition"}, {"internal/handlers", "entry"}, {"internal/background", "entry"}, {"internal/jobs", "entry"}, {"internal/transport", "entry"}, {"internal/tools", "entry"}, {"internal/operations", "operations"}, {"internal/domain", "domain"}, {"internal/storage", "data"}, {"internal/caching", "data"}, {"internal/auth", "infrastructure"}, {"internal/infrastructure", "infrastructure"}, {"internal/paths", "contract"}, {"internal/models", "contract"}, {"internal/api", "contract"}, {"web", "presentation"}} {
+	for _, item := range []struct{ root, role string }{{"cmd", "composition"}, {"internal/app", "composition"}, {"internal/config", "configuration"}, {"internal/access", "policy"}, {"internal/features", "domain"}, {"internal/pluto", "entry"}, {"internal/development", "composition"}, {"internal/handlers", "entry"}, {"internal/background", "entry"}, {"internal/jobs", "entry"}, {"internal/agents", "entry"}, {"internal/jobcontracts", "contract"}, {"internal/transport", "entry"}, {"internal/tools", "entry"}, {"internal/operations", "operations"}, {"internal/domain", "domain"}, {"internal/storage", "data"}, {"internal/caching", "data"}, {"internal/auth", "infrastructure"}, {"internal/infrastructure", "infrastructure"}, {"internal/paths", "contract"}, {"internal/models", "contract"}, {"internal/api", "contract"}, {"web", "presentation"}} {
 		if path == item.root || strings.HasPrefix(path, item.root+"/") {
 			return item.role
 		}

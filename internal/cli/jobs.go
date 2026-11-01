@@ -11,8 +11,10 @@ import (
 
 func addJobCommand(options Options) *cobra.Command {
 	var (
-		kind string
-		dry  bool
+		kind        string
+		operationID string
+		permission  string
+		dry         bool
 	)
 
 	command := &cobra.Command{
@@ -31,7 +33,27 @@ func addJobCommand(options Options) *cobra.Command {
 			}
 
 			previousManifest := manifest
-			job := project.Job{Group: args[0], Action: args[1], Kind: kind}
+
+			operation, created, err := ensureEntryOperation(
+				&manifest,
+				operationID,
+				args[0],
+				args[1],
+				permission,
+				true,
+				false,
+				false,
+			)
+			if err != nil {
+				return err
+			}
+
+			job := project.Job{
+				Group:     args[0],
+				Action:    args[1],
+				Kind:      kind,
+				Operation: operation.ID(),
+			}
 
 			manifest.Jobs = append(
 				append([]project.Job(nil), manifest.Jobs...),
@@ -53,6 +75,20 @@ func addJobCommand(options Options) *cobra.Command {
 
 			for path, source := range authored {
 				files[path] = source
+			}
+
+			if created {
+				operationFiles, err := project.OperationFiles(
+					manifest,
+					operation,
+				)
+				if err != nil {
+					return err
+				}
+
+				for path, source := range operationFiles {
+					files[path] = source
+				}
 			}
 
 			previous, err := project.Managed(previousManifest)
@@ -92,6 +128,10 @@ func addJobCommand(options Options) *cobra.Command {
 			return nil
 		},
 	}
+	command.Flags().
+		StringVar(&operationID, "operation", "", "Declared gated operation to invoke")
+	command.Flags().
+		StringVar(&permission, "permission", "", "Permission for a newly declared write operation")
 	command.Flags().
 		StringVar(&kind, "kind", "", "Stable lowercase delivery kind (required)")
 	command.Flags().

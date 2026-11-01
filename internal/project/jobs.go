@@ -10,9 +10,10 @@ import (
 )
 
 type Job struct {
-	Group  string `toml:"group"`
-	Action string `toml:"action"`
-	Kind   string `toml:"kind"`
+	Operation string `toml:"operation"`
+	Group     string `toml:"group"`
+	Action    string `toml:"action"`
+	Kind      string `toml:"kind"`
 }
 
 func validateJobs(jobs []Job) error {
@@ -69,7 +70,7 @@ func jobRegistry(m Manifest) ([]byte, error) {
 			&source,
 			"%sjobs %s\n",
 			name,
-			strconv.Quote(m.Project.Module+"/internal/jobs/"+name),
+			strconv.Quote(m.Project.Module+"/internal/jobcontracts/"+name),
 		)
 	}
 
@@ -92,36 +93,135 @@ func jobRegistry(m Manifest) ([]byte, error) {
 	return format.Source([]byte(source.String()))
 }
 
-func JobFiles(m Manifest, job Job) (map[string][]byte, error) {
-	files := map[string][]byte{}
-	data := dataFor(m, Endpoint{Group: job.Group, Action: job.Action})
-	data.JobKind = job.Kind
-
-	for _, name := range []string{"job.go", "job_test.go"} {
-		source, err := render(name, data)
-		if err != nil {
-			return nil, err
-		}
-
-		suffix := ".go"
-		if name == "job_test.go" {
-			suffix = "_test.go"
-		}
-
-		path := "internal/jobs/" + job.Group + "/" + strings.ToLower(
-			job.Action,
-		) + suffix
-		files[path] = source
+func jobData(m Manifest, job Job) (templateData, error) {
+	operation, ok := m.Operation(job.Operation)
+	if !ok {
+		return templateData{}, fmt.Errorf(
+			"job requires declared operation %s",
+			job.Operation,
+		)
 	}
 
-	binding, err := render("job_binding.go", data)
+	data := dataFor(m, Endpoint{Group: job.Group, Action: job.Action})
+	data.OperationGroup, data.OperationAction = operation.Group, operation.Action
+	data.JobKind = job.Kind
+
+	return data, nil
+}
+
+func JobFiles(m Manifest, job Job) (map[string][]byte, error) {
+	data, err := jobData(m, job)
 	if err != nil {
 		return nil, err
 	}
 
-	files["internal/background/"+job.Group+"_"+strings.ToLower(job.Action)+".go"] = binding
+	source, err := render("job_test.go", data)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string][]byte{
+		"internal/jobs/" + job.Group + "/" + strings.ToLower(job.Action) + "_test.go": source,
+	}, nil
+}
+
+func managedJobs(m Manifest) (map[string][]byte, error) {
+	files := map[string][]byte{}
+
+	for _, job := range m.Jobs {
+		data, err := jobData(m, job)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, item := range []struct{ path, template string }{
+			{"internal/jobcontracts/" + job.Group + "/" + strings.ToLower(job.Action) + ".go", "job.go"},
+			{"internal/jobs/" + job.Group + "/" + strings.ToLower(job.Action) + ".go", "job_handler.go"},
+			{"internal/background/" + job.Group + "_" + strings.ToLower(job.Action) + ".go", "job_binding.go"},
+		} {
+			source, err := render(item.template, data)
+			if err != nil {
+				return nil, err
+			}
+
+			files[item.path] = source
+		}
+	}
 
 	return files, nil
+}
+
+func jobDependencies(m Manifest) ([]byte, error) {
+	var source strings.Builder
+	source.WriteString("package background\n")
+
+	if len(m.Jobs) > 0 {
+		source.WriteString("import (\n")
+
+		groups := map[string]bool{}
+		operations := map[string]bool{}
+
+		for _, job := range m.Jobs {
+			groups[job.Group] = true
+			op, _ := m.Operation(job.Operation)
+			operations[op.Group] = true
+		}
+
+		names := []string{}
+		for group := range groups {
+			names = append(names, group)
+		}
+
+		sort.Strings(names)
+
+		for _, group := range names {
+			fmt.Fprintf(
+				&source,
+				"%sjobs %q\n",
+				group,
+				m.Project.Module+"/internal/jobs/"+group,
+			)
+		}
+
+		names = nil
+		for group := range operations {
+			names = append(names, group)
+		}
+
+		sort.Strings(names)
+
+		for _, group := range names {
+			fmt.Fprintf(
+				&source,
+				"%soperations %q\n",
+				group,
+				m.Project.Module+"/internal/operations/"+group,
+			)
+		}
+
+		source.WriteString(")\n")
+	}
+
+	source.WriteString("type Dependencies struct {\n")
+
+	for _, job := range m.Jobs {
+		op, _ := m.Operation(job.Operation)
+		symbol := symbol(Endpoint{Group: job.Group, Action: job.Action})
+		fmt.Fprintf(
+			&source,
+			"%sOperation %soperations.%sBoundary\n%sIdentity %sjobs.%sIdentity\n",
+			symbol,
+			op.Group,
+			op.Action,
+			symbol,
+			job.Group,
+			job.Action,
+		)
+	}
+
+	source.WriteString("}\n")
+
+	return format.Source([]byte(source.String()))
 }
 
 // Kind constants are managed contracts derived only from project metadata.
@@ -150,7 +250,9 @@ func jobKinds(m Manifest) map[string][]byte {
 	for group, source := range groups {
 		source.WriteString(")\n")
 
-		files["internal/jobs/"+group+"/kinds_gen.go"] = []byte(source.String())
+		files["internal/jobcontracts/"+group+"/kinds_gen.go"] = []byte(
+			source.String(),
+		)
 	}
 
 	return files

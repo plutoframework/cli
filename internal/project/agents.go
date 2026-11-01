@@ -8,6 +8,7 @@ import (
 const AgentVersion = "v0.1.3"
 
 type Agent struct {
+	Operation  string `toml:"operation"`
 	Group      string `toml:"group"`
 	Action     string `toml:"action"`
 	Permission string `toml:"permission"`
@@ -31,10 +32,6 @@ func ValidateAgents(agents []Agent) error {
 			return err
 		}
 
-		if a.Permission == "" {
-			return fmt.Errorf("agent requires explicit permission")
-		}
-
 		key := a.Group + "." + a.Action
 		if seen[key] {
 			return fmt.Errorf("duplicate agent %s", key)
@@ -46,28 +43,64 @@ func ValidateAgents(agents []Agent) error {
 	return nil
 }
 
+func agentData(m Manifest, a Agent) (templateData, error) {
+	operation, ok := m.Operation(a.Operation)
+	if !ok {
+		return templateData{}, fmt.Errorf(
+			"agent references undeclared operation %s",
+			a.Operation,
+		)
+	}
+
+	data := dataFor(
+		m,
+		Endpoint{
+			Group:      a.Group,
+			Action:     a.Action,
+			Permission: operation.Permission,
+		},
+	)
+	data.OperationGroup, data.OperationAction = operation.Group, operation.Action
+	data.AgentProvider = a.Provider
+
+	return data, nil
+}
+
 func AgentFiles(m Manifest, a Agent) (map[string][]byte, error) {
+	data, err := agentData(m, a)
+	if err != nil {
+		return nil, err
+	}
+
 	files := map[string][]byte{}
 
-	data := dataFor(m, Endpoint{
-		Group: a.Group, Action: a.Action,
-		Permission: a.Permission,
-	})
-
-	data.AgentProvider = a.Provider
-	for _, name := range []string{"agent.go", "agent_test.go"} {
-		source, err := render(name, data)
+	for _, item := range []struct{ path, template string }{{"internal/agents/" + a.Group + "/" + strings.ToLower(a.Action) + "_test.go", "agent_test.go"}, {"internal/app/" + a.Group + "_" + strings.ToLower(a.Action) + "_provider.go", "agent_provider.go"}} {
+		source, err := render(item.template, data)
 		if err != nil {
 			return nil, err
 		}
 
-		suffix := ".go"
-		if name == "agent_test.go" {
-			suffix = "_test.go"
+		files[item.path] = source
+	}
+
+	return files, nil
+}
+
+func managedAgents(m Manifest) (map[string][]byte, error) {
+	files := map[string][]byte{}
+
+	for _, a := range m.Agents {
+		data, err := agentData(m, a)
+		if err != nil {
+			return nil, err
 		}
 
-		files["internal/agents/"+a.Group+"/"+
-			strings.ToLower(a.Action)+suffix] = source
+		source, err := render("agent.go", data)
+		if err != nil {
+			return nil, err
+		}
+
+		files["internal/agents/"+a.Group+"/"+strings.ToLower(a.Action)+".go"] = source
 	}
 
 	return files, nil

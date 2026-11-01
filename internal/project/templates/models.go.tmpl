@@ -6,6 +6,7 @@ package {{.Group}}
 type {{.Action}}Request struct {
  {{if .Collection}}Page pagination.Request `json:"-"`{{end}}
 	Value string            `json:"value"`
+ ResourceID string `json:"resource_id,omitempty"`
 	Path  map[string]string `json:"-"`
 }
 

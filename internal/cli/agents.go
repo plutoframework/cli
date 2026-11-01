@@ -13,9 +13,10 @@ import (
 
 func addAgentCommand(options Options) *cobra.Command {
 	var (
-		permission string
-		provider   string
-		dry        bool
+		permission  string
+		operationID string
+		provider    string
+		dry         bool
 	)
 
 	command := &cobra.Command{
@@ -34,7 +35,22 @@ func addAgentCommand(options Options) *cobra.Command {
 
 			old := m
 
+			operation, created, err := ensureEntryOperation(
+				&m,
+				operationID,
+				args[0],
+				args[1],
+				permission,
+				false,
+				false,
+				false,
+			)
+			if err != nil {
+				return err
+			}
+
 			a := project.Agent{
+				Operation:  operation.ID(),
 				Group:      args[0],
 				Action:     args[1],
 				Permission: permission,
@@ -50,6 +66,17 @@ func addAgentCommand(options Options) *cobra.Command {
 			files, err := project.AgentFiles(m, a)
 			if err != nil {
 				return err
+			}
+
+			if created {
+				authored, err := project.OperationFiles(m, operation)
+				if err != nil {
+					return err
+				}
+
+				for path, source := range authored {
+					files[path] = source
+				}
 			}
 
 			managed, err := project.Managed(m)
@@ -130,6 +157,8 @@ func addAgentCommand(options Options) *cobra.Command {
 			return nil
 		},
 	}
+	command.Flags().
+		StringVar(&operationID, "operation", "", "Declared protected read operation to invoke")
 	command.Flags().
 		StringVar(&permission, "permission", "", "Required explicit RBAC capability")
 	command.Flags().

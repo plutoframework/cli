@@ -217,7 +217,26 @@ update. Scaffolding never overwrites that existing authored code. Local check
 script recognition is evidence of a literal bare/exec CLI invocation only;
 arbitrary shell control flow or protected CI enforcement is unassessed.
 
-Schema 9 requires managed operation gates and sealed per-endpoint handlers.
+Schema 10 declares use cases independently in `[[operations]]` with `group`,
+`action`, `permission`, `public`, `write`, `collection`, and `idempotency`.
+Transport declarations reference the canonical `group.Action` via `operation`.
+Create a use case with `pluto add operation reports Read --permission reports.read`,
+then add HTTP, worker and agent adapters with `--operation reports.Read`.
+`add endpoint`/`add job`/`add agent` can instead atomically create their matching
+operation using explicit authority flags. Read operations declare replay `none`;
+protected writes require `required` or a reasoned `exempt` contract. HTTP methods
+cannot weaken a declared write operation or its authority.
+
+Worker payload constructors live in `internal/jobcontracts`; managed workers
+consume only sealed operation gates and configured session identities. Worker
+construction/dispatch is managed, so application composition cannot replace its
+handler map with raw callbacks. Managed agent tools call the same operation,
+never an authored Read/Handle callback. Published compatibility tools are read
+only; this does not establish candidate identity/resource/data contract adoption.
+`ARCH211` rejects unmanaged worker/binding/construction forms; `ARCH212` rejects
+unmanaged tool factories; `ARCH213`/`ARCH214` report missing target declarations.
+
+Schema 10 requires managed operation gates and sealed per-endpoint handlers.
 Authored code supplies private `execute` bodies and typed `ActionDependencies`;
 composition calls managed `NewActionWithDependencies`. Every protected call
 refreshes exact subject/tenant membership before implementation, and declared

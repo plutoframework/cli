@@ -413,6 +413,13 @@ func endpointForm(
 			wizardChoice{"Required", "required"},
 			wizardChoice{"Exempt", "exempt"},
 		),
+		textField(
+			"operation",
+			"Existing operation",
+			"Optional declared group.Action; blank creates this use case.",
+			seed(cmd, "operation", ""),
+		),
+
 		boolField(
 			"dry-run",
 			"Preview files only",
@@ -440,6 +447,25 @@ func endpointForm(
 			Idempotency:   v["idempotency"],
 		}
 		candidate := m
+
+		operation, _, err := ensureEntryOperation(
+			&candidate,
+			v["operation"],
+			endpoint.Group,
+			endpoint.Action,
+			endpoint.Permission,
+			endpoint.Method != "GET" && endpoint.Method != "HEAD" &&
+				endpoint.Method != "OPTIONS",
+			endpoint.Public,
+			endpoint.Collection,
+			endpoint.Idempotency,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		endpoint.Operation = operation.ID()
+		endpoint.Permission, endpoint.Public, endpoint.Collection = operation.Permission, operation.Public, operation.Collection
 
 		candidate.Endpoints = append(
 			append([]project.Endpoint(nil), m.Endpoints...),
@@ -492,6 +518,19 @@ func jobForm(
 			"Stable lowercase identifier, for example invoice.send.",
 			seed(cmd, "kind", ""),
 		),
+		textField(
+			"operation",
+			"Existing operation",
+			"Optional protected group.Action; blank creates a write operation.",
+			seed(cmd, "operation", ""),
+		),
+		textField(
+			"permission",
+			"New operation permission",
+			"Required when declaring a new write use case.",
+			seed(cmd, "permission", ""),
+		),
+
 		boolField(
 			"dry-run",
 			"Preview files only",
@@ -503,12 +542,27 @@ func jobForm(
 	model.build = func(v map[string]string) ([]string, error) {
 		candidate := m
 
+		operation, _, err := ensureEntryOperation(
+			&candidate,
+			v["operation"],
+			v["group"],
+			v["action"],
+			v["permission"],
+			true,
+			false,
+			false,
+		)
+		if err != nil {
+			return nil, err
+		}
+
 		candidate.Jobs = append(
 			append([]project.Job(nil), m.Jobs...),
 			project.Job{
-				Group:  v["group"],
-				Action: v["action"],
-				Kind:   v["kind"],
+				Operation: operation.ID(),
+				Group:     v["group"],
+				Action:    v["action"],
+				Kind:      v["kind"],
 			},
 		)
 		if err := candidate.Validate(); err != nil {
@@ -521,6 +575,8 @@ func jobForm(
 			v["group"],
 			v["action"],
 			"--kind=" + v["kind"],
+			"--operation=" + v["operation"],
+			"--permission=" + v["permission"],
 			"--dry-run=" + v["dry-run"],
 		}, nil
 	}

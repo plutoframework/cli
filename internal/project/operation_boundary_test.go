@@ -31,6 +31,16 @@ func boundaryFixture(t *testing.T) (string, Manifest) {
 			},
 		},
 	}
+	m.Endpoints[0].Operation = "widgets.Create"
+	m.Operations = []Operation{
+		{
+			Group:       "widgets",
+			Action:      "Create",
+			Permission:  "widgets.write",
+			Write:       true,
+			Idempotency: "required",
+		},
+	}
 	root := testRoot(t)
 
 	files, err := InitialFiles(m)
@@ -44,6 +54,15 @@ func boundaryFixture(t *testing.T) (string, Manifest) {
 	}
 
 	for path, source := range authored {
+		files[path] = source
+	}
+
+	operationFiles, err := OperationFiles(m, m.Operations[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for path, source := range operationFiles {
 		files[path] = source
 	}
 
@@ -181,7 +200,7 @@ func TestLegacyOperationHasBoundaryDiagnostic(t *testing.T) {
 
 func TestProtectedWriteBoundaryNeedsPermission(t *testing.T) {
 	root, m := boundaryFixture(t)
-	m.Endpoints[0].Permission = ""
+	m.Operations[0].Permission = ""
 
 	metadata, err := Encode(m)
 	if err != nil {
@@ -207,5 +226,42 @@ func TestProtectedWriteBoundaryNeedsPermission(t *testing.T) {
 
 	if !found {
 		t.Fatal("unsupported protected write declaration was accepted")
+	}
+}
+
+func TestWriteOperationCannotBindReadMethod(t *testing.T) {
+	operation := Operation{
+		Group:        "records",
+		Action:       "Update",
+		Permission:   "records.write",
+		Write:        true,
+		Idempotency:  "exempt",
+		ReplayReason: "Explicit non-replayable workflow.",
+	}
+
+	m := Manifest{Operations: []Operation{operation}}
+	for _, method := range []string{"GET", "HEAD", "OPTIONS"} {
+		if _, err := m.OperationEndpoint(
+			Endpoint{
+				Group:     operation.Group,
+				Action:    operation.Action,
+				Operation: operation.ID(),
+				Method:    method,
+			},
+		); err == nil {
+			t.Fatalf("write authority exposed through %s", method)
+		}
+	}
+
+	if endpoint, err := m.OperationEndpoint(
+		Endpoint{
+			Group:     operation.Group,
+			Action:    operation.Action,
+			Operation: operation.ID(),
+			Method:    "POST",
+		},
+	); err != nil ||
+		endpoint.Idempotency != "exempt" {
+		t.Fatal(endpoint, err)
 	}
 }

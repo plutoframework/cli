@@ -17,7 +17,8 @@ func permissionDeclarations(m Manifest) ([]byte, error) {
 
 	permissions := map[string]bool{}
 
-	for _, endpoint := range m.Endpoints {
+	for _, operation := range m.Operations {
+		endpoint := operation.Endpoint()
 		fmt.Fprintf(
 			&source,
 			"const %sPermission rbac.PermissionID = %q\n",
@@ -28,10 +29,6 @@ func permissionDeclarations(m Manifest) ([]byte, error) {
 		if endpoint.Permission != "" {
 			permissions[endpoint.Permission] = true
 		}
-	}
-
-	for _, a := range m.Agents {
-		permissions[a.Permission] = true
 	}
 
 	keys := make([]string, 0, len(permissions))

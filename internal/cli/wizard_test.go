@@ -98,9 +98,10 @@ func TestWizardDispatchesSharedGenerators(t *testing.T) {
 				}
 			case "job":
 				values = map[string]string{
-					"group":  "orbit",
-					"action": "Deliver",
-					"kind":   "orbit.deliver",
+					"group":      "orbit",
+					"action":     "Deliver",
+					"kind":       "orbit.deliver",
+					"permission": "orbit.deliver",
 				}
 			}
 

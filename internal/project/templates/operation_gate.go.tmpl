@@ -13,6 +13,7 @@ import (
 // {{.Action}}Boundary is sealed to the managed operation gate. Entry adapters
 // consume this contract; authored production implementations cannot replace it.
 type {{.Action}}Boundary interface {
+    Authorize(context.Context,domain.Principal)(domain.Principal,error)
     sealed{{.Action}}()
     Execute(context.Context, domain.Principal, {{.Group}}.{{.Action}}Request) ({{.Group}}.{{.Action}}Data, error)
 }
@@ -41,20 +42,28 @@ func (operation *{{.Action}}) Execute(
     principal domain.Principal,
     input {{.Group}}.{{.Action}}Request,
 ) ({{.Group}}.{{.Action}}Data, error) {
-    if ctx == nil { return {{.Group}}.{{.Action}}Data{}, domain.ErrUnauthenticated }
-    if err := ctx.Err(); err != nil { return {{.Group}}.{{.Action}}Data{}, err }
-    if operation == nil { return {{.Group}}.{{.Action}}Data{}, domain.ErrForbidden }
+    refreshed,err:=operation.Authorize(ctx,principal)
+    if err!=nil{return {{.Group}}.{{.Action}}Data{},err}
+    return operation.execute(ctx,refreshed,input)
+}
+
+// Authorize is preflight only; Execute always repeats it before implementation.
+func (operation *{{.Action}}) Authorize(ctx context.Context,principal domain.Principal)(domain.Principal,error) {
+    if ctx == nil { return domain.Principal{}, domain.ErrUnauthenticated }
+    if err := ctx.Err(); err != nil { return domain.Principal{}, err }
+    if operation == nil { return domain.Principal{}, domain.ErrForbidden }
 {{if not .Public}}    if !principal.Verified() {
-        return {{.Group}}.{{.Action}}Data{}, domain.ErrUnauthenticated
+        return domain.Principal{}, domain.ErrUnauthenticated
     }
-    if operation.memberships == nil {return {{.Group}}.{{.Action}}Data{},domain.ErrUnauthenticated}
+    if operation.memberships == nil {return domain.Principal{},domain.ErrUnauthenticated}
     current,identityErr:=operation.memberships.Resolve(ctx,principal.ActorID{{if .Multi}},principal.TenantID{{end}})
-    if err:=ctx.Err();err!=nil {return {{.Group}}.{{.Action}}Data{},err}
-    if identityErr!=nil || !current.Verified() || current.ActorID!=principal.ActorID{{if .Multi}} || current.TenantID!=principal.TenantID{{end}} {return {{.Group}}.{{.Action}}Data{},domain.ErrUnauthenticated}
+    if err:=ctx.Err();err!=nil {return domain.Principal{},err}
+    if identityErr!=nil || !current.Verified() || current.ActorID!=principal.ActorID{{if .Multi}} || current.TenantID!=principal.TenantID{{end}} {return domain.Principal{},domain.ErrUnauthenticated}
     principal=current
 {{end}}
 {{if .Permission}}    if err := operation.authorizer.Authorize(ctx,rbac.Request{SubjectID:principal.ActorID,Scope:rbac.Scope{ {{if .Multi}}TenantID:principal.TenantID,{{end}} },Permission:access.{{.Symbol}}Permission});err!=nil {
-        return {{.Group}}.{{.Action}}Data{}, err
+        return domain.Principal{}, err
     }
-{{end}}    return operation.execute(ctx, principal, input)
+{{end}}
+ return principal,nil
 }

@@ -16,6 +16,11 @@ import (
 var templates embed.FS
 
 type templateData struct {
+	Resource             ResourceContract
+	Contract             OperationContract
+	ContractOperations   []OperationContract
+	ContractEffects      []EffectContract
+	Candidate            bool
 	Module, Name, Prefix string
 	Multi                bool
 	OIDC                 bool
@@ -24,12 +29,14 @@ type templateData struct {
 	Valkey               bool
 	Development
 	Endpoint
-	Symbol        string
-	JobKind       string
-	AgentProvider string
-	Params        []string
-	Body          bool
-	TestPath      string
+	Symbol          string
+	JobKind         string
+	OperationGroup  string
+	OperationAction string
+	AgentProvider   string
+	Params          []string
+	Body            bool
+	TestPath        string
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {
@@ -103,7 +110,26 @@ func render(name string, data templateData) ([]byte, error) {
 // Managed derives only files wholly owned by the generator. User source files
 // are created once and never edited. No string replacement of user code occurs.
 func Managed(m Manifest) (map[string][]byte, error) {
+	resolved := []Endpoint{}
+
+	for _, entry := range m.Endpoints {
+		view, err := m.OperationEndpoint(entry)
+		if err != nil {
+			return nil, err
+		}
+
+		resolved = append(resolved, view)
+	}
+
+	m.Endpoints = resolved
 	files := map[string][]byte{}
+
+	workerRuntime, err := render("worker_runtime.go", dataFor(m, Endpoint{}))
+	if err != nil {
+		return nil, err
+	}
+
+	files["internal/app/worker_runtime_gen.go"] = workerRuntime
 
 	authorization, err := render("authorization.go", dataFor(m, Endpoint{}))
 	if err != nil {
@@ -112,19 +138,51 @@ func Managed(m Manifest) (map[string][]byte, error) {
 
 	files["internal/access/authorization_gen.go"] = authorization
 
-	for _, endpoint := range m.Endpoints {
-		for _, item := range []struct{ directory, template, suffix string }{
-			{"operations", "operation_gate.go", "_gate_gen.go"},
-			{"handlers", "handler.go", ".go"},
-		} {
-			source, err := render(item.template, dataFor(m, endpoint))
-			if err != nil {
-				return nil, err
-			}
-
-			files[filepath.ToSlash(filepath.Join("internal", item.directory, endpoint.Group, strings.ToLower(endpoint.Action)+item.suffix))] = source
+	for _, operation := range m.Operations {
+		source, err := render(
+			"operation_gate.go",
+			dataFor(m, operation.Endpoint()),
+		)
+		if err != nil {
+			return nil, err
 		}
+
+		files["internal/operations/"+operation.Group+"/"+strings.ToLower(operation.Action)+"_gate_gen.go"] = source
 	}
+
+	for _, endpoint := range m.Endpoints {
+		source, err := render("handler.go", dataFor(m, endpoint))
+		if err != nil {
+			return nil, err
+		}
+
+		files["internal/handlers/"+endpoint.Group+"/"+strings.ToLower(endpoint.Action)+".go"] = source
+	}
+
+	agentFiles, err := managedAgents(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range agentFiles {
+		files[path] = source
+	}
+
+	jobFiles, err := managedJobs(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range jobFiles {
+		files[path] = source
+	}
+
+	dependencies, err := jobDependencies(m)
+	if err != nil {
+		return nil, err
+	}
+
+	files["internal/background/dependencies.go"] = dependencies
 
 	jobs, err := jobRegistry(m)
 	if err != nil {
@@ -321,26 +379,20 @@ func Managed(m Manifest) (map[string][]byte, error) {
 }
 
 func EndpointFiles(m Manifest, e Endpoint) (map[string][]byte, error) {
+	view, err := m.OperationEndpoint(e)
+	if err != nil {
+		return nil, err
+	}
+
+	e = view
 	files := map[string][]byte{}
 
-	for _, entry := range []struct{ dir, template string }{
-		{"models", "models.go"},
-		{"operations", "operation.go"},
-		{"operations", "operation_test.go"},
-		{"handlers", "handler_test.go"},
-	} {
-		suffix := ".go"
-		if strings.HasSuffix(entry.template, "_test.go") {
-			suffix = "_test.go"
-		}
-
-		data, err := render(entry.template, dataFor(m, e))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", entry.template, err)
-		}
-
-		files[filepath.Join("internal", entry.dir, e.Group, strings.ToLower(e.Action)+suffix)] = data
+	source, err := render("handler_test.go", dataFor(m, e))
+	if err != nil {
+		return nil, err
 	}
+
+	files[filepath.ToSlash(filepath.Join("internal", "handlers", e.Group, strings.ToLower(e.Action)+"_test.go"))] = source
 
 	binding, err := render("binding.go", dataFor(m, e))
 	if err != nil {
@@ -364,7 +416,6 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		"docs/TELEMETRY.md":                          "telemetry.md",
 		"internal/caching/cache.go":                  "cache.go",
 		"cmd/worker/main.go":                         "worker_main.go",
-		"internal/background/dependencies.go":        "job_dependencies.go",
 		"internal/app/worker.go":                     "worker.go",
 		"db/migrations/005_jobs.sql":                 "jobs_schema.sql",
 		"internal/access/policy.go":                  "policy.go",

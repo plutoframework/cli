@@ -46,6 +46,7 @@ func TestGeneratedJobs(t *testing.T) {
 				"Send",
 				"--kind",
 				"invoice.send",
+				"--permission", "invoices.send",
 				"--dry-run",
 			)
 			assertUnchanged(t, before, snapshot(t, root))
@@ -58,9 +59,10 @@ func TestGeneratedJobs(t *testing.T) {
 				"Send",
 				"--kind",
 				"invoice.send",
+				"--permission", "invoices.send",
 			)
 
-			path := filepath.Join(root, "internal/jobs/invoices/send.go")
+			path := filepath.Join(root, "internal/operations/invoices/send.go")
 
 			source, err := os.ReadFile(path)
 			if err != nil {
@@ -78,7 +80,7 @@ func TestGeneratedJobs(t *testing.T) {
 
 			bindingPath := filepath.Join(
 				root,
-				"internal/background/invoices_send.go",
+				"internal/app/worker.go",
 			)
 
 			binding, err := os.ReadFile(bindingPath)
@@ -102,6 +104,7 @@ func TestGeneratedJobs(t *testing.T) {
 				"Build",
 				"--kind",
 				"export.build",
+				"--permission", "exports.build",
 			)
 			mustInvoke(
 				t,

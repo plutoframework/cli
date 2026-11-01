@@ -51,6 +51,25 @@ func addCommand(options Options) *cobra.Command {
 					endpoint.Action == "List"
 			}
 
+			operation, created, err := ensureEntryOperation(
+				&m,
+				endpoint.Operation,
+				endpoint.Group,
+				endpoint.Action,
+				endpoint.Permission,
+				endpoint.Method != "GET" && endpoint.Method != "HEAD" &&
+					endpoint.Method != "OPTIONS",
+				endpoint.Public,
+				endpoint.Collection,
+				endpoint.Idempotency,
+			)
+			if err != nil {
+				return err
+			}
+
+			endpoint.Operation = operation.ID()
+			endpoint.Permission, endpoint.Public, endpoint.Collection = operation.Permission, operation.Public, operation.Collection
+
 			m.Endpoints = append(
 				append([]project.Endpoint(nil), m.Endpoints...),
 				endpoint,
@@ -71,6 +90,17 @@ func addCommand(options Options) *cobra.Command {
 
 			for path, data := range authored {
 				files[path] = data
+			}
+
+			if created {
+				operationFiles, err := project.OperationFiles(m, operation)
+				if err != nil {
+					return err
+				}
+
+				for path, source := range operationFiles {
+					files[path] = source
+				}
 			}
 
 			previous, err := project.Managed(old)
@@ -171,6 +201,12 @@ func addCommand(options Options) *cobra.Command {
 		"Explicitly allow unauthenticated calls (single tenancy only)",
 	)
 	flags.StringVar(
+		&endpoint.Operation,
+		"operation",
+		"",
+		"Reference a declared operation instead of creating one",
+	)
+	flags.StringVar(
 		&endpoint.Permission,
 		"permission",
 		"",
@@ -195,6 +231,7 @@ func addCommand(options Options) *cobra.Command {
 		"Preflight and list files without writing",
 	)
 	add.AddCommand(command)
+	add.AddCommand(addOperationCommand(options))
 	add.AddCommand(addJobCommand(options))
 	add.AddCommand(addAgentCommand(options))
 	add.AddCommand(addStateCommand(options))

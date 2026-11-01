@@ -8,6 +8,13 @@ import tempfile
 
 root = Path(__file__).resolve().parent.parent
 mutations = [
+    ("domain normalization placement", "internal/project/primitive_boundaries.go", 'if operationCode && dependency == "strings" {', 'if false && operationCode && dependency == "strings" {', './internal/project#TestPrimitivePlacementAndHelperBypasses'),
+    ("cache boundary placement", "internal/project/primitive_boundaries.go", 'dependency == "github.com/plutoframework/pluto-core/cache"', 'dependency == "disabled/cache"', './internal/project#TestPrimitivePlacementAndHelperBypasses'),
+    ("scoped pagination ownership", "internal/project/primitive_boundaries.go", 'capability == "Finish"', 'capability == "disabledFinish"', './internal/project#TestPrimitivePlacementAndHelperBypasses'),
+    ("required replay contract", "internal/project/contracts.go", 'operation.Idempotency != "required"', 'false', './internal/project#TestContractsRejectMissingAndContradictoryObligations'),
+    ("declared query visibility", "internal/project/contracts.go", 'operation.ResourcePolicy != resource.Visibility', 'false', './internal/project#TestContractsRejectMissingAndContradictoryObligations'),
+    ("owned worker construction", "internal/project/entry_boundary.go", 'selector.Sel.Name == "NewWorker"', 'selector.Sel.Name == "disabledWorker"', 'TestCrossEntryOperationConsumer'),
+
     (
         "public lifecycle field inspection",
         "internal/project/lifecycle_boundary.go",
@@ -78,13 +85,13 @@ mutations = [
         "internal/project/jobs.go",
         "identifiers[identifier] || kinds[job.Kind]",
         "identifiers[identifier]",
-        "TestGeneratedJobs/single",
+        "./internal/project#TestJobKindUniqueness",
     ),
     (
         "job tenant delivery guard",
-        "internal/project/templates/job.go.tmpl",
-        'if job.TenantID == nil || *job.TenantID == ""',
-        'if false',
+        "internal/project/templates/job_handler.go.tmpl",
+        'if job.TenantID==nil || *job.TenantID=="" {return jobs.Permanent(jobs.ErrInvalid)}',
+        'if false {return jobs.Permanent(jobs.ErrInvalid)}',
         "TestGeneratedJobs/multi",
     ),
     (
@@ -166,8 +173,11 @@ for name, relative, old, new, test in mutations:
             raise SystemExit(f"Mutation target drifted: {name}")
         source.write_text(text.replace(old, new, 1))
         try:
+            package = "./internal/cli"
+            if "#" in test:
+                package, test = test.split("#", 1)
             run = subprocess.run(
-                ["go", "test", "./internal/cli", "-run", f"^{test}$", "-count=1"],
+                ["go", "test", package, "-run", f"^{test}$", "-count=1"],
                 cwd=checkout, capture_output=True, text=True, timeout=120,
                 env={**os.environ, "GOWORK": "off"},
             )

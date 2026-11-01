@@ -13,9 +13,10 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 9
+const SchemaVersion = 10
 
 type Manifest struct {
+	Operations    []Operation  `toml:"operations,omitempty"`
 	Agents        []Agent      `toml:"agents,omitempty"`
 	SchemaVersion int          `toml:"schema_version"`
 	Project       Project      `toml:"project"`
@@ -49,6 +50,7 @@ type Development struct {
 	Docker bool `toml:"docker"`
 }
 type Endpoint struct {
+	Operation     string `toml:"operation"`
 	Collection    bool   `toml:"collection"`
 	Idempotency   string `toml:"idempotency"`
 	Group         string `toml:"group"`
@@ -123,6 +125,10 @@ func (m Manifest) Validate() error {
 		return fmt.Errorf("database requires engine=postgres and queries=sqlc")
 	}
 
+	if err := validateOperations(m); err != nil {
+		return err
+	}
+
 	if err := ValidateAgents(m.Agents); err != nil {
 		return err
 	}
@@ -140,7 +146,12 @@ func (m Manifest) Validate() error {
 	routeNames := map[string]string{}
 	envKeys := map[string]string{}
 
-	for _, e := range m.Endpoints {
+	for _, entry := range m.Endpoints {
+		e, err := m.OperationEndpoint(entry)
+		if err != nil {
+			return err
+		}
+
 		if err := e.Validate(m.Capabilities.Tenancy == "multi"); err != nil {
 			return err
 		}
@@ -370,7 +381,20 @@ func Decode(data []byte) (Manifest, error) {
 		return m, fmt.Errorf("pluto.toml: %w", err)
 	}
 
-	return m, m.Validate()
+	if err := m.Validate(); err != nil {
+		return m, err
+	}
+
+	for i, entry := range m.Endpoints {
+		resolved, err := m.OperationEndpoint(entry)
+		if err != nil {
+			return m, err
+		}
+
+		m.Endpoints[i] = resolved
+	}
+
+	return m, nil
 }
 
 func Encode(m Manifest) ([]byte, error) { return toml.Marshal(m) }

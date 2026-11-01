@@ -364,8 +364,11 @@ func Contracts(root string, m Manifest) error {
 	// Manifest and classification migration diagnostics remain inspection-only.
 	for _, diagnostic := range InspectArchitecture(root).Diagnostics {
 		if diagnostic.ID == "ARCH101" ||
-			strings.HasPrefix(diagnostic.ID, "ARCH20") ||
-			strings.HasPrefix(diagnostic.ID, "ARCH30") {
+			strings.HasPrefix(diagnostic.ID, "ARCH2") ||
+			strings.HasPrefix(
+				diagnostic.ID,
+				"ARCH30",
+			) || strings.HasPrefix(diagnostic.ID, "ARCH50") {
 			return fmt.Errorf(
 				"architecture: %s:%d: %s: %s; %s",
 				diagnostic.File,
