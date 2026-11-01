@@ -7,11 +7,12 @@ import rbac "github.com/plutoframework/pluto-rbac"
 func NewPolicy() (*rbac.Policy, error) {
 	return rbac.New(rbac.Definition{
 		Permissions: Permissions(),
-		Roles: Roles(),
+		Roles:       Roles(),
 	})
 }
 
-// Permissions is authored: customize display metadata here or append capabilities
+// Permissions is authored: customize display metadata here or append
+// capabilities
 // used outside HTTP. Keep the generated declarations needed by your endpoints.
 func Permissions() []rbac.Permission {
 	return GeneratedPermissions()

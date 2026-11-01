@@ -1,54 +1,106 @@
 package access
 
 import (
- "context"
+	"context"
 
- "{{.Module}}/internal/domain"
- auth "github.com/plutoframework/pluto-auth"
- "github.com/plutoframework/pluto-auth/httpauth"
- jobs "github.com/plutoframework/pluto-jobs"
+	auth "github.com/plutoframework/pluto-auth"
+	"github.com/plutoframework/pluto-auth/httpauth"
+	jobs "github.com/plutoframework/pluto-jobs"
+	"{{.Module}}/internal/domain"
 )
 
-// Caller carries a verified callback-lifetime identity, never actor/role claims.
+// Caller carries a verified callback-lifetime identity, never actor/role
+// claims.
 // Its zero value cannot authorize; copied values expire with the issuing scope.
 type Caller struct {
- callerIdentity *auth.Identity
- callerTenant string
- callerWorkID string
- callerWorkKind string
+	callerIdentity *auth.Identity
+	callerTenant   string
+	callerWorkID   string
+	callerWorkKind string
 }
 
 // Actor is display/protocol information only. It is never an execution receipt.
-type Actor struct {SubjectID string;TenantID string}
-func (c Caller) Identity() *auth.Identity {return c.callerIdentity}
-func (c Caller) TenantID() string {return c.callerTenant}
-func (c Caller) WorkID() string {return c.callerWorkID}
-func (c Caller) WorkKind() string {return c.callerWorkKind}
+type Actor struct {
+	SubjectID string
+	TenantID  string
+}
 
-func CallerFromHTTP(ctx context.Context,tenant string)(Caller,error){
- if ctx==nil || tenant=="" {return Caller{},domain.ErrUnauthenticated}
- identity,ok:=httpauth.IdentityFromContext(ctx)
- if !ok || identity==nil{return Caller{},domain.ErrUnauthenticated}
- return Caller{callerIdentity:identity,callerTenant:tenant},nil
+func (c Caller) Identity() *auth.Identity {
+	return c.callerIdentity
+}
+
+func (c Caller) TenantID() string {
+	return c.callerTenant
+}
+
+func (c Caller) WorkID() string {
+	return c.callerWorkID
+}
+
+func (c Caller) WorkKind() string {
+	return c.callerWorkKind
+}
+
+func CallerFromHTTP(ctx context.Context, tenant string) (Caller, error) {
+	if ctx == nil || tenant == "" {
+		return Caller{}, domain.ErrUnauthenticated
+	}
+
+	identity, ok := httpauth.IdentityFromContext(ctx)
+	if !ok || identity == nil {
+		return Caller{}, domain.ErrUnauthenticated
+	}
+
+	return Caller{callerIdentity: identity, callerTenant: tenant}, nil
 }
 
 // WithSession verifies a credential against the supplied configured issuer. The
-// operation additionally binds the exact trusted Manager, membership and resource.
+// operation additionally binds the exact trusted Manager, membership and
+// resource.
 // There is deliberately no subject-string or exported-field issuer.
-func WithSession(ctx context.Context,manager *auth.Manager,credential,tenant string,run func(context.Context,Caller)error)error {
- if ctx==nil||manager==nil||tenant==""||run==nil{return domain.ErrUnauthenticated}
- return manager.WithIdentity(ctx,credential,func(ctx context.Context,identity *auth.Identity)error{
-  return run(ctx,Caller{callerIdentity:identity,callerTenant:tenant})
- })
+func WithSession(
+	ctx context.Context,
+	manager *auth.Manager,
+	credential, tenant string,
+	run func(context.Context, Caller) error,
+) error {
+	if ctx == nil || manager == nil || tenant == "" || run == nil {
+		return domain.ErrUnauthenticated
+	}
+
+	return manager.WithIdentity(
+		ctx,
+		credential,
+		func(ctx context.Context, identity *auth.Identity) error {
+			return run(
+				ctx,
+				Caller{callerIdentity: identity, callerTenant: tenant})
+		})
 }
 
 // WithJobSession treats persisted work metadata as input, not authority. The
 // configured service credential establishes identity anew for each delivery.
-func WithJobSession(ctx context.Context,manager *auth.Manager,credential string,job jobs.Job,run func(context.Context,Caller)error)error{
- if job.Validate()!=nil||job.TenantID==nil||*job.TenantID==""||run==nil{return domain.ErrUnauthenticated}
- return WithSession(ctx,manager,credential,*job.TenantID,func(ctx context.Context,caller Caller)error{
-  caller.callerWorkID=job.ID
-  caller.callerWorkKind=string(job.Kind)
-  return run(ctx,caller)
- })
+func WithJobSession(
+	ctx context.Context,
+	manager *auth.Manager,
+	credential string,
+	job jobs.Job,
+	run func(context.Context, Caller) error,
+) error {
+	if job.Validate() != nil || job.TenantID == nil || *job.TenantID == "" ||
+		run == nil {
+		return domain.ErrUnauthenticated
+	}
+
+	return WithSession(
+		ctx,
+		manager,
+		credential,
+		*job.TenantID,
+		func(ctx context.Context, caller Caller) error {
+			caller.callerWorkID = job.ID
+			caller.callerWorkKind = string(job.Kind)
+
+			return run(ctx, caller)
+		})
 }

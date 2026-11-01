@@ -15,19 +15,29 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	rbac "github.com/plutoframework/pluto-rbac"
 "github.com/plutoframework/pluto-auth/httpauth"
- "github.com/plutoframework/pluto-core/httpidem"
- {{if not .Candidate}}"github.com/plutoframework/pluto-core/idempotency"{{end}}
+	"github.com/plutoframework/pluto-core/httpidem"
+	{{if not .Candidate}}
+	"github.com/plutoframework/pluto-core/idempotency"{{end}}
 )
 
 // Authenticator validates bearer credentials and, for multi tenancy, selected
 // membership. Never trust actor, permission or tenant headers on their own.
 type Authenticator interface {
-	Authenticate(context.Context, string{{if .Multi}}, string{{end}}) (domain.Principal, error)
+	Authenticate(
+		context.Context,
+		string,
+{{if .Multi}}
+		string,
+{{end}}
+	) (domain.Principal, error)
 }
 
 type DenyAll struct{}
 
-func (DenyAll) Authenticate(context.Context, string{{if .Multi}}, string{{end}}) (domain.Principal, error) {
+func (DenyAll) Authenticate(
+	context.Context,
+	string{{if .Multi}},
+	string{{end}}) (domain.Principal, error) {
 	return domain.Principal{}, http.ErrNoCookie
 }
 
@@ -39,91 +49,132 @@ func Principal(ctx context.Context) domain.Principal {
 }
 
 type Registrar struct {
-	Router   chi.Router
-	Auth     Authenticator
-	Features features.Evaluator
-	Logger   *slog.Logger
-	Policy   *rbac.Policy
-Sessions *httpauth.Transport
- Idempotency *httpidem.Handler
+	Router      chi.Router
+	Auth        Authenticator
+	Features    features.Evaluator
+	Logger      *slog.Logger
+	Policy      *rbac.Policy
+	Sessions    *httpauth.Transport
+	Idempotency *httpidem.Handler
 }
 
 func (reg Registrar) Handle(endpoint paths.Endpoint, handler http.HandlerFunc) {
 	invoke := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			started := time.Now()
-			writer := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		started := time.Now()
+		writer := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
-			principal := domain.Principal{}
-			defer func() {
- if recover()!=nil {
-  Error(writer,r,500,"internal_error")
-  reg.Logger.ErrorContext(r.Context(),"request panic","request_id",middleware.GetReqID(r.Context()))
- }
-				reg.Logger.InfoContext(r.Context(), "request",
-					"request_id", middleware.GetReqID(r.Context()),
-					"endpoint", endpoint.ID,
-					"status", writer.Status(),
-					"duration", time.Since(started),
-				)
-			}()
+		principal := domain.Principal{}
 
-			if endpoint.Authenticated && !endpoint.SessionOnly {
-				scheme, token, ok := strings.Cut(
-					r.Header.Get("Authorization"),
-					" ",
-				)
-				_, sessionVerified := httpauth.FromContext(r.Context())
- if !sessionVerified && (!ok || !strings.EqualFold(scheme, "Bearer") || token == "" ||
- strings.TrimSpace(token) != token) {
-					Error(writer, r, 401, "unauthenticated")
-
-					return
-				}
-
-				verified, err := reg.Auth.Authenticate(
- r.Context(),
- token,
- {{if .Multi}}r.Header.Get("X-Tenant-ID"),{{end}}
-)
-				if err != nil || !verified.Verified() {
-					Error(writer, r, 401, "unauthenticated")
-
-					return
-				}
-
-				principal = verified
-
-				r = r.WithContext(
-					context.WithValue(r.Context(), principalKey{}, principal),
-				)
-				if endpoint.Permission != "" &&
-					!principal.Can(reg.Policy, endpoint.Permission) {
-					Error(writer, r, 403, "forbidden")
-
-					return
-				}
+		defer func() {
+			if recover() != nil {
+				Error(writer, r, 500, "internal_error")
+				reg.Logger.ErrorContext(
+					r.Context(),
+					"request panic",
+					"request_id",
+					middleware.GetReqID(r.Context()))
 			}
 
-			// Features never bypass authentication or permissions, including public gates.
-			if endpoint.Feature != "" &&
-				!reg.Features.Enabled(endpoint.Feature) {
-				Error(writer, r, 403, "feature_disabled")
+			reg.Logger.InfoContext(r.Context(), "request",
+				"request_id", middleware.GetReqID(r.Context()),
+				"endpoint", endpoint.ID,
+				"status", writer.Status(),
+				"duration", time.Since(started),
+			)
+		}()
+
+		if endpoint.Authenticated && !endpoint.SessionOnly {
+			scheme, token, ok := strings.Cut(
+				r.Header.Get("Authorization"),
+				" ",
+			)
+
+			_, sessionVerified := httpauth.FromContext(r.Context())
+			if !sessionVerified &&
+				(!ok || !strings.EqualFold(scheme, "Bearer") || token == "" ||
+					strings.TrimSpace(token) != token) {
+				Error(writer, r, 401, "unauthenticated")
 
 				return
 			}
 
-   {{if not .Candidate}}if endpoint.Idempotent {
-    if reg.Idempotency==nil { Error(writer,r,503,"idempotency_unavailable");return }
-    reg.Idempotency.Serve(writer,r,idempotency.Scope{Subject:principal.ActorID,{{if .Multi}}Tenant:principal.TenantID,{{end}}Operation:endpoint.ID},handler)
-    return
-   }{{end}}
-			handler(writer, r)
-        })
-    var secured http.Handler = invoke
-    if endpoint.Authenticated && reg.Sessions != nil {
-        secured = reg.Sessions.{{if .Candidate}}RequireIdentity{{else}}Require{{end}}(invoke)
-    } else if endpoint.SessionOnly {
-        secured = http.HandlerFunc(func(w http.ResponseWriter,r *http.Request) { Error(w,r,401,"unauthenticated") })
-    }
-    reg.Router.Method(endpoint.Method,endpoint.Path,secured)
+			verified, err := reg.Auth.Authenticate(
+				r.Context(),
+				token,
+	{{if .Multi}}
+
+				r.Header.Get("X-Tenant-ID"),{{end}}
+			)
+			if err != nil || !verified.Verified() {
+				Error(writer, r, 401, "unauthenticated")
+
+				return
+			}
+
+			principal = verified
+
+			r = r.WithContext(
+				context.WithValue(r.Context(), principalKey{}, principal),
+			)
+			if endpoint.Permission != "" &&
+				!principal.Can(reg.Policy, endpoint.Permission) {
+				Error(writer, r, 403, "forbidden")
+
+				return
+			}
+		}
+
+		// Features never bypass authentication or permissions, including public
+		// gates.
+		if endpoint.Feature != "" &&
+			!reg.Features.Enabled(endpoint.Feature) {
+			Error(writer, r, 403, "feature_disabled")
+
+			return
+		}
+
+	{{if not .Candidate}}
+
+		if endpoint.Idempotent {
+			if reg.Idempotency == nil {
+				Error(writer, r, 503, "idempotency_unavailable")
+
+				return
+			}
+
+			reg.Idempotency.Serve(
+				writer,
+				r,
+				idempotency.Scope{
+					Subject: principal.ActorID,
+{{if .Multi}}
+					Tenant: principal.TenantID,
+{{end}}
+					Operation: endpoint.ID,
+				},
+				handler)
+
+			return
+		}{{end}}
+
+		handler(writer, r)
+	})
+
+	var secured http.Handler = invoke
+	if endpoint.Authenticated && reg.Sessions != nil {
+		{{if .Candidate}}
+		secured = reg.Sessions.RequireIdentity(invoke)
+{{- else}}
+		secured = reg.Sessions.Require(invoke)
+{{- end}}
+	} else if endpoint.SessionOnly {
+		secured = http.HandlerFunc(func(
+			w http.ResponseWriter,
+			r *http.Request,
+		) {
+			Error(w, r, 401, "unauthenticated")
+		})
+	}
+
+	reg.Router.Method(endpoint.Method, endpoint.Path, secured)
 }

@@ -1,83 +1,327 @@
 package app_test
 
 import (
- "context"
- "errors"
- "io"
- "log/slog"
- "net/http/httptest"
- "strings"
- "testing"
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http/httptest"
+	"strings"
+	"testing"
 
- "example.test/cross/internal/access"
- "example.test/cross/internal/domain"
- "example.test/cross/internal/features"
- httpentry "example.test/cross/internal/handlers/reports"
- contracts "example.test/cross/internal/jobcontracts/deliveries"
- worker "example.test/cross/internal/jobs/deliveries"
- models "example.test/cross/internal/models/reports"
- operations "example.test/cross/internal/operations/reports"
- toolentry "example.test/cross/internal/agents/reviews"
- "example.test/cross/internal/transport"
- "github.com/go-chi/chi/v5"
- agent "github.com/plutoframework/pluto-agent"
- "github.com/plutoframework/pluto-agent/providers/scripted"
- auth "github.com/plutoframework/pluto-auth"
- authmemory "github.com/plutoframework/pluto-auth/stores/memory"
- jobs "github.com/plutoframework/pluto-jobs"
- rbac "github.com/plutoframework/pluto-rbac"
+	"example.test/cross/internal/access"
+	toolentry "example.test/cross/internal/agents/reviews"
+	"example.test/cross/internal/domain"
+	"example.test/cross/internal/features"
+	httpentry "example.test/cross/internal/handlers/reports"
+	contracts "example.test/cross/internal/jobcontracts/deliveries"
+	worker "example.test/cross/internal/jobs/deliveries"
+	models "example.test/cross/internal/models/reports"
+	operations "example.test/cross/internal/operations/reports"
+	"example.test/cross/internal/transport"
+	"github.com/go-chi/chi/v5"
+	agent "github.com/plutoframework/pluto-agent"
+	"github.com/plutoframework/pluto-agent/providers/scripted"
+	auth "github.com/plutoframework/pluto-auth"
+	authmemory "github.com/plutoframework/pluto-auth/stores/memory"
+	jobs "github.com/plutoframework/pluto-jobs"
+	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-type currentMembership struct {roles []rbac.RoleID}
-func (m *currentMembership) Resolve(_ context.Context,actor,tenant string)(domain.Principal,error){
- if actor!="actor"||tenant!="tenant" {return domain.Principal{},domain.ErrUnauthenticated}
- return domain.Principal{ActorID:actor,TenantID:tenant,Roles:append([]rbac.RoleID(nil),m.roles...)},nil
+type currentMembership struct {
+	roles []rbac.RoleID
 }
-func (m *currentMembership) Authenticate(ctx context.Context,token,tenant string)(domain.Principal,error){if token!="trusted"{return domain.Principal{},domain.ErrUnauthenticated};return m.Resolve(ctx,"actor",tenant)}
-type providerCalls struct{inner agent.Provider;calls int}
-func (p *providerCalls) Capabilities()agent.Capabilities{return p.inner.Capabilities()}
-func (p *providerCalls) Generate(ctx context.Context,r agent.Request)(agent.Response,error){p.calls++;return p.inner.Generate(ctx,r)}
 
-func TestSameGateAcrossHTTPWorkerToolAndDirectCalls(t *testing.T){
- ctx:=context.Background()
- policy,err:=rbac.New(rbac.Definition{Permissions:access.Permissions(),Roles:[]rbac.Role{{ID:"reader",Name:"Reader",Description:"Read report",Permissions:[]rbac.PermissionID{access.ReportsReadPermission}}}})
- if err!=nil{t.Fatal(err)}
- memberships:=&currentMembership{roles:[]rbac.RoleID{"reader"}}
- authorizer,err:=access.NewAuthorizer(policy,memberships);if err!=nil{t.Fatal(err)}
- calls:=0;gate:=operations.NewReadWithDependencies(authorizer,memberships,operations.ReadDependencies{Calls:&calls})
- principal:=domain.Principal{ActorID:"actor",TenantID:"tenant",Roles:[]rbac.RoleID{"fake"}}
- if _,err:=gate.Execute(ctx,principal,models.ReadRequest{ResourceID:"selected"});err!=nil||calls!=1{t.Fatal(err,calls)}
- router:=chi.NewRouter();httpentry.RegisterRead(transport.Registrar{Router:router,Auth:memberships,Policy:policy,Features:features.New(nil),Logger:slog.New(slog.NewTextHandler(io.Discard,nil))},gate,4096)
- request:=httptest.NewRequest("POST","/api/reports",strings.NewReader(`{"resource_id":"selected"}`));request.Header.Set("Authorization","Bearer trusted");request.Header.Set("X-Tenant-ID","tenant")
- response:=httptest.NewRecorder();router.ServeHTTP(response,request)
- if response.Code!=200||calls!=2{t.Fatal("HTTP did not use shared gate",response.Code,response.Body,calls)}
- store,err:=authmemory.New(10);if err!=nil{t.Fatal(err)}
- manager,err:=auth.New(store,auth.DefaultConfig());if err!=nil{t.Fatal(err)}
- issued,err:=manager.Start(ctx,"actor");if err!=nil{t.Fatal(err)}
- tenant:="tenant";prepared,err:=contracts.NewRead(contracts.ReadPayload{ResourceID:"selected"},jobs.Options{TenantID:&tenant});if err!=nil{t.Fatal(err)}
- job:=jobs.Job{Request:prepared,Attempt:1}
- handler:=worker.NewReadHandler(gate,worker.NewReadSessionIdentity(manager,issued.Token,memberships))
- if err:=handler(ctx,job);err!=nil||calls!=3{t.Fatal("worker did not use shared gate",err,calls)}
- provider:=&providerCalls{inner:scripted.New(scripted.Calls(agent.ToolCall{ID:"read",Name:"read_selected_resource",Arguments:`{}`}),scripted.Final(`{"value":"reviewed"}`))}
- runner,err:=toolentry.NewInspect(provider);if err!=nil{t.Fatal(err)}
- deps:=toolentry.InspectDependencies{Principal:principal,Operation:gate,Input:models.ReadRequest{ResourceID:"selected"}}
- if _,err:=toolentry.RunInspect(ctx,runner,"review",deps);err!=nil||calls!=4||provider.calls!=2{t.Fatal("tool did not use shared gate",err,calls,provider.calls)}
+func (m *currentMembership) Resolve(
+	_ context.Context,
+	actor, tenant string,
+) (domain.Principal, error) {
+	if actor != "actor" || tenant != "tenant" {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
 
- invalidUTF8:=[]byte{'{','"','r','e','s','o','u','r','c','e','_','i','d','"',':','"',0xff,'"','}'}
- badRequest:=httptest.NewRequest("POST","/api/reports",strings.NewReader(string(invalidUTF8)));badRequest.Header.Set("Authorization","Bearer trusted");badRequest.Header.Set("X-Tenant-ID","tenant")
- badResponse:=httptest.NewRecorder();router.ServeHTTP(badResponse,badRequest)
- if badResponse.Code!=400||calls!=4{t.Fatal("invalid UTF-8 HTTP reached gate",badResponse.Code,calls)}
- badJob:=job;badJob.Payload=invalidUTF8
- if err:=handler(ctx,badJob);!errors.Is(err,jobs.ErrInvalid)||calls!=4{t.Fatal("invalid UTF-8 worker reached gate",err,calls)}
- memberships.roles=nil
- if _,err:=gate.Execute(ctx,principal,models.ReadRequest{});!errors.Is(err,domain.ErrForbidden)||calls!=4{t.Fatal("direct revocation bypass",err,calls)}
- if err:=handler(ctx,job);!errors.Is(err,domain.ErrForbidden)||calls!=4{t.Fatal("worker revocation bypass",err,calls)}
- if _,err:=toolentry.RunInspect(ctx,runner,"denied",deps);err==nil||calls!=4||provider.calls!=2{t.Fatal("tool denied after provider/effect",err,calls,provider.calls)}
- memberships.roles=[]rbac.RoleID{"reader"}
- wrong:="other";job.TenantID=&wrong
- if err:=handler(ctx,job);err==nil||calls!=4{t.Fatal("cross-tenant worker bypass",err,calls)}
- deps.Principal.TenantID="other"
- if _,err:=toolentry.RunInspect(ctx,runner,"wrong-tenant",deps);err==nil||calls!=4||provider.calls!=2{t.Fatal("cross-tenant tool bypass",err,calls,provider.calls)}
- job.Request=prepared;job.Payload=[]byte(`{"resource_id":"selected","actor_id":"admin"}`)
- if err:=handler(ctx,job);!errors.Is(err,jobs.ErrInvalid)||calls!=4{t.Fatal("payload supplied authority",err,calls)}
+	return domain.Principal{
+		ActorID:  actor,
+		TenantID: tenant,
+		Roles:    append([]rbac.RoleID(nil), m.roles...),
+	}, nil
+}
+
+func (m *currentMembership) Authenticate(
+	ctx context.Context,
+	token, tenant string,
+) (domain.Principal, error) {
+	if token != "trusted" {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+
+	return m.Resolve(ctx, "actor", tenant)
+}
+
+type providerCalls struct {
+	inner agent.Provider
+	calls int
+}
+
+func (p *providerCalls) Capabilities() agent.Capabilities {
+	return p.inner.Capabilities()
+}
+
+func (p *providerCalls) Generate(
+	ctx context.Context,
+	r agent.Request,
+) (agent.Response, error) {
+	p.calls++
+	return p.inner.Generate(ctx, r)
+}
+
+func TestSameGateAcrossHTTPWorkerToolAndDirectCalls(t *testing.T) {
+	ctx := context.Background()
+
+	policy, err := rbac.New(
+		rbac.Definition{
+			Permissions: access.Permissions(),
+			Roles: []rbac.Role{
+				{
+					ID:          "reader",
+					Name:        "Reader",
+					Description: "Read report",
+					Permissions: []rbac.PermissionID{
+						access.ReportsReadPermission,
+					},
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	memberships := &currentMembership{roles: []rbac.RoleID{"reader"}}
+
+	authorizer, err := access.NewAuthorizer(policy, memberships)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calls := 0
+	gate := operations.NewReadWithDependencies(
+		authorizer,
+		memberships,
+		operations.ReadDependencies{Calls: &calls},
+	)
+
+	principal := domain.Principal{
+		ActorID:  "actor",
+		TenantID: "tenant",
+		Roles:    []rbac.RoleID{"fake"},
+	}
+	if _, err := gate.Execute(
+		ctx,
+		principal,
+		models.ReadRequest{ResourceID: "selected"},
+	); err != nil ||
+		calls != 1 {
+		t.Fatal(err, calls)
+	}
+
+	router := chi.NewRouter()
+	httpentry.RegisterRead(
+		transport.Registrar{
+			Router:   router,
+			Auth:     memberships,
+			Policy:   policy,
+			Features: features.New(nil),
+			Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		},
+		gate,
+		4096,
+	)
+
+	request := httptest.NewRequest(
+		"POST",
+		"/api/reports",
+		strings.NewReader(`{"resource_id":"selected"}`),
+	)
+	request.Header.Set("Authorization", "Bearer trusted")
+	request.Header.Set("X-Tenant-ID", "tenant")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != 200 || calls != 2 {
+		t.Fatal(
+			"HTTP did not use shared gate",
+			response.Code,
+			response.Body,
+			calls,
+		)
+	}
+
+	store, err := authmemory.New(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager, err := auth.New(store, auth.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issued, err := manager.Start(ctx, "actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := "tenant"
+
+	prepared, err := contracts.NewRead(
+		contracts.ReadPayload{ResourceID: "selected"},
+		jobs.Options{TenantID: &tenant},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job := jobs.Job{Request: prepared, Attempt: 1}
+
+	handler := worker.NewReadHandler(
+		gate,
+		worker.NewReadSessionIdentity(manager, issued.Token, memberships),
+	)
+	if err := handler(ctx, job); err != nil || calls != 3 {
+		t.Fatal("worker did not use shared gate", err, calls)
+	}
+
+	provider := &providerCalls{
+		inner: scripted.New(
+			scripted.Calls(
+				agent.ToolCall{
+					ID:        "read",
+					Name:      "read_selected_resource",
+					Arguments: `{}`,
+				},
+			),
+			scripted.Final(`{"value":"reviewed"}`),
+		),
+	}
+
+	runner, err := toolentry.NewInspect(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deps := toolentry.InspectDependencies{
+		Principal: principal,
+		Operation: gate,
+		Input:     models.ReadRequest{ResourceID: "selected"},
+	}
+	if _, err := toolentry.RunInspect(
+		ctx,
+		runner,
+		"review",
+		deps,
+	); err != nil ||
+		calls != 4 ||
+		provider.calls != 2 {
+		t.Fatal("tool did not use shared gate", err, calls, provider.calls)
+	}
+
+	invalidUTF8 := []byte{
+		'{',
+		'"',
+		'r',
+		'e',
+		's',
+		'o',
+		'u',
+		'r',
+		'c',
+		'e',
+		'_',
+		'i',
+		'd',
+		'"',
+		':',
+		'"',
+		0xff,
+		'"',
+		'}',
+	}
+	badRequest := httptest.NewRequest(
+		"POST",
+		"/api/reports",
+		strings.NewReader(string(invalidUTF8)),
+	)
+	badRequest.Header.Set("Authorization", "Bearer trusted")
+	badRequest.Header.Set("X-Tenant-ID", "tenant")
+
+	badResponse := httptest.NewRecorder()
+	router.ServeHTTP(badResponse, badRequest)
+
+	if badResponse.Code != 400 || calls != 4 {
+		t.Fatal("invalid UTF-8 HTTP reached gate", badResponse.Code, calls)
+	}
+
+	badJob := job
+
+	badJob.Payload = invalidUTF8
+	if err := handler(ctx, badJob); !errors.Is(err, jobs.ErrInvalid) ||
+		calls != 4 {
+		t.Fatal("invalid UTF-8 worker reached gate", err, calls)
+	}
+
+	memberships.roles = nil
+
+	if _, err := gate.Execute(ctx, principal, models.ReadRequest{}); !errors.Is(
+		err,
+		domain.ErrForbidden,
+	) ||
+		calls != 4 {
+		t.Fatal("direct revocation bypass", err, calls)
+	}
+
+	if err := handler(ctx, job); !errors.Is(err, domain.ErrForbidden) ||
+		calls != 4 {
+		t.Fatal("worker revocation bypass", err, calls)
+	}
+
+	if _, err := toolentry.RunInspect(
+		ctx,
+		runner,
+		"denied",
+		deps,
+	); err == nil ||
+		calls != 4 ||
+		provider.calls != 2 {
+		t.Fatal("tool denied after provider/effect", err, calls, provider.calls)
+	}
+
+	memberships.roles = []rbac.RoleID{"reader"}
+	wrong := "other"
+
+	job.TenantID = &wrong
+	if err := handler(ctx, job); err == nil || calls != 4 {
+		t.Fatal("cross-tenant worker bypass", err, calls)
+	}
+
+	deps.Principal.TenantID = "other"
+	if _, err := toolentry.RunInspect(
+		ctx,
+		runner,
+		"wrong-tenant",
+		deps,
+	); err == nil ||
+		calls != 4 ||
+		provider.calls != 2 {
+		t.Fatal("cross-tenant tool bypass", err, calls, provider.calls)
+	}
+
+	job.Request = prepared
+
+	job.Payload = []byte(`{"resource_id":"selected","actor_id":"admin"}`)
+	if err := handler(ctx, job); !errors.Is(err, jobs.ErrInvalid) ||
+		calls != 4 {
+		t.Fatal("payload supplied authority", err, calls)
+	}
 }

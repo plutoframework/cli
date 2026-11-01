@@ -1,12 +1,13 @@
 package app
 
 import (
- "{{.Module}}/internal/background"
- "github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"{{.Module}}/internal/background"
 )
 
-// workerDependencies is authored composition. Supply only sealed operation gates
+// workerDependencies is authored composition. Supply only sealed operation
+// gates
 // and configured session identities. Handler registration is framework-owned.
 func workerDependencies(_ *pgxpool.Pool) background.Dependencies {
- return background.Dependencies{}
+	return background.Dependencies{}
 }

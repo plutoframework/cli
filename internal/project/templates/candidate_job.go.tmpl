@@ -1,43 +1,100 @@
 package {{.Group}}
 
 import (
- "context"
- "{{.Module}}/internal/access"
- "{{.Module}}/internal/domain"
- models "{{.Module}}/internal/models/{{.OperationGroup}}"
- operations "{{.Module}}/internal/operations/{{.OperationGroup}}"
- resource "{{.Module}}/internal/domain/{{.Resource.Group}}"
- auth "github.com/plutoframework/pluto-auth"
- jobs "github.com/plutoframework/pluto-jobs"
- "github.com/plutoframework/pluto-core/idempotency"
+	"context"
+	"{{.Module}}/internal/access"
+	"{{.Module}}/internal/domain"
+	models "{{.Module}}/internal/models/{{.OperationGroup}}"
+	operations "{{.Module}}/internal/operations/{{.OperationGroup}}"
+	resource "{{.Module}}/internal/domain/{{.Resource.Group}}"
+	auth "github.com/plutoframework/pluto-auth"
+	jobs "github.com/plutoframework/pluto-jobs"
+	"github.com/plutoframework/pluto-core/idempotency"
 )
 
-const {{.Action}}Kind jobs.Kind={{q .JobKind}}
+const {{.Action}}Kind jobs.Kind = {{q .JobKind}}
 
 // New{{.Action}}Handler owns decoding and verified service identity adaptation.
 // There is no callback or caller-controlled identity resolver extension point.
-func New{{.Action}}Handler(operation operations.{{.OperationAction}}Boundary,manager *auth.Manager,credential string)(jobs.Handler,error){
- definition,err:=jobs.NewDefinition[models.{{.OperationAction}}Request]({{.Action}}Kind,func(input models.{{.OperationAction}}Request)error{
-  command,err:=resource.New{{.Resource.Name}}Command({{q .Contract.Kind}},input.ResourceID,input.IdempotencyKey,input.Value,input.Limit,input.Cursor)
-  if err!=nil{return err}
-  {{if eq .Contract.Idempotency "required"}}if !idempotency.ValidKey(command.Key()){return resource.Err{{.Resource.Name}}Input}{{else}}_ = command;_ = idempotency.ValidKey{{end}}
-  return nil
- })
- if err!=nil{return nil,err}
- bound,err:=definition.Bind(func(ctx context.Context,delivery jobs.Delivery,input models.{{.OperationAction}}Request)error{
-  // The surrounding managed adapter installs the identity from the original
-  // validated Job, retaining its exact delivery ID and kind.
-  caller,ok:=ctx.Value({{lowerFirst .Action}}CallerKey{}).(access.Caller)
-  if !ok||caller.WorkID()!=delivery.ID{return domain.ErrUnauthenticated}
-  _,err:=operation.Execute(ctx,caller,input);return err
- })
- if err!=nil{return nil,err}
- return func(ctx context.Context,job jobs.Job)error{
-  if ctx==nil||operation==nil||manager==nil||credential==""{return domain.ErrUnauthenticated}
-  if job.Kind!={{.Action}}Kind||job.MaxAttempts!={{.MaxAttempts}}{return jobs.Permanent(jobs.ErrInvalid)}
-  return access.WithJobSession(ctx,manager,credential,job,func(ctx context.Context,caller access.Caller)error{
-   return bound(context.WithValue(ctx,{{lowerFirst .Action}}CallerKey{},caller),job)
-  })
- },nil
+func New{{.Action}}Handler(
+	operation operations.{{.OperationAction}}Boundary,
+	manager *auth.Manager,
+	credential string,
+) (jobs.Handler, error) {
+	definition, err := jobs.NewDefinition[models.{{.OperationAction}}Request](
+		{{.Action}}Kind,
+		func(input models.{{.OperationAction}}Request) error {
+			command, err := resource.New{{.Resource.Name}}Command(
+				{{q .Contract.Kind}},
+				input.ResourceID,
+				input.IdempotencyKey,
+				input.Value,
+				input.Limit,
+				input.Cursor)
+			if err != nil {
+				return err
+			}
+	{{if eq .Contract.Idempotency "required"}}
+
+			if !idempotency.ValidKey(command.Key()) {
+				return resource.Err{{.Resource.Name}}Input
+			}{{else}}_ = command
+			_ = idempotency.ValidKey{{end}}
+
+			return nil
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	bound, err := definition.Bind(
+		func(
+			ctx context.Context,
+			delivery jobs.Delivery,
+			input models.{{.OperationAction}}Request,
+		) error {
+			// The surrounding managed adapter installs the identity from the
+			// original
+			// validated Job, retaining its exact delivery ID and kind.
+			caller, ok := ctx.Value(
+				{{lowerFirst .Action}}CallerKey{},
+			).(access.Caller)
+			if !ok || caller.WorkID() != delivery.ID {
+				return domain.ErrUnauthenticated
+			}
+
+			_, err := operation.Execute(ctx, caller, input)
+
+			return err
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context, job jobs.Job) error {
+		if ctx == nil || operation == nil || manager == nil ||
+			credential == "" {
+			return domain.ErrUnauthenticated
+		}
+
+		if job.Kind != {{.Action}}Kind || job.MaxAttempts != {{.MaxAttempts}} {
+			return jobs.Permanent(jobs.ErrInvalid)
+		}
+
+		return access.WithJobSession(
+			ctx,
+			manager,
+			credential,
+			job,
+			func(ctx context.Context, caller access.Caller) error {
+				return bound(
+					context.WithValue(
+						ctx,
+						{{lowerFirst .Action}}CallerKey{},
+						caller),
+					job)
+			})
+	}, nil
 }
+
 type {{lowerFirst .Action}}CallerKey struct{}

@@ -1,27 +1,58 @@
 package access
 
 import (
-    "context"
-    "slices"
+	"context"
+	"slices"
 
-    "{{.Module}}/internal/domain"
-    rbac "github.com/plutoframework/pluto-rbac"
+	"{{.Module}}/internal/domain"
+	rbac "github.com/plutoframework/pluto-rbac"
 )
 
 // MembershipResolver is a consumer-owned current-assignment lookup. It must
 // resolve the authenticated subject in exactly the requested membership scope.
 type MembershipResolver interface {
-    Resolve(context.Context, string{{if .Multi}}, string{{end}}) (domain.Principal, error)
+	Resolve(
+		context.Context,
+		string,
+{{if .Multi}}
+		string,
+{{end}}
+	) (domain.Principal, error)
 }
 
 // NewAuthorizer never trusts a caller's Principal.Roles snapshot. The published
 // authorizer invokes this resolver for every protected operation execution.
-func NewAuthorizer(policy *rbac.Policy, memberships MembershipResolver) (*rbac.Authorizer,error) {
-    return rbac.NewAuthorizer(policy,rbac.RoleResolverFunc(func(ctx context.Context,subject string,scope rbac.Scope)([]rbac.RoleID,error){
-        if memberships==nil { return nil,domain.ErrUnauthenticated }
-        current,err:=memberships.Resolve(ctx,subject{{if .Multi}},scope.TenantID{{end}})
-        if err!=nil{return nil,err}
-        if !current.Verified() || current.ActorID!=subject{{if .Multi}} || current.TenantID!=scope.TenantID{{end}} {return nil,domain.ErrUnauthenticated}
-        return slices.Clone(current.Roles),nil
-    }),rbac.Options{RequireTenant:{{.Multi}}})
+func NewAuthorizer(
+	policy *rbac.Policy,
+	memberships MembershipResolver,
+) (*rbac.Authorizer, error) {
+	return rbac.NewAuthorizer(
+		policy,
+		rbac.RoleResolverFunc(
+			func(
+				ctx context.Context,
+				subject string,
+				scope rbac.Scope,
+			) ([]rbac.RoleID, error) {
+				if memberships == nil {
+					return nil, domain.ErrUnauthenticated
+				}
+
+				current, err := memberships.Resolve(
+					ctx,
+					subject{{if .Multi}},
+					scope.TenantID{{end}})
+				if err != nil {
+					return nil, err
+				}
+
+				if !current.Verified() ||
+		current.ActorID != subject{{if .Multi}} ||
+					current.TenantID != scope.TenantID{{end}} {
+					return nil, domain.ErrUnauthenticated
+				}
+
+				return slices.Clone(current.Roles), nil
+			}),
+		rbac.Options{RequireTenant: {{.Multi}}})
 }

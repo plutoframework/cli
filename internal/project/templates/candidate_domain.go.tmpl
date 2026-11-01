@@ -3,192 +3,397 @@
 package {{ .Resource.Group }}
 
 import (
-    "errors"
-    "strings"
-    "unicode"
-    "unicode/utf8"
+	"errors"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
-    commonDomain "{{ .Module }}/internal/domain"
+	commonDomain "{{ .Module }}/internal/domain"
 
-    "github.com/plutoframework/pluto-core/idempotency"
-    "github.com/plutoframework/pluto-core/state"
+	"github.com/plutoframework/pluto-core/idempotency"
+	"github.com/plutoframework/pluto-core/state"
 )
 
 var (
-    Err{{ .Resource.Name }}Input = errors.New("invalid {{ .Resource.ID }} input")
-    Err{{ .Resource.Name }}Guard = errors.Join(state.ErrGuard, commonDomain.ErrForbidden)
+	Err{{ .Resource.Name }}Input = errors.New(
+		"invalid {{ .Resource.ID }} input")
+	Err{{ .Resource.Name }}Guard = errors.Join(
+		state.ErrGuard,
+		commonDomain.ErrForbidden)
 )
 
 type {{ .Resource.Name }}Status string
-type {{ .Resource.Name }}Event string
+type {{ .Resource.Name }}Event  string
 
 // {{ .Resource.Name }}Command normalizes once at construction and carries no
 // authority. Private fields and an invalid zero value close raw input mutation.
 type {{ .Resource.Name }}Command struct {
-    {{ $private }}CommandKind string
-    {{ $private }}CommandID string
-    {{ $private }}CommandKey string
-    {{ $private }}CommandValue string
-    {{ $private }}CommandLimit int
-    {{ $private }}CommandCursor string
-    {{ $private }}CommandValid bool
+	{{ $private }}CommandKind   string
+	{{ $private }}CommandID     string
+	{{ $private }}CommandKey    string
+	{{ $private }}CommandValue  string
+	{{ $private }}CommandLimit  int
+	{{ $private }}CommandCursor string
+	{{ $private }}CommandValid  bool
 }
 
-func New{{ .Resource.Name }}Command(kind, id, key, value string, limit int, cursor string) ({{ .Resource.Name }}Command, error) {
-    for _, raw := range []string{kind, id, key, value, cursor} {
-        if !utf8.ValidString(raw) { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-    }
-    suppliedID, suppliedValue := id != "", value != ""
-    {{ if eq .Resource.Normalize "trim" }}
-    id = strings.TrimSpace(id)
-    value = strings.TrimSpace(value)
-    {{ end }}
-    if len(value) > {{ .Resource.MaxValueBytes }} || strings.ContainsRune(value, 0) || len(cursor) > 2048 || (key != "" && !idempotency.ValidKey(key)) {
-        return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
-    }
-    switch kind {
-    case "create":
-        if !valid{{ .Resource.Name }}ID(id) || limit != 0 || cursor != "" { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-    case "transition":
-        if !valid{{ .Resource.Name }}ID(id) || suppliedValue || limit != 0 || cursor != "" { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-    case "effect":
-        if !valid{{ .Resource.Name }}ID(id) || key == "" || limit != 0 || cursor != "" { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-    case "load":
-        if !valid{{ .Resource.Name }}ID(id) || key != "" || suppliedValue || limit != 0 || cursor != "" { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-    case "list":
-        if suppliedID || key != "" || suppliedValue { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-        if limit == 0 { limit = {{ .Resource.PageLimit }} }
-        if limit < 1 || limit > {{ .Resource.PageLimit }} { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-    case "export":
-        if suppliedID || key != "" || suppliedValue || cursor != "" { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-        if limit == 0 { limit = {{ .Resource.ExportLimit }} }
-        if limit < 1 || limit > {{ .Resource.ExportLimit }} { return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input }
-    default:
-        return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
-    }
-    return {{ .Resource.Name }}Command{
-        {{ $private }}CommandKind:kind, {{ $private }}CommandID:id,
-        {{ $private }}CommandKey:key, {{ $private }}CommandValue:value,
-        {{ $private }}CommandLimit:limit, {{ $private }}CommandCursor:cursor,
-        {{ $private }}CommandValid:true,
-    }, nil
+func New{{ .Resource.Name }}Command(
+	kind, id, key, value string,
+	limit int,
+	cursor string,
+) ({{ .Resource.Name }}Command, error) {
+	for _, raw := range []string{kind, id, key, value, cursor} {
+		if !utf8.ValidString(raw) {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+	}
+
+	suppliedID, suppliedValue := id != "", value != ""
+	{{ if eq .Resource.Normalize "trim" }}
+
+	id = strings.TrimSpace(id)
+	value = strings.TrimSpace(value)
+	{{ end }}
+
+	if len(value) > {{ .Resource.MaxValueBytes }} ||
+		strings.ContainsRune(value, 0) ||
+		len(cursor) > 2048 ||
+		(key != "" && !idempotency.ValidKey(key)) {
+		return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+	}
+
+	switch kind {
+	case "create":
+		if !valid{{ .Resource.Name }}ID(id) || limit != 0 || cursor != "" {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+	case "transition":
+		if !valid{{ .Resource.Name }}ID(id) || suppliedValue || limit != 0 ||
+			cursor != "" {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+	case "effect":
+		if !valid{{ .Resource.Name }}ID(id) || key == "" || limit != 0 ||
+			cursor != "" {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+	case "load":
+		if !valid{{ .Resource.Name }}ID(id) || key != "" || suppliedValue ||
+			limit != 0 ||
+			cursor != "" {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+	case "list":
+		if suppliedID || key != "" || suppliedValue {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+
+		if limit == 0 {
+			limit = {{ .Resource.PageLimit }}
+		}
+
+		if limit < 1 || limit > {{ .Resource.PageLimit }} {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+	case "export":
+		if suppliedID || key != "" || suppliedValue || cursor != "" {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+
+		if limit == 0 {
+			limit = {{ .Resource.ExportLimit }}
+		}
+
+		if limit < 1 || limit > {{ .Resource.ExportLimit }} {
+			return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+		}
+	default:
+		return {{ .Resource.Name }}Command{}, Err{{ .Resource.Name }}Input
+	}
+
+	return {{ .Resource.Name }}Command{
+		{{ $private }}CommandKind: kind, {{ $private }}CommandID: id,
+		{{ $private }}CommandKey: key, {{ $private }}CommandValue: value,
+		{{ $private }}CommandLimit: limit, {{ $private }}CommandCursor: cursor,
+		{{ $private }}CommandValid: true,
+	}, nil
 }
 
 func (c {{ .Resource.Name }}Command) Validate() error {
-    if !c.{{ $private }}CommandValid { return Err{{ .Resource.Name }}Input }
-    return nil
+	if !c.{{ $private }}CommandValid {
+		return Err{{ .Resource.Name }}Input
+	}
+
+	return nil
 }
-func (c {{ .Resource.Name }}Command) Kind() string { return c.{{ $private }}CommandKind }
-func (c {{ .Resource.Name }}Command) ID() string { return c.{{ $private }}CommandID }
-func (c {{ .Resource.Name }}Command) Key() string { return c.{{ $private }}CommandKey }
-func (c {{ .Resource.Name }}Command) Value() string { return c.{{ $private }}CommandValue }
-func (c {{ .Resource.Name }}Command) Limit() int { return c.{{ $private }}CommandLimit }
-func (c {{ .Resource.Name }}Command) Cursor() string { return c.{{ $private }}CommandCursor }
+
+func (c {{ .Resource.Name }}Command) Kind() string {
+	return c.{{ $private }}CommandKind
+}
+
+func (c {{ .Resource.Name }}Command) ID() string {
+	return c.{{ $private }}CommandID
+}
+
+func (c {{ .Resource.Name }}Command) Key() string {
+	return c.{{ $private }}CommandKey
+}
+
+func (c {{ .Resource.Name }}Command) Value() string {
+	return c.{{ $private }}CommandValue
+}
+
+func (c {{ .Resource.Name }}Command) Limit() int {
+	return c.{{ $private }}CommandLimit
+}
+
+func (c {{ .Resource.Name }}Command) Cursor() string {
+	return c.{{ $private }}CommandCursor
+}
 
 // {{ .Resource.Name }}Record is rehydrated only by the approved data adapter.
 // It is never an accepted replacement-record payload for mutation methods.
 type {{ .Resource.Name }}Record struct {
-    {{ $private }}RecordID string
-    {{ $private }}RecordTenant string
-    {{ $private }}RecordOwner string
-    {{ $private }}RecordState {{ .Resource.Name }}Status
-    {{ $private }}RecordVersion int64
-    {{ $private }}RecordValue string
-    {{ $private }}RecordValid bool
+	{{ $private }}RecordID      string
+	{{ $private }}RecordTenant  string
+	{{ $private }}RecordOwner   string
+	{{ $private }}RecordState   {{ .Resource.Name }}Status
+	{{ $private }}RecordVersion int64
+	{{ $private }}RecordValue   string
+	{{ $private }}RecordValid   bool
 }
 
-func Rehydrate{{ .Resource.Name }}(id, tenant, owner, status string, version int64, value string) ({{ .Resource.Name }}Record, error) {
-    if !valid{{ .Resource.Name }}ID(id) || !valid{{ .Resource.Name }}Identity(tenant) || !valid{{ .Resource.Name }}Identity(owner) || version < 1 || !utf8.ValidString(value) || strings.ContainsRune(value, 0) || len(value) > {{ .Resource.MaxValueBytes }} {
-        return {{ .Resource.Name }}Record{}, Err{{ .Resource.Name }}Input
-    }
-    {{ if eq .Resource.Normalize "trim" }}
-    if strings.TrimSpace(value) != value { return {{ .Resource.Name }}Record{}, Err{{ .Resource.Name }}Input }
-    {{ end }}
-    switch status {
-    {{ range .Resource.States }}case {{ q . }}:
-    {{ end }}default:
-        return {{ .Resource.Name }}Record{}, Err{{ .Resource.Name }}Input
-    }
-    return {{ .Resource.Name }}Record{
-        {{ $private }}RecordID:id, {{ $private }}RecordTenant:tenant,
-        {{ $private }}RecordOwner:owner, {{ $private }}RecordState:{{ .Resource.Name }}Status(status),
-        {{ $private }}RecordVersion:version, {{ $private }}RecordValue:value,
-        {{ $private }}RecordValid:true,
-    }, nil
+func Rehydrate{{ .Resource.Name }}(
+	id, tenant, owner, status string,
+	version int64,
+	value string,
+) ({{ .Resource.Name }}Record, error) {
+	if !valid{{ .Resource.Name }}ID(id) ||
+		!valid{{ .Resource.Name }}Identity(tenant) ||
+		!valid{{ .Resource.Name }}Identity(owner) ||
+		version < 1 ||
+		!utf8.ValidString(value) ||
+		strings.ContainsRune(value, 0) ||
+		len(value) > {{ .Resource.MaxValueBytes }} {
+		return {{ .Resource.Name }}Record{}, Err{{ .Resource.Name }}Input
+	}
+	{{ if eq .Resource.Normalize "trim" }}
+
+	if strings.TrimSpace(value) != value {
+		return {{ .Resource.Name }}Record{}, Err{{ .Resource.Name }}Input
+	}
+	{{ end }}
+
+	switch status {
+	{{ range .Resource.States }}
+
+	case {{ q . }}:
+	{{ end }}
+
+	default:
+		return {{ .Resource.Name }}Record{}, Err{{ .Resource.Name }}Input
+	}
+
+	return {{ .Resource.Name }}Record{
+		{{ $private }}RecordID:     id,
+		{{ $private }}RecordTenant: tenant,
+
+		{{ $private }}RecordOwner: owner,
+		{{ $private }}RecordState: {{ .Resource.Name }}Status(
+
+			status,
+		),
+
+		{{ $private }}RecordVersion: version,
+		{{ $private }}RecordValue:   value,
+
+		{{ $private }}RecordValid: true,
+	}, nil
 }
 
 func (r {{ .Resource.Name }}Record) Validate() error {
-    if !r.{{ $private }}RecordValid { return Err{{ .Resource.Name }}Input }
-    return nil
+	if !r.{{ $private }}RecordValid {
+		return Err{{ .Resource.Name }}Input
+	}
+
+	return nil
 }
-func (r {{ .Resource.Name }}Record) ID() string { return r.{{ $private }}RecordID }
-func (r {{ .Resource.Name }}Record) TenantID() string { return r.{{ $private }}RecordTenant }
-func (r {{ .Resource.Name }}Record) OwnerID() string { return r.{{ $private }}RecordOwner }
-func (r {{ .Resource.Name }}Record) State() {{ .Resource.Name }}Status { return r.{{ $private }}RecordState }
-func (r {{ .Resource.Name }}Record) Version() int64 { return r.{{ $private }}RecordVersion }
-func (r {{ .Resource.Name }}Record) Value() string { return r.{{ $private }}RecordValue }
+
+func (r {{ .Resource.Name }}Record) ID() string {
+	return r.{{ $private }}RecordID
+}
+
+func (r {{ .Resource.Name }}Record) TenantID() string {
+	return r.{{ $private }}RecordTenant
+}
+
+func (r {{ .Resource.Name }}Record) OwnerID() string {
+	return r.{{ $private }}RecordOwner
+}
+
+func (r {{ .Resource.Name }}Record) State() {{ .Resource.Name }}Status {
+	return r.{{ $private }}RecordState
+}
+
+func (r {{ .Resource.Name }}Record) Version() int64 {
+	return r.{{ $private }}RecordVersion
+}
+
+func (r {{ .Resource.Name }}Record) Value() string {
+	return r.{{ $private }}RecordValue
+}
 
 func valid{{ .Resource.Name }}ID(value string) bool {
-    if value == "" || len(value) > 128 || !utf8.ValidString(value) { return false }
-    for _, character := range value {
-        if unicode.IsControl(character) || unicode.IsSpace(character) { return false }
-    }
-    return true
+	if value == "" || len(value) > 128 || !utf8.ValidString(value) {
+		return false
+	}
+
+	for _, character := range value {
+		if unicode.IsControl(character) || unicode.IsSpace(character) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func valid{{ .Resource.Name }}Identity(value string) bool {
-    if value == "" || len(value) > 256 || !utf8.ValidString(value) || strings.TrimSpace(value) != value { return false }
-    for _, character := range value {
-        if unicode.IsControl(character) { return false }
-    }
-    return true
+	if value == "" || len(value) > 256 || !utf8.ValidString(value) ||
+		strings.TrimSpace(value) != value {
+		return false
+	}
+
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Authorize{{ .Resource.Name }}Actor is pure and independent of current state.
 // The data resource policy supplies authoritative SQL owner and verified actor
-// on every use, including replay. Equal events have one declared guard semantic.
+// on every use, including replay. Equal events have one declared guard
+// semantic.
 func Authorize{{ .Resource.Name }}Actor(event, actor, owner string) error {
-    if !valid{{ .Resource.Name }}Identity(actor) || !valid{{ .Resource.Name }}Identity(owner) { return Err{{ .Resource.Name }}Guard }
-    for _, rule := range []struct{event, guard string}{
-        {{ range .Resource.Transitions }}{event:{{ q .Event }}, guard:{{ q .Guard }}},
-        {{ end }}
-    } {
-        if rule.event != event { continue }
-        switch rule.guard {
-        case "none":
-            return nil
-        case "owner":
-            if actor == owner { return nil }
-        case "not_owner":
-            if actor != owner { return nil }
-        }
-        return Err{{ .Resource.Name }}Guard
-    }
-    return Err{{ .Resource.Name }}Guard
+	if !valid{{ .Resource.Name }}Identity(actor) ||
+		!valid{{ .Resource.Name }}Identity(owner) {
+		return Err{{ .Resource.Name }}Guard
+	}
+
+	for _, rule := range []struct {
+		event, guard string
+	}{
+		{{ range .Resource.Transitions }}
+		{event: {{ q .Event }}, guard: {{ q .Guard }}},
+		{{ end }}
+	} {
+		if rule.event != event {
+			continue
+		}
+
+		switch rule.guard {
+		case "none":
+			return nil
+		case "owner":
+			if actor == owner {
+				return nil
+			}
+		case "not_owner":
+			if actor != owner {
+				return nil
+			}
+		}
+
+		return Err{{ .Resource.Name }}Guard
+	}
+
+	return Err{{ .Resource.Name }}Guard
 }
 
 func guard{{ .Resource.Name }}(allowed bool) error {
-    if !allowed { return Err{{ .Resource.Name }}Guard }
-    return nil
+	if !allowed {
+		return Err{{ .Resource.Name }}Guard
+	}
+
+	return nil
 }
 
-func New{{ .Resource.Name }}Machine() (*state.Machine[{{ .Resource.Name }}Status, {{ .Resource.Name }}Event, bool], error) {
-    return state.New(state.Definition[{{ .Resource.Name }}Status, {{ .Resource.Name }}Event, bool]{
-        States:[]{{ .Resource.Name }}Status{ {{ range .Resource.States }}{{ q . }},{{ end }} },
-        Transitions:[]state.Transition[{{ .Resource.Name }}Status, {{ .Resource.Name }}Event, bool]{
-            {{ range .Resource.Transitions }}{From:{{ q .From }}, On:{{ q .Event }}, To:{{ q .To }}, Guard:guard{{ $.Resource.Name }}},
-            {{ end }}
-        },
-    })
+func New{{ .Resource.Name }}Machine() (*state.Machine[
+	{{ .Resource.Name }}Status,
+	{{ .Resource.Name }}Event,
+	bool,
+], error,
+) {
+	return state.New(
+		state.Definition[
+		{{ .Resource.Name }}Status,
+		{{ .Resource.Name }}Event,
+		bool,
+	]{
+			States: []{{ .Resource.Name }}Status{
+{{range .Resource.States}}
+				{{q .}},
+{{end}}
+			},
+
+			Transitions: []state.Transition[
+		{{ .Resource.Name }}Status,
+		{{ .Resource.Name }}Event,
+		bool,
+	]{
+			{{ range .Resource.Transitions }}
+				{
+					From:  {{ q .From }},
+					On:    {{ q .Event }},
+					To:    {{ q .To }},
+					Guard: guard{{ $.Resource.Name }},
+				},
+			{{ end }}
+			},
+		},
+	)
 }
 
-// Evaluate{{ .Resource.Name }} decides without I/O. It is not proof that a caller
+// Evaluate{{ .Resource.Name }} decides without I/O. It is not proof that a
+// caller
 // supplied truthful facts; the restricted data gate independently checks actor
 // policy with actual SQL owner before accepting the resulting machine token.
-func Evaluate{{ .Resource.Name }}(machine *state.Machine[{{ .Resource.Name }}Status, {{ .Resource.Name }}Event, bool], record {{ .Resource.Name }}Record, event, verifiedActor string) (state.Evaluated[{{ .Resource.Name }}Status, {{ .Resource.Name }}Event], error) {
-    if err := record.Validate(); err != nil { return state.Evaluated[{{ .Resource.Name }}Status, {{ .Resource.Name }}Event]{}, err }
-    if err := Authorize{{ .Resource.Name }}Actor(event, verifiedActor, record.OwnerID()); err != nil { return state.Evaluated[{{ .Resource.Name }}Status, {{ .Resource.Name }}Event]{}, err }
-    return machine.Evaluate(state.Binding[{{ .Resource.Name }}Status]{
-        Scope:record.TenantID(), Entity:record.ID(), State:record.State(), Version:record.Version(),
-    }, {{ .Resource.Name }}Event(event), true)
+func Evaluate{{ .Resource.Name }}(
+	machine *state.Machine[
+		{{ .Resource.Name }}Status,
+		{{ .Resource.Name }}Event,
+		bool,
+	],
+	record {{ .Resource.Name }}Record,
+	event, verifiedActor string) (state.Evaluated[
+	{{ .Resource.Name }}Status,
+	{{ .Resource.Name }}Event,
+], error,
+) {
+	if err := record.Validate(); err != nil {
+		return state.Evaluated[
+			{{ .Resource.Name }}Status,
+			{{ .Resource.Name }}Event,
+		]{}, err
+	}
+
+	if err := Authorize{{ .Resource.Name }}Actor(
+		event,
+		verifiedActor,
+		record.OwnerID(),
+	); err != nil {
+		return state.Evaluated[
+			{{ .Resource.Name }}Status,
+			{{ .Resource.Name }}Event,
+		]{}, err
+	}
+
+	return machine.Evaluate(state.Binding[{{ .Resource.Name }}Status]{
+		Scope:   record.TenantID(),
+		Entity:  record.ID(),
+		State:   record.State(),
+		Version: record.Version(),
+	}, {{ .Resource.Name }}Event(event), true)
 }

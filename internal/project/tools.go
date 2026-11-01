@@ -32,7 +32,8 @@ func passwordRequirement(m Manifest) string {
 	return AuthVersion + " // indirect"
 }
 
-// ToolFiles contains module dependencies and optional development configuration.
+// ToolFiles contains module dependencies and optional development
+// configuration.
 func ToolFiles(m Manifest) map[string][]byte {
 	files := map[string][]byte{}
 	files["go.mod"] = []byte(fmt.Sprintf(`module %s
@@ -61,7 +62,17 @@ require (
  golang.org/x/sync v0.22.0 // indirect
  golang.org/x/text v0.41.0 // indirect
 )
-`, m.Project.Module, CoreVersion, CorePostgresVersion, RBACVersion, AuthVersion, AuthPostgresVersion, JobsVersion, JobsPostgresVersion, passwordRequirement(m)))
+`,
+		m.Project.Module,
+		CoreVersion,
+		CorePostgresVersion,
+		RBACVersion,
+		AuthVersion,
+		AuthPostgresVersion,
+		JobsVersion,
+		JobsPostgresVersion,
+		passwordRequirement(m),
+	))
 
 	files["go.sum"] = []byte(appGoSum)
 	addTelemetryRequirement(files)
@@ -73,7 +84,9 @@ require (
 			module,
 			"require (",
 			fmt.Sprintf(
-				"require (\n github.com/plutoframework/pluto-core/stores/valkey %s\n github.com/valkey-io/valkey-go v1.0.79 // indirect",
+				`require (
+ github.com/plutoframework/pluto-core/stores/valkey %s
+ github.com/valkey-io/valkey-go v1.0.79 // indirect`,
 				ValkeyVersion,
 			),
 			1,
@@ -85,11 +98,27 @@ require (
 		strings.ReplaceAll(lintConfig, "MODULE", m.Project.Module),
 	)
 	files[".gitignore"] = []byte(
-		"/bin/\n.env\n.env.*\n!.env.example\nage.txt\n*.key\nfnox.local.toml\n.fnox.local.toml\n",
+		`/bin/
+.env
+.env.*
+!.env.example
+age.txt
+*.key
+fnox.local.toml
+.fnox.local.toml
+`,
 	)
 	files[".env.example"] = []byte(
 		fmt.Sprintf(
-			"# Explicitly export desired values; no implicit dotenv loading.\n%sSERVER_ADDRESS=127.0.0.1:8080\n%sSERVER_GZIP=true\n%sLOG_LEVEL=info\n# %sDATABASE_URL=postgres://pluto:local_only@127.0.0.1:55432/pluto?sslmode=disable\n# Flags: %sFEATURE_<KEY>=false (dots/hyphens become underscores)\n",
+			`# Explicitly export desired values; no implicit dotenv loading.
+%sSERVER_ADDRESS=127.0.0.1:8080
+%sSERVER_GZIP=true
+%sLOG_LEVEL=info
+# %sDATABASE_URL=`+
+				`postgres://pluto:local_only@127.0.0.1:55432/pluto?sslmode=disable`+
+				`
+# Flags: %sFEATURE_<KEY>=false (dots/hyphens become underscores)
+`,
 			m.Project.EnvPrefix,
 			m.Project.EnvPrefix,
 			m.Project.EnvPrefix,
@@ -99,29 +128,47 @@ require (
 	)
 
 	files[".env.example"] = append(files[".env.example"], []byte(fmt.Sprintf(
-		"%sCACHE_ENVIRONMENT=development\n# %sCACHE_URL=redis://:local_only@127.0.0.1:6379/0\n%sCACHE_ALLOW_INSECURE=false\n",
+		`%sCACHE_ENVIRONMENT=development
+# %sCACHE_URL=redis://:local_only@127.0.0.1:6379/0
+%sCACHE_ALLOW_INSECURE=false
+`,
 		m.Project.EnvPrefix,
 		m.Project.EnvPrefix,
 		m.Project.EnvPrefix,
 	))...)
 
 	files[".env.example"] = append(files[".env.example"], []byte(fmt.Sprintf(
-		"%sAUTH_TRUSTED_ORIGINS=http://127.0.0.1:8080\n%sAUTH_SESSION_TTL=24h\n%sAUTH_IDLE_TIMEOUT=30m\n",
+		`%sAUTH_TRUSTED_ORIGINS=http://127.0.0.1:8080
+%sAUTH_SESSION_TTL=24h
+%sAUTH_IDLE_TIMEOUT=30m
+`,
 		m.Project.EnvPrefix,
 		m.Project.EnvPrefix,
 		m.Project.EnvPrefix,
 	))...)
 	if m.Capabilities.LocalCredentials {
 		files[".env.example"] = append(files[".env.example"], []byte(
-			"# Local credentials require DATABASE_URL and explicit app-owned Sender,\n# shared AttemptLimiter and trusted-client Ingress in cmd/api/credentials.go.\n# No credential defaults or delivery secrets are included.\n",
+			`# Local credentials require DATABASE_URL and `+
+				`explicit app-owned Sender,
+# shared AttemptLimiter and trusted-client Ingress in cmd/api/credentials.go.
+# No credential defaults or delivery secrets are included.
+`,
 		)...)
 	}
 
 	files["scripts/check.sh"] = []byte(
-		"#!/bin/sh\nset -eu\ncd \"$(dirname \"$0\")/..\"\nexec pluto vet\n",
+		`#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+exec pluto vet
+`,
 	)
 	files["scripts/fmt.sh"] = []byte(
-		"#!/bin/sh\nset -eu\ncd \"$(dirname \"$0\")/..\"\nexec pluto fmt\n",
+		`#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+exec pluto fmt
+`,
 	)
 	files["sqlc.yaml"] = []byte(`version: "2"
 sql:
@@ -138,7 +185,9 @@ sql:
 		initialMigrationSQL,
 	)
 	files["db/queries/schema.sql"] = []byte(
-		"-- name: SchemaVersion :one\nSELECT version FROM schema_metadata ORDER BY version DESC LIMIT 1;\n",
+		`-- name: SchemaVersion :one
+SELECT version FROM schema_metadata ORDER BY version DESC LIMIT 1;
+`,
 	)
 
 	if m.Development.Mise {
@@ -171,7 +220,8 @@ run = "sqlc generate"
 			content = strings.Replace(
 				content,
 				"\"go:github.com/sqlc-dev/sqlc/cmd/sqlc\" = \"1.31.1\"",
-				"\"go:github.com/sqlc-dev/sqlc/cmd/sqlc\" = \"1.31.1\"\nfnox = \"1.43.0\"",
+				`"go:github.com/sqlc-dev/sqlc/cmd/sqlc" = "1.31.1"
+fnox = "1.43.0"`,
 				1,
 			)
 			content = strings.Replace(
@@ -194,7 +244,18 @@ run = "sqlc generate"
 	if m.Development.Fnox {
 		files["fnox.toml"] = []byte(
 			fmt.Sprintf(
-				"#:schema https://fnox.jdx.dev/schema.json\n# Nonsecret local-only value. NEVER use the plain provider for real secrets.\nroot = true\nenv = \"exec\"\nredact_exec = true\n\n[providers.local]\ntype = \"plain\"\n\n[secrets]\n%sLOG_LEVEL = { provider = \"local\", value = \"info\" }\n",
+				`#:schema https://fnox.jdx.dev/schema.json
+# Nonsecret local-only value. NEVER use the plain provider for real secrets.
+root = true
+env = "exec"
+redact_exec = true
+
+[providers.local]
+type = "plain"
+
+[secrets]
+%sLOG_LEVEL = { provider = "local", value = "info" }
+`,
 				m.Project.EnvPrefix,
 			),
 		)
@@ -218,21 +279,32 @@ EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/api"]
 `)
 		files[".dockerignore"] = []byte(
-			".git\n.env\n.env.*\nfnox*.toml\n.fnox*.toml\n*.key\nage.txt\nbin\n",
+			`.git
+.env
+.env.*
+fnox*.toml
+.fnox*.toml
+*.key
+age.txt
+bin
+`,
 		)
 		files["compose.yaml"] = []byte(fmt.Sprintf(`services:
   api:
     build: .
     environment:
       %sSERVER_ADDRESS: 0.0.0.0:8080
-      %sDATABASE_URL: postgres://pluto:local_only@postgres:5432/pluto?sslmode=disable
+      %sDATABASE_URL: `+
+			`postgres://pluto:local_only@postgres:5432/pluto?sslmode=disable`+
+			`
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", `+
+			`"http://127.0.0.1:8080/healthz"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -241,7 +313,9 @@ ENTRYPOINT ["/usr/local/bin/api"]
     profiles: ["worker"]
     entrypoint: ["/usr/local/bin/worker"]
     environment:
-      %sDATABASE_URL: postgres://pluto:local_only@postgres:5432/pluto?sslmode=disable
+      %sDATABASE_URL: `+
+			`postgres://pluto:local_only@postgres:5432/pluto?sslmode=disable`+
+			`
     depends_on:
       postgres:
         condition: service_healthy
@@ -271,21 +345,32 @@ volumes:
 		compose = strings.Replace(
 			compose,
 			"      "+m.Project.EnvPrefix+"SERVER_ADDRESS:",
-			"      "+m.Project.EnvPrefix+"CACHE_URL: redis://:local_only@valkey:6379/0\n      "+m.Project.EnvPrefix+"CACHE_ALLOW_INSECURE: \"true\"\n      "+m.Project.EnvPrefix+"SERVER_ADDRESS:",
+			"      "+
+				m.Project.EnvPrefix+
+				`CACHE_URL: redis://:local_only@valkey:6379/0
+      `+m.Project.EnvPrefix+`CACHE_ALLOW_INSECURE: "true"
+      `+m.Project.EnvPrefix+"SERVER_ADDRESS:",
 			1,
 		)
 		compose = strings.Replace(
 			compose,
-			"    depends_on:\n",
-			"    depends_on:\n      valkey:\n        condition: service_healthy\n",
+			`    depends_on:
+`,
+			`    depends_on:
+      valkey:
+        condition: service_healthy
+`,
 			1,
 		)
 		compose = strings.Replace(
 			compose,
-			"volumes:\n  postgres-data:",
+			`volumes:
+  postgres-data:`,
 			`  valkey:
     image: valkey/valkey:9.1.3-alpine
-    command: ["valkey-server", "--save", "", "--appendonly", "no", "--requirepass", "local_only", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    command: ["valkey-server", "--save", "", "--appendonly", "no", `+
+				`"--requirepass", "local_only", "--maxmemory", "64mb", `+
+				`"--maxmemory-policy", "allkeys-lru"]
     ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD-SHELL", "VALKEYCLI_AUTH=local_only valkey-cli ping"]
@@ -316,6 +401,9 @@ linters:
     - wsl_v5
   settings:
     wsl_v5:
+      # Preserve the required blank line before block-start comments.
+      disable:
+        - leading-whitespace
       default: default
       allow-first-in-block: true
       allow-whole-block: false

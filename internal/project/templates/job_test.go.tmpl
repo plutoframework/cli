@@ -1,37 +1,113 @@
 package {{.Group}}
 
 import (
- "context"
- "errors"
- "testing"
+	"context"
+	"errors"
+	"testing"
 
- "{{.Module}}/internal/domain"
- contracts "{{.Module}}/internal/jobcontracts/{{.Group}}"
- models "{{.Module}}/internal/models/{{.OperationGroup}}"
- operations "{{.Module}}/internal/operations/{{.OperationGroup}}"
- jobs "github.com/plutoframework/pluto-jobs"
+	"{{.Module}}/internal/domain"
+	contracts "{{.Module}}/internal/jobcontracts/{{.Group}}"
+	models "{{.Module}}/internal/models/{{.OperationGroup}}"
+	operations "{{.Module}}/internal/operations/{{.OperationGroup}}"
+	jobs "github.com/plutoframework/pluto-jobs"
 )
 
-type gate{{.Action}} struct {operations.{{.OperationAction}}Boundary; calls int}
-func (g *gate{{.Action}}) Execute(context.Context,domain.Principal,models.{{.OperationAction}}Request)(models.{{.OperationAction}}Data,error){g.calls++;return models.{{.OperationAction}}Data{},domain.ErrNotImplemented}
+type gate{{.Action}} struct {
+	operations.{{.OperationAction}}Boundary
+	calls int
+}
+
+func (g *gate{{.Action}}) Execute(
+	context.Context,
+	domain.Principal,
+	models.{{.OperationAction}}Request,
+) (models.{{.OperationAction}}Data, error) {
+	g.calls++
+	return models.{{.OperationAction}}Data{}, domain.ErrNotImplemented
+}
+
 type identity{{.Action}} struct{}
-func (identity{{.Action}}) ResolveJob(_ context.Context,job jobs.Job)(domain.Principal,error){
- {{if .Multi}}tenant:="";if job.TenantID!=nil{tenant=*job.TenantID}{{end}}
- return domain.Principal{ActorID:"trusted-worker",{{if .Multi}}TenantID:tenant,{{end}}},nil
+
+func (identity{{.Action}}) ResolveJob(
+	_ context.Context,
+	job jobs.Job,
+) (domain.Principal, error) {
+	{{if .Multi}}
+	tenant := ""
+	if job.TenantID != nil {
+		tenant = *job.TenantID
+	}{{end}}
+
+	return domain.Principal{
+		ActorID: "trusted-worker",
+{{if .Multi}}
+		TenantID: tenant,
+{{end}}
+
+	}, nil
 }
 
 func Test{{.Action}}HandlerBoundary(t *testing.T) {
- tenant:="test-tenant"
- request,err:=contracts.New{{.Action}}(contracts.{{.Action}}Payload{ResourceID:"resource"},jobs.Options{TenantID:&tenant})
- if err!=nil{t.Fatal(err)}
- job:=jobs.Job{Request:request,Attempt:1}
- gate:=&gate{{.Action}}{}
- handler:=New{{.Action}}Handler(gate,identity{{.Action}}{})
- if err:=handler(context.Background(),job);!errors.Is(err,domain.ErrNotImplemented)||gate.calls!=1 {t.Fatal(err,gate.calls)}
- if err:=New{{.Action}}Handler(gate,nil)(context.Background(),job);!errors.Is(err,domain.ErrUnauthenticated)||gate.calls!=1{t.Fatal("identity bypass",err,gate.calls)}
- job.Payload=[]byte("{")
- if err:=handler(context.Background(),job);!errors.Is(err,jobs.ErrInvalid)||gate.calls!=1{t.Fatal("invalid payload reached gate",err,gate.calls)}
- {{if .Multi}}job.Request=request;job.TenantID=nil
- if err:=handler(context.Background(),job);!errors.Is(err,jobs.ErrInvalid)||gate.calls!=1{t.Fatal("missing tenant reached gate",err,gate.calls)}
- if _,err:=contracts.New{{.Action}}(contracts.{{.Action}}Payload{},jobs.Options{});!errors.Is(err,jobs.ErrInvalid){t.Fatal("unscoped producer accepted",err)}{{end}}
+	tenant := "test-tenant"
+
+	request, err := contracts.New{{.Action}}(
+		contracts.{{.Action}}Payload{ResourceID: "resource"},
+		jobs.Options{TenantID: &tenant})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job := jobs.Job{Request: request, Attempt: 1}
+	gate := &gate{{.Action}}{}
+
+	handler := New{{.Action}}Handler(gate, identity{{.Action}}{})
+	if err := handler(context.Background(), job); !errors.Is(
+		err,
+		domain.ErrNotImplemented) ||
+		gate.calls != 1 {
+		t.Fatal(err, gate.calls)
+	}
+
+	if err := New{{.Action}}Handler(
+		gate,
+		nil,
+	)(
+		context.Background(),
+		job,
+	); !errors.Is(
+		err,
+		domain.ErrUnauthenticated,
+	) ||
+		gate.calls != 1 {
+		t.Fatal("identity bypass", err, gate.calls)
+	}
+
+	job.Payload = []byte("{")
+	if err := handler(context.Background(), job); !errors.Is(
+		err,
+		jobs.ErrInvalid) ||
+		gate.calls != 1 {
+		t.Fatal("invalid payload reached gate", err, gate.calls)
+	}
+	{{if .Multi}}
+
+	job.Request = request
+
+	job.TenantID = nil
+	if err := handler(context.Background(), job); !errors.Is(
+		err,
+		jobs.ErrInvalid) ||
+		gate.calls != 1 {
+		t.Fatal("missing tenant reached gate", err, gate.calls)
+	}
+
+	if _, err := contracts.New{{.Action}}(
+		contracts.{{.Action}}Payload{},
+		jobs.Options{},
+	); !errors.Is(
+		err,
+		jobs.ErrInvalid,
+	) {
+		t.Fatal("unscoped producer accepted", err)
+	}{{end}}
 }

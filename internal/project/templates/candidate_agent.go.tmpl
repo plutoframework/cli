@@ -1,74 +1,240 @@
 package {{.Group}}
 
 import (
- "context"
- "errors"
- "time"
- "{{.Module}}/internal/access"
- models "{{.Module}}/internal/models/{{.OperationGroup}}"
- operations "{{.Module}}/internal/operations/{{.OperationGroup}}"
- agent "github.com/plutoframework/pluto-agent"
+	"context"
+	"errors"
+	"time"
+	"{{.Module}}/internal/access"
+	models "{{.Module}}/internal/models/{{.OperationGroup}}"
+	operations "{{.Module}}/internal/operations/{{.OperationGroup}}"
+	agent "github.com/plutoframework/pluto-agent"
 )
 
 // Dependencies is issued by the host after the exact server-selected input has
-// passed the current operation gate. Model arguments cannot replace that intent.
+// passed the current operation gate. Model arguments cannot replace that
+// intent.
 type {{.Action}}Dependencies struct {
- {{lowerFirst .Action}}Context context.Context
- {{lowerFirst .Action}}Operation operations.{{.OperationAction}}Boundary
- {{lowerFirst .Action}}Intent *operations.{{.OperationAction}}Intent
- {{lowerFirst .Action}}Receipt *{{lowerFirst .Action}}Receipt
+	{{lowerFirst .Action}}Context   context.Context
+	{{lowerFirst .Action}}Operation operations.{{.OperationAction}}Boundary
+	{{lowerFirst .Action}}Intent    *operations.{{.OperationAction}}Intent
+	{{lowerFirst .Action}}Receipt   *{{lowerFirst .Action}}Receipt
 }
-type {{lowerFirst .Action}}Receipt struct { applied bool; output models.{{.OperationAction}}Data }
+type {{lowerFirst .Action}}Receipt struct {
+	applied bool
+	output  models.{{.OperationAction}}Data
+}
+
 type {{.Action}}Arguments struct{}
-type {{.Action}}Review struct { Summary string `json:"summary"` }
-type {{.Action}}Result struct { Applied bool; Output models.{{.OperationAction}}Data; Review {{.Action}}Review }
+type {{.Action}}Review    struct {
+		Summary string `json:"summary"`
+	}
+type {{.Action}}Result struct {
+	Applied bool
+	Output  models.{{.OperationAction}}Data
+	Review  {{.Action}}Review
+}
 
-// Approve{{.Action}} is a host API, not a model tool. Its input, identity, tenant,
+// Approve{{.Action}} is a host API, not a model tool. Its input, identity,
+// tenant,
 // resource and replay key are immutable inside the opaque operation intent.
-func Approve{{.Action}}(ctx context.Context,operation operations.{{.OperationAction}}Boundary,caller access.Caller,input models.{{.OperationAction}}Request)({{.Action}}Dependencies,error){
- if ctx==nil||operation==nil{return {{.Action}}Dependencies{},agent.ErrDenied}
- intent,err:=operation.Prepare(ctx,caller,input)
- if err!=nil{return {{.Action}}Dependencies{},err}
- return {{.Action}}Dependencies{ {{lowerFirst .Action}}Operation:operation,{{lowerFirst .Action}}Intent:intent},nil
+func Approve{{.Action}}(
+	ctx context.Context,
+	operation operations.{{.OperationAction}}Boundary,
+	caller access.Caller,
+	input models.{{.OperationAction}}Request,
+) ({{.Action}}Dependencies, error) {
+	if ctx == nil || operation == nil {
+		return {{.Action}}Dependencies{}, agent.ErrDenied
+	}
+
+	intent, err := operation.Prepare(ctx, caller, input)
+	if err != nil {
+		return {{.Action}}Dependencies{}, err
+	}
+
+	return {{.Action}}Dependencies{
+		{{lowerFirst .Action}}Operation: operation,
+		{{lowerFirst .Action}}Intent:    intent,
+	}, nil
 }
 
-func New{{.Action}}(provider agent.Provider)(*agent.Agent[{{.Action}}Dependencies,{{.Action}}Review],error){
- authorize:=func(ctx context.Context,d {{.Action}}Dependencies)(access.Actor,error){
-  if ctx==nil||d.{{lowerFirst .Action}}Operation==nil||d.{{lowerFirst .Action}}Intent==nil{return access.Actor{},agent.ErrDenied}
-  return d.{{lowerFirst .Action}}Operation.AuthorizeIntent(ctx,d.{{lowerFirst .Action}}Intent)
- }
- tool,err:=agent.NewTool(agent.ToolConfig[{{.Action}}Dependencies,{{.Action}}Arguments,models.{{.OperationAction}}Data]{
-  Name:"execute_approved_operation",Description:"Execute only the exact operation intent approved by the host.",
-  Access:agent.Access{Permission:{{q .Permission}}},Effect:{{if .Contract.Kind}}{{if or (eq .Contract.Kind "create") (eq .Contract.Kind "transition")}}agent.SideEffect{{else}}agent.ReadOnly{{end}}{{else}}agent.ReadOnly{{end}},
-  Policy:func(ctx context.Context,d {{.Action}}Dependencies,actor agent.Actor,_ {{.Action}}Arguments)error{
-   current,err:=authorize(ctx,d)
-   if err!=nil||actor.SubjectID!=current.SubjectID||actor.Scope!=current.TenantID{return agent.ErrDenied};return nil
-  },
-  Handle:func(ctx context.Context,d {{.Action}}Dependencies,_ {{.Action}}Arguments)(models.{{.OperationAction}}Data,error){
-   if d.{{lowerFirst .Action}}Receipt==nil||d.{{lowerFirst .Action}}Receipt.applied{return models.{{.OperationAction}}Data{},agent.ErrDenied}
-   output,err:=d.{{lowerFirst .Action}}Operation.ExecutePrepared(ctx,d.{{lowerFirst .Action}}Intent)
-   if err==nil{if output.JobIDs==nil{output.JobIDs=[]string{}};d.{{lowerFirst .Action}}Receipt.output=output;d.{{lowerFirst .Action}}Receipt.applied=true}
-   return output,err
-  },
- })
- if err!=nil{return nil,err}
- limits:=agent.DefaultLimits();limits.MaxModelCalls=2;limits.MaxToolCalls=1;limits.MaxRepairs=0
- limits.RunTimeout=10*time.Second;limits.ModelTimeout=4*time.Second;limits.ToolTimeout=time.Second
- return agent.New(agent.Config[{{.Action}}Dependencies,{{.Action}}Review]{Provider:provider,Limits:limits,Tools:[]agent.Tool[{{.Action}}Dependencies]{tool},
- Instructions:"Execute the host-approved operation once, then summarize its verified tool result. Never invent completion or change resources.",
- Principal:func(d {{.Action}}Dependencies)(agent.Actor,error){
-  current,err:=authorize(d.{{lowerFirst .Action}}Context,d);if err!=nil{return agent.Actor{},err}
-  return agent.Actor{SubjectID:current.SubjectID,Scope:current.TenantID},nil
- },Authorizer:agent.AuthorizerFunc(func(_ context.Context,_ agent.Actor,permission string)error{if permission!={{q .Permission}}{return agent.ErrDenied};return nil}),
- })
+func New{{.Action}}(
+	provider agent.Provider,
+) (*agent.Agent[{{.Action}}Dependencies, {{.Action}}Review], error) {
+	authorize := func(
+		ctx context.Context,
+		d {{.Action}}Dependencies,
+	) (access.Actor, error) {
+		if ctx == nil || d.{{lowerFirst .Action}}Operation == nil ||
+			d.{{lowerFirst .Action}}Intent == nil {
+			return access.Actor{}, agent.ErrDenied
+		}
+
+		return d.{{lowerFirst .Action}}Operation.AuthorizeIntent(
+			ctx,
+			d.{{lowerFirst .Action}}Intent)
+	}
+
+	tool, err := agent.NewTool(
+		agent.ToolConfig[
+			{{.Action}}Dependencies,
+			{{.Action}}Arguments,
+			models.{{.OperationAction}}Data,
+		]{
+			Name: "execute_approved_operation",
+
+			Description: "Execute only the exact operation intent approved " +
+				"by the host.",
+
+			Access: agent.Access{
+				Permission: {{q .Permission}},
+			},
+{{if .Contract.Kind}}
+{{if or (eq .Contract.Kind "create") (eq .Contract.Kind "transition")}}
+			Effect: agent.SideEffect,
+{{else}}
+			Effect: agent.ReadOnly,
+{{end}}
+{{else}}
+			Effect: agent.ReadOnly,
+{{end}}
+
+			Policy: func(
+				ctx context.Context,
+				d {{.Action}}Dependencies,
+				actor agent.Actor,
+				_ {{.Action}}Arguments,
+			) error {
+				current, err := authorize(ctx, d)
+				if err != nil || actor.SubjectID != current.SubjectID ||
+					actor.Scope != current.TenantID {
+					return agent.ErrDenied
+				}
+
+				return nil
+			},
+
+			Handle: func(
+				ctx context.Context,
+				d {{.Action}}Dependencies,
+				_ {{.Action}}Arguments,
+			) (models.{{.OperationAction}}Data, error) {
+				if d.{{lowerFirst .Action}}Receipt == nil ||
+					d.{{lowerFirst .Action}}Receipt.applied {
+					return models.{{.OperationAction}}Data{}, agent.ErrDenied
+				}
+
+				output, err :=
+					d.{{lowerFirst .Action}}Operation.ExecutePrepared(
+					ctx,
+
+					d.{{lowerFirst .Action}}Intent,
+				)
+				if err == nil {
+					if output.JobIDs == nil {
+						output.JobIDs = []string{}
+					}
+
+					d.{{lowerFirst .Action}}Receipt.output = output
+					d.{{lowerFirst .Action}}Receipt.applied = true
+				}
+
+				return output, err
+			},
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	limits := agent.DefaultLimits()
+	limits.MaxModelCalls = 2
+	limits.MaxToolCalls = 1
+	limits.MaxRepairs = 0
+	limits.RunTimeout = 10 * time.Second
+	limits.ModelTimeout = 4 * time.Second
+	limits.ToolTimeout = time.Second
+
+	return agent.New(agent.Config[
+		{{.Action}}Dependencies,
+		{{.Action}}Review,
+	]{
+		Provider: provider,
+
+		Limits: limits,
+
+		Tools: []agent.Tool[{{.Action}}Dependencies]{
+			tool,
+		},
+
+		Instructions: "Execute the host-approved operation once, then " +
+			"summarize its verified tool result. Never invent completion or " +
+			"change resources.",
+
+		Principal: func(d {{.Action}}Dependencies) (agent.Actor, error) {
+			current, err := authorize(d.{{lowerFirst .Action}}Context, d)
+			if err != nil {
+				return agent.Actor{}, err
+			}
+
+			return agent.Actor{
+				SubjectID: current.SubjectID,
+				Scope:     current.TenantID,
+			}, nil
+		},
+
+		Authorizer: agent.AuthorizerFunc(func(
+			_ context.Context,
+			_ agent.Actor,
+			permission string,
+		) error {
+			if permission != {{q .Permission}} {
+				return agent.ErrDenied
+			}
+
+			return nil
+		}),
+	})
 }
 
-func Run{{.Action}}(ctx context.Context,runner *agent.Agent[{{.Action}}Dependencies,{{.Action}}Review],id string,deps {{.Action}}Dependencies)({{.Action}}Result,error){
- if ctx==nil||runner==nil||deps.{{lowerFirst .Action}}Operation==nil||deps.{{lowerFirst .Action}}Intent==nil{return {{.Action}}Result{},agent.ErrDenied}
- if _,err:=deps.{{lowerFirst .Action}}Operation.AuthorizeIntent(ctx,deps.{{lowerFirst .Action}}Intent);err!=nil{return {{.Action}}Result{},err}
- deps.{{lowerFirst .Action}}Context=ctx;deps.{{lowerFirst .Action}}Receipt=&{{lowerFirst .Action}}Receipt{}
- result,err:=runner.Run(ctx,agent.Run[{{.Action}}Dependencies]{ID:id,Deps:deps,Input:"Execute the host-approved operation.",Tools:agent.OnlyTools("execute_approved_operation")})
- output:={{.Action}}Result{Applied:deps.{{lowerFirst .Action}}Receipt.applied,Output:deps.{{lowerFirst .Action}}Receipt.output,Review:result.Output}
- if !output.Applied&&err==nil{err=errors.New("agent produced no verified operation receipt")}
- return output,err
+func Run{{.Action}}(
+	ctx context.Context,
+	runner *agent.Agent[{{.Action}}Dependencies, {{.Action}}Review],
+	id string,
+	deps {{.Action}}Dependencies,
+) ({{.Action}}Result, error) {
+	if ctx == nil || runner == nil ||
+		deps.{{lowerFirst .Action}}Operation == nil ||
+		deps.{{lowerFirst .Action}}Intent == nil {
+		return {{.Action}}Result{}, agent.ErrDenied
+	}
+
+	if _, err := deps.{{lowerFirst .Action}}Operation.AuthorizeIntent(
+		ctx,
+		deps.{{lowerFirst .Action}}Intent,
+	); err != nil {
+		return {{.Action}}Result{}, err
+	}
+
+	deps.{{lowerFirst .Action}}Context = ctx
+	deps.{{lowerFirst .Action}}Receipt = &{{lowerFirst .Action}}Receipt{}
+	result, err := runner.Run(
+		ctx,
+		agent.Run[{{.Action}}Dependencies]{
+			ID:    id,
+			Deps:  deps,
+			Input: "Execute the host-approved operation.",
+			Tools: agent.OnlyTools("execute_approved_operation"),
+		})
+
+	output := {{.Action}}Result{
+		Applied: deps.{{lowerFirst .Action}}Receipt.applied,
+		Output:  deps.{{lowerFirst .Action}}Receipt.output,
+		Review:  result.Output,
+	}
+	if !output.Applied && err == nil {
+		err = errors.New("agent produced no verified operation receipt")
+	}
+
+	return output, err
 }

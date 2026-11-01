@@ -1,53 +1,73 @@
 {{if .Candidate}}# Working on {{.Name}}
 
-This is the explicit, unreleased candidate scoped-record profile. Read pluto.toml
-and README.md. Run pluto fmt, pluto openapi, pluto architecture check --directory . --format json,
+This is the explicit, unreleased candidate scoped-record profile. Read
+pluto.toml
+and README.md. Run pluto fmt, pluto openapi, pluto architecture check
+--directory . --format json,
 and pluto vet. Keep every file <=1,000 lines and preserve authored migrations.
 
-All production Go is managed, including domain, operation workflow, narrow ports,
-SQL adapters, transport and composition. Do not edit generated source or add hooks,
+All production Go is managed, including domain, operation workflow, narrow
+ports,
+SQL adapters, transport and composition. Do not edit generated source or add
+hooks,
 initializers, alternate handlers, raw SQL clients, reflection or unsafe escapes.
-Extend the framework's supported contract when business rules need a new pattern.
+Extend the framework's supported contract when business rules need a new
+pattern.
 Use pluto add blueprint --file contracts.toml for atomic declaration changes.
 
-Schema 10 owns independent operation authority and resource/domain/data contracts.
+Schema 10 owns independent operation authority and resource/domain/data
+contracts.
 Each protected use case shares one opaque identity/resource gate across HTTP,
-worker and host-approved agent entry. Never create identity from actor/role strings
+worker and host-approved agent entry. Never create identity from actor/role
+strings
 or trust payload authority. Current verified sessions, tenant assignments, role
-permissions and authoritative resource facts are refreshed before protected work.
+permissions and authoritative resource facts are refreshed before protected
+work.
 Roles are explicit catalog declarations; adding operations never assigns users.
 
 Commands normalize once in the owning domain constructor. Private records,
-rehydration and machine construction stay in their managed owners. State decisions
-are pure; evaluated changes bind to the exact machine/scope/entity/source/version.
-The data adapter atomically commits mutation, audit, typed outbox work and required
-idempotency completion. Pending or uncertain claims require reconciliation; never
-steal them or retry with a new logical key. Queries apply visibility before LIMIT,
+rehydration and machine construction stay in their managed owners. State
+decisions
+are pure; evaluated changes bind to the exact
+machine/scope/entity/source/version.
+The data adapter atomically commits mutation, audit, typed outbox work and
+required
+idempotency completion. Pending or uncertain claims require reconciliation;
+never
+steal them or retry with a new logical key. Queries apply visibility before
+LIMIT,
 use stable scoped cursors and reject oversized exports. Cache display snapshots
 only after fresh authorization; lifecycle guards use authoritative SQL facts.
 
 Workers use configured credentials and typed bounded delivery, not payload actor
-claims. Agent writes use host-issued opaque prepared intents and actual execution
-receipts. Model text never proves a write occurred. HTTP, worker and tool adapters
-must invoke the same sealed operation. Provider URLs are deployment configuration;
+claims. Agent writes use host-issued opaque prepared intents and actual
+execution
+receipts. Model text never proves a write occurred. HTTP, worker and tool
+adapters
+must invoke the same sealed operation. Provider URLs are deployment
+configuration;
 external delivery remains at-least-once and requires stable-key deduplication.
 
-Apply explicit database migrations before startup. No constructor creates schemas,
-users, role assignments or fixture credentials. Candidate dependencies are explicit
+Apply explicit database migrations before startup. No constructor creates
+schemas,
+users, role assignments or fixture credentials. Candidate dependencies are
+explicit
 local replacements; do not invent release versions or silently switch profiles.
 Never log tokens, bodies, secrets, private records or provider payloads.
 {{else}}
 # Working on {{.Name}}
 
 This is the published compatibility profile. Protected operations are drafts:
-canonical architecture checks and pluto vet report ARCH401 until explicit migration
+canonical architecture checks and pluto vet report ARCH401 until explicit
+migration
 to supported identity/resource/data contracts. Compiling this profile does not
 establish those guarantees. There is no compliance bypass flag.
 
 Read README.md first. Run pluto fmt and pluto vet before submitting changes.
 Keep every file <=1,000 lines; prefer expanded readable Go and 80 columns.
 
-pluto.toml schema 10 owns endpoint/feature/capability metadata. *_gen.go is CLI-owned.
+pluto.toml schema 10 owns endpoint/feature/capability metadata. *_gen.go is
+CLI-owned.
 Per-endpoint handlers and operation *_gate_gen.go are managed. Models, private
 operation execute methods, composition and transport helpers are authored and
 created once. Never add magic init registration. Add endpoints with the CLI.
@@ -55,22 +75,26 @@ Do not import HTTP/storage from operations or database adapters from handlers,
 even indirectly. Define narrow interfaces in consumers; inject constructors.
 
 HTTP primitives are app-local. Authorization uses the pinned published
-pluto-rbac module. Authored access.Roles starts empty; adding endpoints must never
+pluto-rbac module. Authored access.Roles starts empty; adding endpoints must
+never
 grant roles automatically. Keep one compiled policy injected into route and
-managed operation gates through Dependencies.Authorizer and Dependencies.Memberships.
+managed operation gates through Dependencies.Authorizer and
+Dependencies.Memberships.
 Every protected Execute refreshes exact actor/tenant membership; declared
 permissions use published Authorizer.Authorize with current assignments. Caller
 Principal.Roles never confers a grant. Do not call or export private execute,
 embed/alias a sealed boundary, or add an alternate exported operation entry.
 Unknown roles, nil authorizers and missing resolvers deny.
 Use the published Pluto session manager and HTTP adapter; preserve exact Origin
-checks for cookie writes and reject ambiguous credentials. Supply a trusted credential provider;
+checks for cookie writes and reject ambiguous credentials. Supply a trusted
+credential provider;
 verify membership before creating a tenant principal. Preserve verified tenant
 scope in every domain-specific repository. Permissions do not prove resource
 ownership; flags never grant authorization. Never log bodies, tokens or secrets.
 
 Dependencies.Cache uses published Core cache primitives. Scope non-authoritative
-data by application, environment and verified tenant/subject. Never cache sessions,
+data by application, environment and verified tenant/subject. Never cache
+sessions,
 credentials, roles or authorization decisions. Check identity and permissions on
 every request, including cache hits. Use bounded TTLs and explicit invalidation.
 
@@ -79,19 +103,24 @@ OpenAPI derives from paths and concrete models. Regenerate with
 operation/HTTP behavior tests. PostgreSQL connectivity is optional; generated
 operations explicitly return not implemented and do not persist data.
 
-Per-endpoint `internal/app/<group>_<action>.go` bindings are authored constructor
+Per-endpoint `internal/app/<group>_<action>.go` bindings are authored
+constructor
 choices. Add consumer-owned ports to <Action>Dependencies and use the managed
-New<Action>WithDependencies constructor from this binding when adding repositories. Add typed fields to app.Dependencies and construct/inject them in
-app.New. Generated group registries accept narrow Operations interfaces and never
+New<Action>WithDependencies constructor from this binding when adding
+repositories. Add typed fields to app.Dependencies and construct/inject them in
+app.New. Generated group registries accept narrow Operations interfaces and
+never
 choose concrete implementations; additions preserve authored constructor wiring.
 
 Apply migration 006_authentication.sql for account-backed evidence and
 007_external_accounts.sql before the PostgreSQL v0.5 account adapter.
-Local-password apps use password.Service with postgres.NewLocal for both accounts
+Local-password apps use password.Service with postgres.NewLocal for both
+accounts
 and sessions. Never use direct Manager.Start/session-only issuance for local
 accounts. Keep delivery, shared account limits and trusted client/concurrency
 Ingress explicit; missing integrations fail startup. Auth responses never enter
-idempotency capture. Enrollment never grants membership or roles. No startup DDL.
+idempotency capture. Enrollment never grants membership or roles. No startup
+DDL.
 
 Jobs use the published Pluto Jobs runtime. EnqueueTx shares the exact business
 transaction; never silently split enqueue and commit. Handlers validate tenant
@@ -104,7 +133,8 @@ successful delivery. Apply 005_jobs.sql explicitly to existing databases.
 Declare use-case authority in independent operations. HTTP, jobs and tools must
 reference one operation and use managed adapters. Portable job contracts belong
 in internal/jobcontracts; no authored worker or agent business callbacks. Worker
-construction and handler registration are managed; supply typed gate dependencies
+construction and handler registration are managed; supply typed gate
+dependencies
 through app workerDependencies. Never call raw jobs.NewWorker or Bind callbacks.
 
 {{end}}

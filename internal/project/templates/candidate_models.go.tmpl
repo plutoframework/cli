@@ -1,28 +1,42 @@
 package {{.Group}}
 
 import (
- ports "{{.Module}}/internal/ports/{{.Resource.Group}}"
- {{if eq .Contract.Kind "list"}}"github.com/plutoframework/pluto-core/pagination"{{end}}
+	ports "{{.Module}}/internal/ports/{{.Resource.Group}}"
+	{{if eq .Contract.Kind "list"}}
+
+	"github.com/plutoframework/pluto-core/pagination"{{end}}
 )
 
 type {{.Action}}Request struct {
- ResourceID string `json:"resource_id,omitempty"`
- IdempotencyKey string `json:"idempotency_key,omitempty"`
- Value string `json:"value,omitempty"`
- Limit int `json:"limit,omitempty"`
- Cursor string `json:"cursor,omitempty"`
- Path map[string]string `json:"-"`
- {{if eq .Contract.Kind "list"}}Page pagination.Request `json:"-"`{{end}}
-}
+	ResourceID     string            `json:"resource_id,omitempty"`
+	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	Value          string            `json:"value,omitempty"`
+	Limit          int               `json:"limit,omitempty"`
+	Cursor         string            `json:"cursor,omitempty"`
+	Path           map[string]string `json:"-"`
+	{{if eq .Contract.Kind "list"}}
 
+	Page pagination.Request `json:"-"`{{end}}
+}
 {{if eq .Contract.Kind "list"}}
-type {{.Action}}Data = pagination.Page[ports.{{.Resource.Name}}Summary]
-type {{.Action}}Item = ports.{{.Resource.Name}}Summary
-type {{.Action}}Response struct {Data []{{.Action}}Item `json:"data"`;Page pagination.Metadata `json:"page"`}
+
+type {{.Action}}Data     = pagination.Page[ports.{{.Resource.Name}}Summary]
+type {{.Action}}Item     = ports.{{.Resource.Name}}Summary
+type {{.Action}}Response struct {
+		Data []{{.Action}}Item   `json:"data"`
+		Page pagination.Metadata `json:"page"`
+	}
 {{else if eq .Contract.Kind "export"}}
-type {{.Action}}Data struct {Rows []ports.{{.Resource.Name}}Summary `json:"rows"`;Limit int `json:"limit"`}
-type {{.Action}}Response struct {Data {{.Action}}Data `json:"data"`}
+type {{.Action}}Data struct {
+	Rows  []ports.{{.Resource.Name}}Summary `json:"rows"`
+	Limit int                               `json:"limit"`
+}
+type {{.Action}}Response struct {
+	Data {{.Action}}Data `json:"data"`
+}
 {{else}}
-type {{.Action}}Data = ports.{{.Resource.Name}}Result
-type {{.Action}}Response struct {Data {{.Action}}Data `json:"data"`}
+type {{.Action}}Data     = ports.{{.Resource.Name}}Result
+type {{.Action}}Response struct {
+		Data {{.Action}}Data `json:"data"`
+	}
 {{end}}

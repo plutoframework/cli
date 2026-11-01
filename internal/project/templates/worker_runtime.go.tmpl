@@ -2,37 +2,56 @@
 package app
 
 import (
-    "errors"
- "{{.Module}}/internal/background"
-    "github.com/plutoframework/pluto-core/telemetry"
+	"errors"
 
-    jobs "github.com/plutoframework/pluto-jobs"
-    jobpostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
-    "github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/plutoframework/pluto-core/telemetry"
+	jobs "github.com/plutoframework/pluto-jobs"
+	jobpostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
+	"{{.Module}}/internal/background"
 )
 
 // NewWorker never runs migrations or starts a goroutine. Empty registrations
 // fail before claiming: an unconfigured worker must not fail queued work.
 func NewWorker(pool *pgxpool.Pool, config jobs.Config) (*jobs.Worker, error) {
-    return NewWorkerWithTelemetry(pool, config, nil)
+	return NewWorkerWithTelemetry(pool, config, nil)
 }
 
 // NewWorkerWithTelemetry instruments each registered handler explicitly.
-func NewWorkerWithTelemetry(pool *pgxpool.Pool, config jobs.Config, runtime *telemetry.Runtime) (*jobs.Worker, error) {
-    // Add typed app-owned adapters here and fields to Dependencies. Authored
-    // per-job bindings receive this value; new jobs never rewrite those files.
-    return NewWorkerWithDependencies(pool,config,runtime,workerDependencies(pool))
+func NewWorkerWithTelemetry(
+	pool *pgxpool.Pool,
+	config jobs.Config,
+	runtime *telemetry.Runtime,
+) (*jobs.Worker, error) {
+	// Add typed app-owned adapters here and fields to Dependencies. Authored
+	// per-job bindings receive this value; new jobs never rewrite those files.
+	return NewWorkerWithDependencies(
+		pool,
+		config,
+		runtime,
+		workerDependencies(pool))
 }
 
-func NewWorkerWithDependencies(pool *pgxpool.Pool,config jobs.Config,runtime *telemetry.Runtime,dependencies background.Dependencies)(*jobs.Worker,error){
-    handlers := background.Handlers(dependencies)
-    if len(handlers) == 0 {
-        return nil, errors.New("register a job with pluto add job before starting the worker")
-    }
-    for kind, handler := range handlers {
-        handlers[kind] = runtime.JobHandler(handler)
-    }
-    store, err := jobpostgres.New(pool)
-    if err != nil { return nil, err }
-    return jobs.NewWorker(store, handlers, config)
+func NewWorkerWithDependencies(
+	pool *pgxpool.Pool,
+	config jobs.Config,
+	runtime *telemetry.Runtime,
+	dependencies background.Dependencies,
+) (*jobs.Worker, error) {
+	handlers := background.Handlers(dependencies)
+	if len(handlers) == 0 {
+		return nil, errors.New(
+			"register a job with pluto add job before starting the worker")
+	}
+
+	for kind, handler := range handlers {
+		handlers[kind] = runtime.JobHandler(handler)
+	}
+
+	store, err := jobpostgres.New(pool)
+	if err != nil {
+		return nil, err
+	}
+
+	return jobs.NewWorker(store, handlers, config)
 }

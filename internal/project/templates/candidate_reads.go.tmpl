@@ -2,191 +2,438 @@
 package {{ .Resource.Group }}
 
 import (
-    "context"
-    "errors"
-    "net/url"
-    "strconv"
-    "time"
+	"context"
+	"errors"
+	"net/url"
+	"strconv"
+	"time"
 
-    domain "{{ .Module }}/internal/domain/{{ .Resource.Group }}"
-    contract "{{ .Module }}/internal/ports/{{ .Resource.Group }}"
+	domain "{{ .Module }}/internal/domain/{{ .Resource.Group }}"
+	contract "{{ .Module }}/internal/ports/{{ .Resource.Group }}"
 
-    "github.com/plutoframework/pluto-core/cache"
-    "github.com/plutoframework/pluto-core/pagination"
-    identitygate "github.com/plutoframework/pluto-rbac/identity"
+	"github.com/plutoframework/pluto-core/cache"
+	"github.com/plutoframework/pluto-core/pagination"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
 
-    "github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 type snapshot{{ .Resource.Name }} struct {
-    ID string
-    TenantID string
-    OwnerID string
-    State string
-    Version int64
-    Value string
+	ID       string
+	TenantID string
+	OwnerID  string
+	State    string
+	Version  int64
+	Value    string
 }
 
-func (d *{{ .Resource.Name }}Data) key(execution *identitygate.Execution, id string) (string, error) {
-    return cache.Key(cache.Scope{
-        App:d.app, Environment:d.environment,
-        Namespace:{{ q .Resource.Namespace }}, Version:strconv.Itoa({{ .Resource.Version }}),
-        TenantID:execution.TenantID(), SubjectID:execution.SubjectID(),
-    }, id)
+func (d *{{ .Resource.Name }}Data) key(
+	execution *identitygate.Execution,
+	id string,
+) (string, error) {
+	return cache.Key(cache.Scope{
+		App: d.app, Environment: d.environment,
+		Namespace: {{ q .Resource.Namespace }}, Version: strconv.Itoa(
+			{{ .Resource.Version }},
+		),
+		TenantID: execution.TenantID(), SubjectID: execution.SubjectID(),
+	}, id)
 }
 
-func (d *{{ .Resource.Name }}Data) invalidate(ctx context.Context, execution *identitygate.Execution, id string) {
-    if d.loader == nil || d.store == nil { return }
-    if key, err := d.key(execution, id); err == nil {
-        // Failure cannot undo a committed mutation. Cache is bounded display
-        // data; lifecycle guard loads never consult it.
-        _ = d.store.Delete(ctx, key)
-    }
+func (d *{{ .Resource.Name }}Data) invalidate(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	id string,
+) {
+	if d.loader == nil || d.store == nil {
+		return
+	}
+
+	if key, err := d.key(execution, id); err == nil {
+		// Failure cannot undo a committed mutation. Cache is bounded display
+		// data; lifecycle guard loads never consult it.
+		_ = d.store.Delete(ctx, key)
+	}
 }
 
-func (d *{{ .Resource.Name }}Data) visible(ctx context.Context, execution *identitygate.Execution, id string) error {
-    query := `SELECT EXISTS(SELECT 1 FROM "{{ .Resource.Table }}"
-        WHERE "tenant_id"=$1 AND "id"=$2 AND ($3::text<>''))`
-    if d.operation.policy == "owner" {
-        query = `SELECT EXISTS(SELECT 1 FROM "{{ .Resource.Table }}"
-            WHERE "tenant_id"=$1 AND "id"=$2 AND "owner_id"=$3)`
-    }
-    var allowed bool
-    if err := d.pool.QueryRow(ctx, query, execution.TenantID(), id, execution.SubjectID()).Scan(&allowed); err != nil {
-        return err
-    }
-    if !allowed { return Err{{ .Resource.Name }}Visibility }
-    return nil
+func (d *{{ .Resource.Name }}Data) visible(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	id string,
+) error {
+	query := `SELECT EXISTS(SELECT 1 FROM "{{ .Resource.Table }}"
+		WHERE "tenant_id"=$1 AND "id"=$2 AND ($3::text<>''))`
+	if d.operation.policy == "owner" {
+		query = `SELECT EXISTS(SELECT 1 FROM "{{ .Resource.Table }}"
+			WHERE "tenant_id"=$1 AND "id"=$2 AND "owner_id"=$3)`
+	}
+
+	var allowed bool
+	if err := d.pool.QueryRow(
+		ctx,
+		query,
+		execution.TenantID(),
+		id,
+		execution.SubjectID(),
+	).Scan(&allowed); err != nil {
+		return err
+	}
+
+	if !allowed {
+		return Err{{ .Resource.Name }}Visibility
+	}
+
+	return nil
 }
 
-func (d *{{ .Resource.Name }}Data) read(ctx context.Context, execution *identitygate.Execution, id string) (domain.{{ .Resource.Name }}Record, error) {
-    query := `SELECT "id","tenant_id","owner_id","state","version","value"
-        FROM "{{ .Resource.Table }}" WHERE "tenant_id"=$1 AND "id"=$2 AND ($3::text<>'')`
-    if d.operation.policy == "owner" {
-        query = `SELECT "id","tenant_id","owner_id","state","version","value"
-            FROM "{{ .Resource.Table }}" WHERE "tenant_id"=$1 AND "id"=$2 AND "owner_id"=$3`
-    }
-    var value snapshot{{ .Resource.Name }}
-    err := d.pool.QueryRow(ctx, query, execution.TenantID(), id, execution.SubjectID()).Scan(
-        &value.ID, &value.TenantID, &value.OwnerID, &value.State, &value.Version, &value.Value,
-    )
-    if errors.Is(err, pgx.ErrNoRows) { return domain.{{ .Resource.Name }}Record{}, Err{{ .Resource.Name }}Visibility }
-    if err != nil { return domain.{{ .Resource.Name }}Record{}, err }
-    return domain.Rehydrate{{ .Resource.Name }}(value.ID, value.TenantID, value.OwnerID, value.State, value.Version, value.Value)
+func (d *{{ .Resource.Name }}Data) read(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	id string,
+) (domain.{{ .Resource.Name }}Record, error) {
+	query := "SELECT \"id\",\"tenant_id\",\"owner_id\",\"state\",\"version\"" +
+		",\"value\"\n\t\tFROM \"{{ .Resource.Table }}\" WHERE " +
+		"\"tenant_id\"=$1 AND \"id\"=$2 AND ($3::text<>'')"
+	if d.operation.policy == "owner" {
+		query = "SELECT \"id\",\"tenant_id\",\"owner_id\",\"state\",\"versi" +
+			"on\",\"value\"\n\t\t\tFROM \"{{ .Resource.Table }}\" " +
+			"WHERE \"tenant_id\"=$1 AND \"id\"=$2 AND \"owner_id\"=$3"
+	}
+
+	var value snapshot{{ .Resource.Name }}
+
+	err := d.pool.QueryRow(
+		ctx,
+		query,
+		execution.TenantID(),
+		id,
+		execution.SubjectID(),
+	).
+		Scan(
+
+			&value.ID,
+			&value.TenantID,
+			&value.OwnerID,
+			&value.State,
+			&value.Version,
+			&value.Value,
+		)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.{{ .Resource.Name }}Record{},
+			Err{{ .Resource.Name }}Visibility
+	}
+
+	if err != nil {
+		return domain.{{ .Resource.Name }}Record{}, err
+	}
+
+	return domain.Rehydrate{{ .Resource.Name }}(
+		value.ID,
+		value.TenantID,
+		value.OwnerID,
+		value.State,
+		value.Version,
+		value.Value)
 }
 
 // Load is restricted to its declared operation. Transition loads always read
 // authoritative SQL facts; cached display values can never authorize a guard.
-func (d *{{ .Resource.Name }}Data) Load(ctx context.Context, execution *identitygate.Execution, id string) (domain.{{ .Resource.Name }}Record, error) {
-    if d == nil || execution == nil || id == "" || (d.operation.kind != "load" && d.operation.kind != "transition") {
-        return domain.{{ .Resource.Name }}Record{}, Err{{ .Resource.Name }}Contract
-    }
-    var record domain.{{ .Resource.Name }}Record
-    err := d.gate.Use(ctx, execution, execution.TenantID(), id, func(ctx context.Context) error {
-        var err error
-        if d.operation.kind == "transition" || d.loader == nil {
-            record, err = d.read(ctx, execution, id)
-            return err
-        }
-        // Current permission/resource policy and SQL visibility precede even
-        // a cache hit. The cache is never an authority for access.
-        if err := d.visible(ctx, execution, id); err != nil { return err }
-        key, err := d.key(execution, id)
-        if err != nil { return err }
-        value, err := d.loader.Remember(ctx, key, time.Duration({{ .Resource.CacheTTLSeconds }})*time.Second,
-            func(ctx context.Context) (snapshot{{ .Resource.Name }}, error) {
-                loaded, err := d.read(ctx, execution, id)
-                if err != nil { return snapshot{{ .Resource.Name }}{}, err }
-                return snapshot{{ .Resource.Name }}{
-                    ID:loaded.ID(), TenantID:loaded.TenantID(), OwnerID:loaded.OwnerID(),
-                    State:string(loaded.State()), Version:loaded.Version(), Value:loaded.Value(),
-                }, nil
-            })
-        if err != nil { return err }
-        record, err = domain.Rehydrate{{ .Resource.Name }}(value.ID, value.TenantID, value.OwnerID, value.State, value.Version, value.Value)
-        if err != nil { return err }
-        if record.ID() != id || record.TenantID() != execution.TenantID() || (d.operation.policy == "owner" && record.OwnerID() != execution.SubjectID()) {
-            return Err{{ .Resource.Name }}Visibility
-        }
-        return nil
-    })
-    if err != nil { return domain.{{ .Resource.Name }}Record{}, err }
-    return record, nil
+func (d *{{ .Resource.Name }}Data) Load(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	id string,
+) (domain.{{ .Resource.Name }}Record, error) {
+	if d == nil || execution == nil || id == "" ||
+		(d.operation.kind != "load" && d.operation.kind != "transition") {
+		return domain.{{ .Resource.Name }}Record{},
+			Err{{ .Resource.Name }}Contract
+	}
+
+	var record domain.{{ .Resource.Name }}Record
+
+	err := d.gate.Use(
+		ctx,
+		execution,
+		execution.TenantID(),
+		id,
+		func(ctx context.Context) error {
+			var err error
+			if d.operation.kind == "transition" || d.loader == nil {
+				record, err = d.read(ctx, execution, id)
+				return err
+			}
+
+			// Current permission/resource policy and SQL visibility precede
+			// even
+			// a cache hit. The cache is never an authority for access.
+			if err := d.visible(ctx, execution, id); err != nil {
+				return err
+			}
+
+			key, err := d.key(execution, id)
+			if err != nil {
+				return err
+			}
+
+			value, err := d.loader.Remember(
+				ctx,
+				key,
+				time.Duration({{ .Resource.CacheTTLSeconds }})*time.Second,
+				func(
+					ctx context.Context,
+				) (
+					snapshot{{ .Resource.Name }},
+					error,
+				) {
+					loaded, err := d.read(ctx, execution, id)
+					if err != nil {
+						return snapshot{{ .Resource.Name }}{}, err
+					}
+
+					return snapshot{{ .Resource.Name }}{
+						ID:       loaded.ID(),
+						TenantID: loaded.TenantID(),
+						OwnerID:  loaded.OwnerID(),
+
+						State: string(
+							loaded.State(),
+						),
+						Version: loaded.Version(),
+						Value:   loaded.Value(),
+					}, nil
+				},
+			)
+			if err != nil {
+				return err
+			}
+
+			record, err = domain.Rehydrate{{ .Resource.Name }}(
+				value.ID,
+				value.TenantID,
+				value.OwnerID,
+				value.State,
+				value.Version,
+				value.Value)
+			if err != nil {
+				return err
+			}
+
+			if record.ID() != id || record.TenantID() != execution.TenantID() ||
+				(d.operation.policy == "owner" &&
+					record.OwnerID() != execution.SubjectID()) {
+				return Err{{ .Resource.Name }}Visibility
+			}
+
+			return nil
+		})
+	if err != nil {
+		return domain.{{ .Resource.Name }}Record{}, err
+	}
+
+	return record, nil
 }
 
-func (d *{{ .Resource.Name }}Data) list(ctx context.Context, execution *identitygate.Execution, limit int, cursor string) (pagination.Page[contract.{{ .Resource.Name }}Summary], error) {
-    if d == nil || execution == nil || limit < 1 || limit > {{ .Resource.PageLimit }} {
-        return pagination.Page[contract.{{ .Resource.Name }}Summary]{}, Err{{ .Resource.Name }}Contract
-    }
-    var page pagination.Page[contract.{{ .Resource.Name }}Summary]
-    err := d.gate.Use(ctx, execution, execution.TenantID(), {{ q .Resource.ID }}, func(ctx context.Context) error {
-        query := url.Values{"limit":{strconv.Itoa(limit)}}
-        if cursor != "" { query.Set("cursor", cursor) }
-        binding := pagination.Binding(query, {{ q .Resource.ID }}, d.operationID,
-            execution.SubjectID(), execution.TenantID(), d.operation.policy)
-        request, err := pagination.Parse(query, binding)
-        if err != nil { return err }
-        // Visibility is part of this SQL statement before keyset LIMIT.
-        statement := `SELECT "id","owner_id","state","version","value"
-            FROM "{{ .Resource.Table }}" WHERE "tenant_id"=$1 AND ($2::text<>'') AND "id">$3
-            ORDER BY "id" ASC LIMIT $4`
-        if d.operation.policy == "owner" {
-            statement = `SELECT "id","owner_id","state","version","value"
-                FROM "{{ .Resource.Table }}" WHERE "tenant_id"=$1 AND "owner_id"=$2 AND "id">$3
-                ORDER BY "id" ASC LIMIT $4`
-        }
-        rows, err := d.pool.Query(ctx, statement, execution.TenantID(), execution.SubjectID(), request.After.ID, request.FetchLimit())
-        if err != nil { return err }
-        defer rows.Close()
-        values := make([]contract.{{ .Resource.Name }}Summary, 0, request.FetchLimit())
-        for rows.Next() {
-            var id, owner, status, value string
-            var version int64
-            if err := rows.Scan(&id, &owner, &status, &version, &value); err != nil { return err }
-            record, err := domain.Rehydrate{{ .Resource.Name }}(id, execution.TenantID(), owner, status, version, value)
-            if err != nil { return err }
-            values = append(values, contract.{{ .Resource.Name }}Summary{
-                ID:record.ID(), State:record.State(), Version:record.Version(), Value:record.Value(),
-            })
-        }
-        if err := rows.Err(); err != nil { return err }
-        page, err = pagination.Finish(request, values, func(value contract.{{ .Resource.Name }}Summary) pagination.Key {
-            return pagination.Key{ID:value.ID}
-        })
-        return err
-    })
-    if err != nil { return pagination.Page[contract.{{ .Resource.Name }}Summary]{}, err }
-    return page, nil
+func (d *{{ .Resource.Name }}Data) list(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	limit int,
+	cursor string,
+) (pagination.Page[contract.{{ .Resource.Name }}Summary], error) {
+	if d == nil || execution == nil || limit < 1 ||
+		limit > {{ .Resource.PageLimit }} {
+		return pagination.Page[
+			contract.{{ .Resource.Name }}Summary,
+		]{}, Err{{ .Resource.Name }}Contract
+	}
+
+	var page pagination.Page[contract.{{ .Resource.Name }}Summary]
+
+	err := d.gate.Use(
+		ctx,
+		execution,
+		execution.TenantID(),
+		{{ q .Resource.ID }},
+		func(ctx context.Context) error {
+			query := url.Values{"limit": {strconv.Itoa(limit)}}
+			if cursor != "" {
+				query.Set("cursor", cursor)
+			}
+
+			binding := pagination.Binding(
+				query,
+				{{ q .Resource.ID }},
+				d.operationID,
+				execution.SubjectID(),
+				execution.TenantID(),
+				d.operation.policy)
+
+			request, err := pagination.Parse(query, binding)
+			if err != nil {
+				return err
+			}
+
+			// Visibility is part of this SQL statement before keyset LIMIT.
+			statement := "SELECT \"id\",\"owner_id\"," +
+				"\"state\",\"version\",\"val" +
+				"ue\"\n\t\t\tFROM \"{{ .Resource.Table }}\" WHERE " +
+				"\"tenant_id\"=$1 AND ($2::text<>'') AND \"id\">$3\n" +
+				"\t\t\tORDER BY \"id\" ASC LIMIT $4"
+			if d.operation.policy == "owner" {
+				statement = "SELECT \"id\",\"owner_id\"," +
+					"\"state\",\"version\"," +
+					"\"value\"\n\t\t\t\tFROM \"{{ .Resource.Table }}\" " +
+					"WHERE \"tenant_id\"=$1 AND \"owner_id\"=$2 AND " +
+					"\"id\">$3\n\t\t\t\tORDER BY \"id\" ASC LIMIT $4"
+			}
+
+			rows, err := d.pool.Query(
+				ctx,
+				statement,
+				execution.TenantID(),
+				execution.SubjectID(),
+				request.After.ID,
+				request.FetchLimit())
+			if err != nil {
+				return err
+			}
+
+			defer rows.Close()
+
+			values := make(
+				[]contract.{{ .Resource.Name }}Summary,
+				0,
+				request.FetchLimit())
+
+			for rows.Next() {
+				var id, owner, status, value string
+
+				var version int64
+				if err := rows.Scan(
+					&id,
+					&owner,
+					&status,
+					&version,
+					&value,
+				); err != nil {
+					return err
+				}
+
+				record, err := domain.Rehydrate{{ .Resource.Name }}(
+					id,
+					execution.TenantID(),
+					owner,
+					status,
+					version,
+					value)
+				if err != nil {
+					return err
+				}
+
+				values = append(values, contract.{{ .Resource.Name }}Summary{
+					ID:      record.ID(),
+					State:   record.State(),
+					Version: record.Version(),
+					Value:   record.Value(),
+				})
+			}
+
+			if err := rows.Err(); err != nil {
+				return err
+			}
+
+			page, err = pagination.Finish(
+				request,
+				values,
+				func(
+					value contract.{{ .Resource.Name }}Summary,
+				) pagination.Key {
+					return pagination.Key{ID: value.ID}
+				},
+			)
+
+			return err
+		})
+	if err != nil {
+		return pagination.Page[contract.{{ .Resource.Name }}Summary]{}, err
+	}
+
+	return page, nil
 }
 
-func (d *{{ .Resource.Name }}Data) List(ctx context.Context, execution *identitygate.Execution, command domain.{{ .Resource.Name }}Command) (pagination.Page[contract.{{ .Resource.Name }}Summary], error) {
-    if d == nil || d.operation.kind != "list" || command.Kind() != "list" {
-        return pagination.Page[contract.{{ .Resource.Name }}Summary]{}, Err{{ .Resource.Name }}Contract
-    }
-    if err := command.Validate(); err != nil { return pagination.Page[contract.{{ .Resource.Name }}Summary]{}, err }
-    limit := command.Limit()
-    if limit == 0 { limit = {{ .Resource.PageLimit }} }
-    return d.list(ctx, execution, limit, command.Cursor())
+func (d *{{ .Resource.Name }}Data) List(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	command domain.{{ .Resource.Name }}Command,
+) (
+	pagination.Page[contract.{{ .Resource.Name }}Summary],
+	error,
+) {
+	if d == nil || d.operation.kind != "list" || command.Kind() != "list" {
+		return pagination.Page[
+			contract.{{ .Resource.Name }}Summary,
+		]{}, Err{{ .Resource.Name }}Contract
+	}
+
+	if err := command.Validate(); err != nil {
+		return pagination.Page[contract.{{ .Resource.Name }}Summary]{}, err
+	}
+
+	limit := command.Limit()
+	if limit == 0 {
+		limit = {{ .Resource.PageLimit }}
+	}
+
+	return d.list(ctx, execution, limit, command.Cursor())
 }
 
 // Export uses the same visible keyset query and refreshes current authority on
 // every page. It returns an error rather than a silently truncated export.
-func (d *{{ .Resource.Name }}Data) Export(ctx context.Context, execution *identitygate.Execution, command domain.{{ .Resource.Name }}Command) ([]contract.{{ .Resource.Name }}Summary, error) {
-    if d == nil || execution == nil || d.operation.kind != "export" || command.Kind() != "export" || command.Cursor() != "" {
-        return nil, Err{{ .Resource.Name }}Contract
-    }
-    if err := command.Validate(); err != nil { return nil, err }
-    maximum := command.Limit()
-    if maximum == 0 { maximum = {{ .Resource.ExportLimit }} }
-    if maximum < 1 || maximum > {{ .Resource.ExportLimit }} { return nil, Err{{ .Resource.Name }}Export }
-    values := make([]contract.{{ .Resource.Name }}Summary, 0, maximum)
-    cursor := ""
-    for {
-        page, err := d.list(ctx, execution, min({{ .Resource.PageLimit }}, maximum-len(values)), cursor)
-        if err != nil { return nil, err }
-        values = append(values, page.Data...)
-        if !page.Page.HasMore { return values, nil }
-        if len(values) == maximum { return nil, Err{{ .Resource.Name }}Export }
-        cursor = page.Page.NextCursor
-    }
+func (d *{{ .Resource.Name }}Data) Export(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	command domain.{{ .Resource.Name }}Command,
+) ([]contract.{{ .Resource.Name }}Summary, error) {
+	if d == nil || execution == nil || d.operation.kind != "export" ||
+		command.Kind() != "export" ||
+		command.Cursor() != "" {
+		return nil, Err{{ .Resource.Name }}Contract
+	}
+
+	if err := command.Validate(); err != nil {
+		return nil, err
+	}
+
+	maximum := command.Limit()
+	if maximum == 0 {
+		maximum = {{ .Resource.ExportLimit }}
+	}
+
+	if maximum < 1 || maximum > {{ .Resource.ExportLimit }} {
+		return nil, Err{{ .Resource.Name }}Export
+	}
+
+	values := make([]contract.{{ .Resource.Name }}Summary, 0, maximum)
+
+	cursor := ""
+	for {
+		page, err := d.list(
+			ctx,
+			execution,
+			min({{ .Resource.PageLimit }}, maximum-len(values)),
+			cursor)
+		if err != nil {
+			return nil, err
+		}
+
+		values = append(values, page.Data...)
+		if !page.Page.HasMore {
+			return values, nil
+		}
+
+		if len(values) == maximum {
+			return nil, Err{{ .Resource.Name }}Export
+		}
+
+		cursor = page.Page.NextCursor
+	}
 }

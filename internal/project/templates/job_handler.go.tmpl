@@ -1,48 +1,115 @@
 package {{.Group}}
 
 import (
- "context"
- "{{.Module}}/internal/domain"
- "{{.Module}}/internal/access"
- plutoauth "github.com/plutoframework/pluto-auth"
- contracts "{{.Module}}/internal/jobcontracts/{{.Group}}"
- operations "{{.Module}}/internal/operations/{{.OperationGroup}}"
- jobs "github.com/plutoframework/pluto-jobs"
+	"context"
+	"{{.Module}}/internal/domain"
+	"{{.Module}}/internal/access"
+	plutoauth "github.com/plutoframework/pluto-auth"
+	contracts "{{.Module}}/internal/jobcontracts/{{.Group}}"
+	operations "{{.Module}}/internal/operations/{{.OperationGroup}}"
+	jobs "github.com/plutoframework/pluto-jobs"
 )
 
-// {{.Action}}Identity resolves trusted work authority. Persisted payload IDs are
-// input facts, never proof of permission. Current grants are checked by Execute.
+// {{.Action}}Identity resolves trusted work authority. Persisted payload IDs
+// are
+// input facts, never proof of permission. Current grants are checked by
+// Execute.
 type {{.Action}}Identity interface {
- ResolveJob(context.Context,jobs.Job)(domain.Principal,error)
+	ResolveJob(context.Context, jobs.Job) (domain.Principal, error)
 }
 
 // New{{.Action}}Handler exposes only protocol adaptation to a sealed operation.
-func New{{.Action}}Handler(operation operations.{{.OperationAction}}Boundary, identity {{.Action}}Identity) jobs.Handler {
- return func(ctx context.Context,job jobs.Job) error {
-  if err:=ctx.Err();err!=nil{return err}
-  if job.Kind!=contracts.{{.Action}}Kind{return jobs.Permanent(jobs.ErrInvalid)}
-  input,err:=contracts.Decode{{.Action}}(job)
-  if err!=nil{return jobs.Permanent(jobs.ErrInvalid)}
-  {{if .Multi}}if job.TenantID==nil || *job.TenantID=="" {return jobs.Permanent(jobs.ErrInvalid)}{{end}}
-  if operation==nil || identity==nil{return domain.ErrUnauthenticated}
-  principal,err:=identity.ResolveJob(ctx,job)
-  if err!=nil || !principal.Verified(){{if .Multi}} || principal.TenantID!=*job.TenantID{{end}} {return domain.ErrUnauthenticated}
-  _,err=operation.Execute(ctx,principal,input)
-  return err
- }
+func New{{.Action}}Handler(
+	operation operations.{{.OperationAction}}Boundary,
+	identity {{.Action}}Identity,
+) jobs.Handler {
+	return func(ctx context.Context, job jobs.Job) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		if job.Kind != contracts.{{.Action}}Kind {
+			return jobs.Permanent(jobs.ErrInvalid)
+		}
+
+		input, err := contracts.Decode{{.Action}}(job)
+		if err != nil {
+			return jobs.Permanent(jobs.ErrInvalid)
+		}
+	{{if .Multi}}
+
+		if job.TenantID == nil || *job.TenantID == "" {
+			return jobs.Permanent(jobs.ErrInvalid)
+		}{{end}}
+
+		if operation == nil || identity == nil {
+			return domain.ErrUnauthenticated
+		}
+
+		principal, err := identity.ResolveJob(ctx, job)
+		if err != nil || !principal.Verified(){{if .Multi}} ||
+			principal.TenantID != *job.TenantID{{end}} {
+			return domain.ErrUnauthenticated
+		}
+
+		_, err = operation.Execute(ctx, principal, input)
+
+		return err
+	}
 }
 
 // New{{.Action}}SessionIdentity accepts a configured session credential, never
-// payload identity claims. The owning Manager authenticates it on each delivery.
-func New{{.Action}}SessionIdentity(manager *plutoauth.Manager, credential string, memberships access.MembershipResolver) {{.Action}}Identity {
- return &session{{.Action}}Identity{manager:manager,credential:credential,memberships:memberships}
+// payload identity claims. The owning Manager authenticates it on each
+// delivery.
+func New{{.Action}}SessionIdentity(
+	manager *plutoauth.Manager,
+	credential string,
+	memberships access.MembershipResolver,
+) {{.Action}}Identity {
+	return &session{{.Action}}Identity{
+		manager:     manager,
+		credential:  credential,
+		memberships: memberships,
+	}
 }
-type session{{.Action}}Identity struct {manager *plutoauth.Manager;credential string;memberships access.MembershipResolver}
-func (s *session{{.Action}}Identity) ResolveJob(ctx context.Context,job jobs.Job)(domain.Principal,error){
- if s==nil || s.manager==nil || s.credential=="" || s.memberships==nil{return domain.Principal{},domain.ErrUnauthenticated}
- session,err:=s.manager.Authenticate(ctx,s.credential);if err!=nil{return domain.Principal{},domain.ErrUnauthenticated}
- {{if .Multi}}if job.TenantID==nil || *job.TenantID=="" {return domain.Principal{},domain.ErrUnauthenticated}{{end}}
- current,err:=s.memberships.Resolve(ctx,session.SubjectID{{if .Multi}},*job.TenantID{{end}})
- if err!=nil || !current.Verified() || current.ActorID!=session.SubjectID{{if .Multi}} || current.TenantID!=*job.TenantID{{end}} {return domain.Principal{},domain.ErrUnauthenticated}
- return current,nil
+
+type session{{.Action}}Identity struct {
+	manager     *plutoauth.Manager
+	credential  string
+	memberships access.MembershipResolver
+}
+
+func (s *session{{.Action}}Identity) ResolveJob(
+	ctx context.Context,
+	job jobs.Job,
+) (domain.Principal, error) {
+	if s == nil || s.manager == nil || s.credential == "" ||
+		s.memberships == nil {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+
+	session, err := s.manager.Authenticate(ctx, s.credential)
+	if err != nil {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+	{{if .Multi}}
+
+	if job.TenantID == nil || *job.TenantID == "" {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}{{end}}
+
+	current, err := s.memberships.Resolve(
+		ctx,
+		session.SubjectID,
+{{if .Multi}}
+		*job.TenantID,
+{{end}}
+	)
+	if err != nil || !current.Verified() ||
+		current.ActorID != session.SubjectID{{if .Multi}} ||
+		current.TenantID != *job.TenantID{{end}} {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+
+	return current, nil
 }

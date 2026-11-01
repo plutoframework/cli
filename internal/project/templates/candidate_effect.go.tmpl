@@ -1,50 +1,157 @@
 package {{.Resource.Group}}
 
 import (
- "bytes"
- "context"
- "encoding/json"
- "errors"
- "io"
- "net/http"
- "net/url"
- "time"
- domain "{{.Module}}/internal/domain/{{.Resource.Group}}"
- commonDomain "{{.Module}}/internal/domain"
- ports "{{.Module}}/internal/ports/{{.Resource.Group}}"
- "github.com/jackc/pgx/v5/pgxpool"
- identitygate "github.com/plutoframework/pluto-rbac/identity"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"time"
+	domain "{{.Module}}/internal/domain/{{.Resource.Group}}"
+	commonDomain "{{.Module}}/internal/domain"
+	ports "{{.Module}}/internal/ports/{{.Resource.Group}}"
+	"github.com/jackc/pgx/v5/pgxpool"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
 )
 
-type {{.Symbol}}Delivery struct {pool *pgxpool.Pool;gate *identitygate.Gate;endpoint string;client *http.Client}
-func New{{.Symbol}}Delivery(pool *pgxpool.Pool,gate *identitygate.Gate,endpoint string)(*{{.Symbol}}Delivery,error){
- parsed,err:=url.Parse(endpoint)
- if pool==nil||gate==nil||err!=nil||parsed.Host==""||(parsed.Scheme!="https"&&parsed.Scheme!="http")||parsed.User!=nil||parsed.Fragment!=""{return nil,errors.New("invalid configured effect destination")}
- return &{{.Symbol}}Delivery{pool:pool,gate:gate,endpoint:endpoint,client:&http.Client{Timeout:3*time.Second,CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}}},nil
+type {{.Symbol}}Delivery struct {
+	pool     *pgxpool.Pool
+	gate     *identitygate.Gate
+	endpoint string
+	client   *http.Client
 }
 
-// Deliver requires fresh authorization and an exact persisted typed work intent.
-// Provider idempotency is keyed by the stable delivery ID; external exactly-once
+func New{{.Symbol}}Delivery(
+	pool *pgxpool.Pool,
+	gate *identitygate.Gate,
+	endpoint string,
+) (*{{.Symbol}}Delivery, error) {
+	parsed, err := url.Parse(endpoint)
+	if pool == nil || gate == nil || err != nil || parsed.Host == "" ||
+		(parsed.Scheme != "https" && parsed.Scheme != "http") ||
+		parsed.User != nil ||
+		parsed.Fragment != "" {
+		return nil, errors.New("invalid configured effect destination")
+	}
+
+	return &{{.Symbol}}Delivery{
+		pool:     pool,
+		gate:     gate,
+		endpoint: endpoint,
+		client: &http.Client{
+			Timeout: 3 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+	}, nil
+}
+
+// Deliver requires fresh authorization and an exact persisted typed work
+// intent.
+// Provider idempotency is keyed by the stable delivery ID; external
+// exactly-once
 // execution is not claimed. The configured destination must honor this key.
-func(d *{{.Symbol}}Delivery)Deliver(ctx context.Context,execution *identitygate.Execution,command domain.{{.Resource.Name}}Command)(ports.{{.Resource.Name}}Result,error){
- var output ports.{{.Resource.Name}}Result
- if d==nil||execution==nil||command.Validate()!=nil||command.Kind()!="effect"{return output,commonDomain.ErrForbidden}
- err:=d.gate.Use(ctx,execution,execution.TenantID(),command.ID(),func(ctx context.Context)error{
-  var raw []byte;var kind string
-  if err:=d.pool.QueryRow(ctx,`SELECT "payload","kind" FROM "pluto_jobs" WHERE "id"=$1 AND "tenant_id"=$2 AND "state"='running' AND "lease_until">clock_timestamp()`,command.Key(),execution.TenantID()).Scan(&raw,&kind);err!=nil{return commonDomain.ErrForbidden}
-  kindAllowed:=false
-  {{range .ContractEffects}}{{if eq .Operation $.Contract.ID}}if kind=={{q .Kind}}{kindAllowed=true}{{end}}{{end}}
-  if !kindAllowed{return commonDomain.ErrForbidden}
-  var payload ports.{{.Resource.Name}}EffectPayload
-  decoder:=json.NewDecoder(bytes.NewReader(raw));decoder.DisallowUnknownFields()
-  if decoder.Decode(&payload)!=nil||payload.ResourceID!=command.ID()||payload.IdempotencyKey!=command.Key()||payload.Value!=command.Value(){return commonDomain.ErrForbidden}
-  var extra any;if !errors.Is(decoder.Decode(&extra),io.EOF){return commonDomain.ErrForbidden}
-  request,err:=http.NewRequestWithContext(ctx,http.MethodPost,d.endpoint,bytes.NewReader(raw));if err!=nil{return err}
-  request.Header.Set("Content-Type","application/json");request.Header.Set("Idempotency-Key",command.Key())
-  response,err:=d.client.Do(request);if err!=nil{return err};defer response.Body.Close()
-  if size,err:=io.Copy(io.Discard,io.LimitReader(response.Body,65537));err!=nil{return err}else if size>65536{return errors.New("effect response exceeds bound")}
-  if response.StatusCode<200||response.StatusCode>=300{return errors.New("effect destination rejected delivery")}
-  output=ports.{{.Resource.Name}}Result{ID:command.ID(),Value:command.Value()};return nil
- })
- return output,err
+func (d *{{.Symbol}}Delivery) Deliver(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	command domain.{{.Resource.Name}}Command,
+) (ports.{{.Resource.Name}}Result, error) {
+	var output ports.{{.Resource.Name}}Result
+	if d == nil || execution == nil || command.Validate() != nil ||
+		command.Kind() != "effect" {
+		return output, commonDomain.ErrForbidden
+	}
+
+	err := d.gate.Use(
+		ctx,
+		execution,
+		execution.TenantID(),
+		command.ID(),
+		func(ctx context.Context) error {
+			var raw []byte
+
+			var kind string
+			if err := d.pool.QueryRow(
+				ctx,
+				"SELECT \"payload\",\"kind\" FROM \"pluto_jobs\" WHERE " +
+					"\"id\"=$1 AND \"tenant_id\"=$2 AND \"state\"='running' " +
+					"AND \"lease_until\">clock_timestamp()",
+				command.Key(),
+				execution.TenantID(),
+			).Scan(&raw, &kind); err != nil {
+				return commonDomain.ErrForbidden
+			}
+
+			switch kind {
+{{range .ContractEffects}}{{if eq .Operation $.Contract.ID}}
+			case {{q .Kind}}:
+{{end}}{{end}}
+			default:
+				return commonDomain.ErrForbidden
+			}
+
+			var payload ports.{{.Resource.Name}}EffectPayload
+
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.DisallowUnknownFields()
+
+			if decoder.Decode(&payload) != nil ||
+				payload.ResourceID != command.ID() ||
+				payload.IdempotencyKey != command.Key() ||
+				payload.Value != command.Value() {
+				return commonDomain.ErrForbidden
+			}
+
+			var extra any
+			if !errors.Is(decoder.Decode(&extra), io.EOF) {
+				return commonDomain.ErrForbidden
+			}
+
+			request, err := http.NewRequestWithContext(
+				ctx,
+				http.MethodPost,
+				d.endpoint,
+				bytes.NewReader(raw))
+			if err != nil {
+				return err
+			}
+
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Idempotency-Key", command.Key())
+
+			response, err := d.client.Do(request)
+			if err != nil {
+				return err
+			}
+
+			defer response.Body.Close()
+
+			if size, err := io.Copy(
+				io.Discard,
+				io.LimitReader(
+					response.Body,
+					65537,
+				),
+			); err != nil {
+				return err
+			} else if size > 65536 {
+				return errors.New("effect response exceeds bound")
+			}
+
+			if response.StatusCode < 200 || response.StatusCode >= 300 {
+				return errors.New("effect destination rejected delivery")
+			}
+
+			output = ports.{{.Resource.Name}}Result{
+				ID:    command.ID(),
+				Value: command.Value(),
+			}
+
+			return nil
+		})
+
+	return output, err
 }

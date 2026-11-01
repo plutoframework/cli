@@ -1,10 +1,13 @@
 package background
 
 import (
- handlers "{{.Module}}/internal/jobs/{{.Group}}"
- jobs "github.com/plutoframework/pluto-jobs"
+	handlers "{{.Module}}/internal/jobs/{{.Group}}"
+
+	jobs "github.com/plutoframework/pluto-jobs"
 )
 
 func new{{.Symbol}}(dependencies Dependencies) jobs.Handler {
- return handlers.New{{.Action}}Handler(dependencies.{{.Symbol}}Operation,dependencies.{{.Symbol}}Identity)
+	return handlers.New{{.Action}}Handler(
+		dependencies.{{.Symbol}}Operation,
+		dependencies.{{.Symbol}}Identity)
 }

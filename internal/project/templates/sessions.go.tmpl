@@ -10,59 +10,114 @@ import (
 
 	plutoauth "github.com/plutoframework/pluto-auth"
 	"github.com/plutoframework/pluto-auth/httpauth"
- "github.com/plutoframework/pluto-core/httpidem"
+	"github.com/plutoframework/pluto-core/httpidem"
 )
 
 // AccountDisabler is for trusted application administration after its own
 // authorization check, never an unauthenticated HTTP bootstrap endpoint.
 type AccountDisabler interface {
-    Disable(context.Context,string) error
+	Disable(context.Context, string) error
 }
 
 // Authentication is explicit wiring shared by protected routes and logout.
 type Authentication struct {
- Memberships MembershipResolver
- {{if .OIDC}}OIDC http.Handler{{end}}
-    Accounts AccountDisabler
-    Credentials http.Handler
- Idempotency *httpidem.Handler
-	Verifier Authenticator
-	HTTP *httpauth.Transport
-	Manager *plutoauth.Manager
+	Memberships MembershipResolver
+	{{if .OIDC}}
+
+	OIDC        http.Handler{{end}}
+	Accounts    AccountDisabler
+	Credentials http.Handler
+	Idempotency *httpidem.Handler
+	Verifier    Authenticator
+	HTTP        *httpauth.Transport
+	Manager     *plutoauth.Manager
 }
 
 // MembershipResolver must return a trusted snapshot for exactly this subject
 // and selected tenant. A header never proves membership or grants a role.
 type MembershipResolver interface {
-	Resolve(context.Context, string{{if .Multi}}, string{{end}}) (domain.Principal, error)
+	Resolve(
+		context.Context,
+		string,
+{{if .Multi}}
+		string,
+{{end}}
+	) (domain.Principal, error)
 }
 
-type sessionPrincipal struct { memberships MembershipResolver }
+type sessionPrincipal struct {
+	memberships MembershipResolver
+}
 
-func (s sessionPrincipal) Authenticate(ctx context.Context, _ string{{if .Multi}}, tenant string{{end}}) (domain.Principal,error) {
+func (s sessionPrincipal) Authenticate(
+	ctx context.Context,
+	_ string{{if .Multi}},
+	tenant string{{end}}) (domain.Principal, error) {
 	session, ok := httpauth.FromContext(ctx)
-	if !ok{{if .Multi}} || tenant == ""{{end}} { return domain.Principal{},domain.ErrUnauthenticated }
-	principal,err:=s.memberships.Resolve(ctx,session.SubjectID{{if .Multi}},tenant{{end}})
-	if err != nil { return domain.Principal{},err }
-	if !principal.Verified() || principal.ActorID != session.SubjectID{{if .Multi}} || principal.TenantID != tenant{{end}} {
-		return domain.Principal{},domain.ErrUnauthenticated
+	if !ok{{if .Multi}} || tenant == ""{{end}} {
+		return domain.Principal{}, domain.ErrUnauthenticated
 	}
-	principal.Roles=slices.Clone(principal.Roles)
-	return principal,nil
+
+	principal, err := s.memberships.Resolve(
+		ctx,
+		session.SubjectID,
+{{if .Multi}}
+		tenant,
+{{end}}
+	)
+	if err != nil {
+		return domain.Principal{}, err
+	}
+
+	if !principal.Verified() ||
+		principal.ActorID != session.SubjectID{{if .Multi}} ||
+		principal.TenantID != tenant{{end}} {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+
+	principal.Roles = slices.Clone(principal.Roles)
+
+	return principal, nil
 }
 
-func NewAuthentication(settings config.Auth, store plutoauth.SessionStore, memberships MembershipResolver) (Authentication,error) {
-	if memberships == nil { return Authentication{},plutoauth.ErrInvalidConfig }
-	configuration:=plutoauth.DefaultConfig()
-	configuration.TTL=settings.SessionTTL
-	configuration.IdleTimeout=settings.IdleTimeout
-	manager,err:=plutoauth.New(store,configuration)
-	if err != nil { return Authentication{},err }
-	transport,err:=httpauth.New(manager,httpauth.Config{
-		TrustedOrigins:settings.TrustedOrigins,
-		AllowBearer:true,
-		WriteError:func(w http.ResponseWriter,r *http.Request,status int,code string) { Error(w,r,status,code) },
+func NewAuthentication(
+	settings config.Auth,
+	store plutoauth.SessionStore,
+	memberships MembershipResolver,
+) (Authentication, error) {
+	if memberships == nil {
+		return Authentication{}, plutoauth.ErrInvalidConfig
+	}
+
+	configuration := plutoauth.DefaultConfig()
+	configuration.TTL = settings.SessionTTL
+	configuration.IdleTimeout = settings.IdleTimeout
+
+	manager, err := plutoauth.New(store, configuration)
+	if err != nil {
+		return Authentication{}, err
+	}
+
+	transport, err := httpauth.New(manager, httpauth.Config{
+		TrustedOrigins: settings.TrustedOrigins,
+		AllowBearer:    true,
+		WriteError: func(
+			w http.ResponseWriter,
+			r *http.Request,
+			status int,
+			code string,
+		) {
+			Error(w, r, status, code)
+		},
 	})
-	if err != nil { return Authentication{},err }
-	return Authentication{Memberships:memberships,Verifier:sessionPrincipal{memberships:memberships},HTTP:transport,Manager:manager},nil
+	if err != nil {
+		return Authentication{}, err
+	}
+
+	return Authentication{
+		Memberships: memberships,
+		Verifier:    sessionPrincipal{memberships: memberships},
+		HTTP:        transport,
+		Manager:     manager,
+	}, nil
 }

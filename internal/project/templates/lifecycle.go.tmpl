@@ -1,4 +1,5 @@
-// Package {{.Group}} owns application business rules, independent of HTTP/storage.
+// Package {{.Group}} owns application business rules, independent of
+// HTTP/storage.
 package {{.Group}}
 
 import (
@@ -12,9 +13,9 @@ type Status string
 type Event string
 
 const (
-	Draft Status = "draft"
+	Draft     Status = "draft"
 	Submitted Status = "submitted"
-	Submit Event = "submit"
+	Submit    Event  = "submit"
 )
 
 var ErrOwnerRequired = errors.New("only the owner can submit")
@@ -28,16 +29,17 @@ type Facts struct {
 
 // NewLifecycle compiles rules once for injection into an application operation.
 // Extend these authored rules for your domain. Operations must still authorize,
-// load tenant-scoped data, and atomically save the expected version + audit/outbox.
+// load tenant-scoped data, and atomically save the expected version +
+// audit/outbox.
 // Next only decides a transition; it does not perform or authorize a write.
 func NewLifecycle() (*state.Machine[Status, Event, Facts], error) {
 	return state.New(state.Definition[Status, Event, Facts]{
 		States: []Status{Draft, Submitted},
 		Transitions: []state.Transition[Status, Event, Facts]{
 			{
-				From: Draft,
-				On: Submit,
-				To: Submitted,
+				From:  Draft,
+				On:    Submit,
+				To:    Submitted,
 				Guard: canSubmit,
 			},
 		},

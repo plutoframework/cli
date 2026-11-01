@@ -1,80 +1,164 @@
 package main
 
 import (
- "context"
- "errors"
- "log/slog"
- "os"
- "os/signal"
- "strings"
- "syscall"
- "time"
+	"context"
+	"errors"
+	"log/slog"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
- "github.com/plutoframework/pluto-core/telemetry"
+	"github.com/plutoframework/pluto-core/telemetry"
 
- "{{.Module}}/internal/app"
- "{{.Module}}/internal/caching"
- "{{.Module}}/internal/config"
- "{{.Module}}/internal/storage/postgres"
+	"{{.Module}}/internal/app"
+	"{{.Module}}/internal/caching"
+	"{{.Module}}/internal/config"
+	"{{.Module}}/internal/storage/postgres"
 )
 
-var version="dev"
+var version = "dev"
 
-func newTelemetry(ctx context.Context)(*telemetry.Runtime,error){
- environment:=os.Getenv(config.Prefix+"ENVIRONMENT")
- if environment==""{environment="development"}
- settings,err:=telemetry.FromEnv(config.Prefix,{{q .Name}}+"-worker",version,environment)
- if err!=nil{return nil,errors.New("invalid telemetry configuration")}
- return telemetry.New(ctx,settings)
+func newTelemetry(ctx context.Context) (*telemetry.Runtime, error) {
+	environment := os.Getenv(config.Prefix + "ENVIRONMENT")
+	if environment == "" {
+		environment = "development"
+	}
+
+	settings, err := telemetry.FromEnv(
+		config.Prefix,
+		{{q .Name}}+"-worker",
+		version,
+		environment)
+	if err != nil {
+		return nil, errors.New("invalid telemetry configuration")
+	}
+
+	return telemetry.New(ctx, settings)
 }
 
-func run()error{
- cfg,err:=config.Load()
- if err!=nil{return err}
- if cfg.Database.URL==""{return errors.New("candidate worker requires DATABASE_URL and explicit migrations")}
- var level slog.Level
- if err:=level.UnmarshalText([]byte(cfg.Logging.Level));err!=nil{return errors.New("invalid logging configuration")}
- ctx,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM)
- defer stop()
- startup,cancelStartup:=context.WithTimeout(ctx,10*time.Second)
- defer cancelStartup()
- observability,err:=newTelemetry(startup)
- if err!=nil{return errors.New("worker telemetry startup failed")}
- logger:=slog.New(observability.Handler(slog.NewJSONHandler(os.Stdout,&slog.HandlerOptions{Level:level})))
- defer func(){
-  shutdown,cancel:=context.WithTimeout(context.Background(),10*time.Second)
-  defer cancel()
-  if err:=observability.Shutdown(shutdown);err!=nil{logger.Error("worker telemetry shutdown failed")}
- }()
- pool,err:=postgres.OpenWithTracer(startup,cfg.Database.URL,observability.PGXTracer())
- if err!=nil{return errors.New("worker database unavailable")}
- defer pool.Close()
- dataCache,closeCache,err:=caching.New(cfg.Cache)
- if err!=nil{return errors.New("invalid worker cache configuration")}
- defer closeCache()
- dataCache=observability.Cache(dataCache)
- destinations:=map[string]string{}
- for _,operationID:=range []string{ {{range .Manifest.OperationContracts}}{{if eq .Kind "effect"}}{{q .ID}},{{end}}{{end}} }{
-  key:=strings.ToUpper(strings.ReplaceAll(operationID,".","_"))
-  destinations[operationID]=os.Getenv(config.Prefix+"EFFECT_"+key+"_URL")
- }
- runtime,err:=app.NewCandidateRuntime(cfg,pool,logger,dataCache,cfg.Cache.Environment,destinations)
- if err!=nil{return errors.New("candidate worker configuration failed; verify declared policy, data and effect settings")}
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 
- // Each delivery authenticates this configured credential again. Persisted
- // actor/tenant labels alone never create execution authority.
- credentials:=app.CandidateWorkerCredentials{
- {{range .Manifest.Jobs}}{{upperFirst .Group}}{{.Action}}:os.Getenv(config.Prefix+"JOB_"+strings.ToUpper({{q .Group}})+"_"+strings.ToUpper({{q .Action}})+"_CREDENTIAL"),
- {{end}} }
- worker,err:=runtime.Worker(credentials)
- if err!=nil{return errors.New("candidate worker requires declared handlers and valid service credentials")}
- if err:=worker.Run(ctx);err!=nil&&!errors.Is(err,context.Canceled){return errors.New("worker stopped; inspect sanitized job diagnostics")}
- return nil
+	if cfg.Database.URL == "" {
+		return errors.New(
+			"candidate worker requires DATABASE_URL and explicit migrations")
+	}
+
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.Logging.Level)); err != nil {
+		return errors.New("invalid logging configuration")
+	}
+
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM)
+	defer stop()
+
+	startup, cancelStartup := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelStartup()
+
+	observability, err := newTelemetry(startup)
+	if err != nil {
+		return errors.New("worker telemetry startup failed")
+	}
+
+	logger := slog.New(
+		observability.Handler(
+			slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
+
+	defer func() {
+		shutdown, cancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second)
+		defer cancel()
+
+		if err := observability.Shutdown(shutdown); err != nil {
+			logger.Error("worker telemetry shutdown failed")
+		}
+	}()
+
+	pool, err := postgres.OpenWithTracer(
+		startup,
+		cfg.Database.URL,
+		observability.PGXTracer())
+	if err != nil {
+		return errors.New("worker database unavailable")
+	}
+
+	defer pool.Close()
+
+	dataCache, closeCache, err := caching.New(cfg.Cache)
+	if err != nil {
+		return errors.New("invalid worker cache configuration")
+	}
+
+	defer closeCache()
+
+	dataCache = observability.Cache(dataCache)
+
+	destinations := map[string]string{}
+
+	for _, operationID := range []string{
+{{range .Manifest.OperationContracts}}
+{{if eq .Kind "effect"}}
+		{{q .ID}},
+{{end}}
+{{end}}
+	} {
+		key := strings.ToUpper(strings.ReplaceAll(operationID, ".", "_"))
+		destinations[operationID] = os.Getenv(
+			config.Prefix + "EFFECT_" + key + "_URL")
+	}
+
+	runtime, err := app.NewCandidateRuntime(
+		cfg,
+		pool,
+		logger,
+		dataCache,
+		cfg.Cache.Environment,
+		destinations)
+	if err != nil {
+		return errors.New(
+			"candidate worker configuration failed; verify declared policy," +
+				" data and effect settings",
+		)
+	}
+
+	// Each delivery authenticates this configured credential again. Persisted
+	// actor/tenant labels alone never create execution authority.
+	credentials := app.CandidateWorkerCredentials{
+	{{range .Manifest.Jobs}}
+		{{upperFirst .Group}}{{.Action}}: os.Getenv(
+			config.Prefix + "JOB_" + strings.ToUpper({{q .Group}}) +
+				"_" + strings.ToUpper({{q .Action}}) + "_CREDENTIAL",
+		),
+	{{end}}
+	}
+
+	worker, err := runtime.Worker(credentials)
+	if err != nil {
+		return errors.New(
+			"candidate worker requires declared handlers and valid service " +
+				"credentials",
+		)
+	}
+
+	if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		return errors.New("worker stopped; inspect sanitized job diagnostics")
+	}
+
+	return nil
 }
 
-func main(){
- if err:=run();err!=nil{
-  slog.Error("candidate worker failed","error",err)
-  os.Exit(1)
- }
+func main() {
+	if err := run(); err != nil {
+		slog.Error("candidate worker failed", "error", err)
+		os.Exit(1)
+	}
 }

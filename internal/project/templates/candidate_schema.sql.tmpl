@@ -3,9 +3,17 @@ CREATE TABLE "{{ .Resource.Table }}" (
     "tenant_id" text NOT NULL,
     "id" text NOT NULL,
     "owner_id" text NOT NULL,
-    "state" text NOT NULL CHECK ("state" IN ({{ range $index, $state := .Resource.States }}{{ if $index }}, {{ end }}'{{ $state }}'{{ end }})),
+    "state" text NOT NULL CHECK (
+        "state" IN (
+{{ range $index, $state := .Resource.States }}
+            {{ if $index }}, {{ end }}'{{ $state }}'
+{{ end }}
+        )
+    ),
     "version" bigint NOT NULL CHECK ("version" >= 1),
-    "value" text NOT NULL CHECK (octet_length("value") <= {{ .Resource.MaxValueBytes }}),
+    "value" text NOT NULL CHECK (
+        octet_length("value") <= {{ .Resource.MaxValueBytes }}
+    ),
     PRIMARY KEY ("tenant_id", "id")
 );
 

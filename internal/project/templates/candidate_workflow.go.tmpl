@@ -1,38 +1,85 @@
 package {{.Group}}
 
 import (
- "context"
- domain "{{.Module}}/internal/domain/{{.Resource.Group}}"
- models "{{.Module}}/internal/models/{{.Group}}"
- identitygate "github.com/plutoframework/pluto-rbac/identity"
+	"context"
+	domain "{{.Module}}/internal/domain/{{.Resource.Group}}"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
 )
 
 // execute is managed use-case assembly for the explicitly declared contract.
 // Business decisions remain pure domain rules; I/O is restricted to typed data
 // capabilities that revalidate this execution before every access or effect.
-func (operation *{{.Action}}) execute(ctx context.Context,execution *identitygate.Execution,command domain.{{.Resource.Name}}Command)(models.{{.Action}}Data,error){
- {{if eq .Contract.Kind "create"}}
- return operation.{{lowerFirst .Action}}Data.Create(ctx,execution,command)
- {{else if eq .Contract.Kind "transition"}}
- attempt,err:=operation.{{lowerFirst .Action}}Data.Start(ctx,execution,command)
- if err!=nil{return models.{{.Action}}Data{},err}
- if replay,ok:=attempt.Replayed();ok{return replay,nil}
- record,err:=operation.{{lowerFirst .Action}}Data.Load(ctx,execution,command.ID())
- if err!=nil{return models.{{.Action}}Data{},err}
- change,err:=domain.Evaluate{{.Resource.Name}}(operation.{{lowerFirst .Action}}Machine,record,{{q .Contract.Event}},execution.SubjectID())
- if err!=nil{return models.{{.Action}}Data{},err}
- return operation.{{lowerFirst .Action}}Data.Commit(ctx,execution,attempt,change)
- {{else if eq .Contract.Kind "load"}}
- record,err:=operation.{{lowerFirst .Action}}Data.Load(ctx,execution,command.ID())
- if err!=nil{return models.{{.Action}}Data{},err}
- return models.{{.Action}}Data{ID:record.ID(),State:record.State(),Version:record.Version(),Value:record.Value()},nil
- {{else if eq .Contract.Kind "list"}}
- return operation.{{lowerFirst .Action}}Data.List(ctx,execution,command)
- {{else if eq .Contract.Kind "export"}}
- rows,err:=operation.{{lowerFirst .Action}}Data.Export(ctx,execution,command)
- if err!=nil{return models.{{.Action}}Data{},err}
- return models.{{.Action}}Data{Rows:rows,Limit:command.Limit()},nil
- {{else if eq .Contract.Kind "effect"}}
- return operation.{{lowerFirst .Action}}Data.Deliver(ctx,execution,command)
- {{end}}
+func (operation *{{.Action}}) execute(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	command domain.{{.Resource.Name}}Command,
+) (models.{{.Action}}Data, error) {
+	{{if eq .Contract.Kind "create"}}
+	return operation.{{lowerFirst .Action}}Data.Create(ctx, execution, command)
+	{{- else if eq .Contract.Kind "transition"}}
+	attempt, err := operation.{{lowerFirst .Action}}Data.Start(
+		ctx,
+		execution,
+		command)
+	if err != nil {
+		return models.{{.Action}}Data{}, err
+	}
+
+	if replay, ok := attempt.Replayed(); ok {
+		return replay, nil
+	}
+
+	record, err := operation.{{lowerFirst .Action}}Data.Load(
+		ctx,
+		execution,
+		command.ID())
+	if err != nil {
+		return models.{{.Action}}Data{}, err
+	}
+
+	change, err := domain.Evaluate{{.Resource.Name}}(
+		operation.{{lowerFirst .Action}}Machine,
+		record,
+		{{q .Contract.Event}},
+		execution.SubjectID())
+	if err != nil {
+		return models.{{.Action}}Data{}, err
+	}
+
+	return operation.{{lowerFirst .Action}}Data.Commit(
+		ctx,
+		execution,
+		attempt,
+		change)
+	{{- else if eq .Contract.Kind "load"}}
+	record, err := operation.{{lowerFirst .Action}}Data.Load(
+		ctx,
+		execution,
+		command.ID())
+	if err != nil {
+		return models.{{.Action}}Data{}, err
+	}
+
+	return models.{{.Action}}Data{
+		ID:      record.ID(),
+		State:   record.State(),
+		Version: record.Version(),
+		Value:   record.Value(),
+	}, nil
+	{{- else if eq .Contract.Kind "list"}}
+	return operation.{{lowerFirst .Action}}Data.List(ctx, execution, command)
+	{{- else if eq .Contract.Kind "export"}}
+	rows, err := operation.{{lowerFirst .Action}}Data.Export(
+		ctx,
+		execution,
+		command)
+	if err != nil {
+		return models.{{.Action}}Data{}, err
+	}
+
+	return models.{{.Action}}Data{Rows: rows, Limit: command.Limit()}, nil
+	{{- else if eq .Contract.Kind "effect"}}
+	return operation.{{lowerFirst .Action}}Data.Deliver(ctx, execution, command)
+	{{- end}}
 }

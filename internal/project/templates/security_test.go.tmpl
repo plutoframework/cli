@@ -13,35 +13,42 @@ func TestSecurityHeaders(t *testing.T) {
 			handler := SecurityHeaders(http.HandlerFunc(
 				func(w http.ResponseWriter, _ *http.Request) {
 					called = true
+
 					w.WriteHeader(status)
 				},
 			))
 			request := httptest.NewRequest("GET", "/", nil)
 			request.Header.Set("X-Forwarded-Proto", "https")
 			request.Header.Set("Forwarded", "proto=https")
+
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 
 			if !called || response.Code != status {
-				t.Fatalf("downstream called=%v status=%d", called, response.Code)
+				t.Fatalf(
+					"downstream called=%v status=%d",
+					called,
+					response.Code)
 			}
 
 			want := map[string]string{
-				"Cache-Control": "no-store",
+				"Cache-Control":          "no-store",
 				"X-Content-Type-Options": "nosniff",
-				"X-Frame-Options": "DENY",
-				"Referrer-Policy": "no-referrer",
-				"Content-Security-Policy": "default-src 'none'; "+
-					"base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-				"Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-				"Cross-Origin-Embedder-Policy": "require-corp",
-				"Cross-Origin-Opener-Policy": "same-origin",
-				"Cross-Origin-Resource-Policy": "same-origin",
-				"Origin-Agent-Cluster": "?1",
-				"X-DNS-Prefetch-Control": "off",
-				"X-Download-Options": "noopen",
+				"X-Frame-Options":        "DENY",
+				"Referrer-Policy":        "no-referrer",
+				"Content-Security-Policy": "default-src 'none'; " +
+					"base-uri 'none'; form-action 'none'; frame-ancestors " +
+						"'none'",
+				"Permissions-Policy":                "camera=(), " +
+					"microphone=(), geolocation=()",
+				"Cross-Origin-Embedder-Policy":      "require-corp",
+				"Cross-Origin-Opener-Policy":        "same-origin",
+				"Cross-Origin-Resource-Policy":      "same-origin",
+				"Origin-Agent-Cluster":              "?1",
+				"X-DNS-Prefetch-Control":            "off",
+				"X-Download-Options":                "noopen",
 				"X-Permitted-Cross-Domain-Policies": "none",
-				"X-XSS-Protection": "0",
+				"X-XSS-Protection":                  "0",
 			}
 			for name, value := range want {
 				if got := response.Result().Header.Get(name); got != value {

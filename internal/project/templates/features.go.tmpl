@@ -3,9 +3,13 @@ package features
 import corefeatures "github.com/plutoframework/pluto-core/features"
 
 // Application declarations remain generated from endpoint metadata.
-type Definition = corefeatures.Definition
-type Evaluator = *corefeatures.Snapshot
+type (
+	Definition = corefeatures.Definition
+	Evaluator  = *corefeatures.Snapshot
+)
 
 func New(overrides map[string]*bool) Evaluator {
- return corefeatures.MustSnapshot(Declarations(), corefeatures.Overrides(overrides))
+	return corefeatures.MustSnapshot(
+		Declarations(),
+		corefeatures.Overrides(overrides))
 }

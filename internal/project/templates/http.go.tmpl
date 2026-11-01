@@ -2,19 +2,18 @@
 package transport
 
 import (
+	"bytes"
 	"encoding/json"
- "unicode/utf8"
- "bytes"
 	"errors"
 	"io"
 	"net/http"
-
-	"{{.Module}}/internal/domain"
- "github.com/plutoframework/pluto-core/pagination"
- "github.com/plutoframework/pluto-core/idempotency"
- auth "github.com/plutoframework/pluto-auth"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5/middleware"
+	auth "github.com/plutoframework/pluto-auth"
+	"github.com/plutoframework/pluto-core/idempotency"
+	"github.com/plutoframework/pluto-core/pagination"
+	"{{.Module}}/internal/domain"
 )
 
 type ErrorEnvelope struct {
@@ -43,12 +42,40 @@ func Error(w http.ResponseWriter, r *http.Request, status int, code string) {
 }
 
 func OperationError(w http.ResponseWriter, r *http.Request, err error) {
- if errors.Is(err,pagination.ErrInvalid) {Error(w,r,400,"invalid_pagination");return}
-	if errors.Is(err,domain.ErrInvalidInput) { Error(w,r,http.StatusBadRequest,"invalid_input");return }
- if errors.Is(err,idempotency.ErrInProgress) {Error(w,r,http.StatusConflict,"idempotency_pending");return}
- if errors.Is(err,domain.ErrConflict)||errors.Is(err,idempotency.ErrConflict)||errors.Is(err,idempotency.ErrOwnership) { Error(w,r,http.StatusConflict,"conflict");return }
- if errors.Is(err,domain.ErrExportLimit) { Error(w,r,http.StatusUnprocessableEntity,"export_limit");return }
- if errors.Is(err, domain.ErrUnauthenticated)||errors.Is(err,auth.ErrUnauthenticated) {
+	if errors.Is(err, pagination.ErrInvalid) {
+		Error(w, r, 400, "invalid_pagination")
+
+		return
+	}
+
+	if errors.Is(err, domain.ErrInvalidInput) {
+		Error(w, r, http.StatusBadRequest, "invalid_input")
+
+		return
+	}
+
+	if errors.Is(err, idempotency.ErrInProgress) {
+		Error(w, r, http.StatusConflict, "idempotency_pending")
+
+		return
+	}
+
+	if errors.Is(err, domain.ErrConflict) ||
+		errors.Is(err, idempotency.ErrConflict) ||
+		errors.Is(err, idempotency.ErrOwnership) {
+		Error(w, r, http.StatusConflict, "conflict")
+
+		return
+	}
+
+	if errors.Is(err, domain.ErrExportLimit) {
+		Error(w, r, http.StatusUnprocessableEntity, "export_limit")
+
+		return
+	}
+
+	if errors.Is(err, domain.ErrUnauthenticated) ||
+		errors.Is(err, auth.ErrUnauthenticated) {
 		Error(w, r, http.StatusUnauthorized, "unauthenticated")
 
 		return
@@ -70,7 +97,8 @@ func OperationError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // Decode bounds input and rejects unknown fields, invalid types and extra JSON.
-// Empty bodies are invalid for body-bearing endpoints. Duplicate known JSON keys
+// Empty bodies are invalid for body-bearing endpoints. Duplicate known JSON
+// keys
 // follow encoding/json's last-value semantics; no stricter claim is made.
 func Decode(
 	w http.ResponseWriter,
@@ -81,24 +109,33 @@ func Decode(
 	body := http.MaxBytesReader(w, r.Body, limit)
 	defer body.Close()
 
- data,err:=io.ReadAll(body)
- if err==nil && !utf8.Valid(data){err=errors.New("invalid UTF-8 JSON")}
- if err==nil && (len(bytes.TrimSpace(data))==0 || bytes.TrimSpace(data)[0]!='{') {
-  err=errors.New("expected JSON object")
- }
- if err==nil {
-  decoder:=json.NewDecoder(bytes.NewReader(data))
-  decoder.DisallowUnknownFields()
-  err=decoder.Decode(target)
-  if err==nil {
-   var extra any
-   trailing:=decoder.Decode(&extra)
-   if !errors.Is(trailing,io.EOF) {
-    err=trailing
-    if err==nil { err=errors.New("extra JSON") }
-   }
-  }
- }
+	data, err := io.ReadAll(body)
+	if err == nil && !utf8.Valid(data) {
+		err = errors.New("invalid UTF-8 JSON")
+	}
+
+	if err == nil &&
+		(len(bytes.TrimSpace(data)) == 0 || bytes.TrimSpace(data)[0] != '{') {
+		err = errors.New("expected JSON object")
+	}
+
+	if err == nil {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+
+		err = decoder.Decode(target)
+		if err == nil {
+			var extra any
+
+			trailing := decoder.Decode(&extra)
+			if !errors.Is(trailing, io.EOF) {
+				err = trailing
+				if err == nil {
+					err = errors.New("extra JSON")
+				}
+			}
+		}
+	}
 
 	if err != nil {
 		var oversized *http.MaxBytesError

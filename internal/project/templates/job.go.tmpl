@@ -1,28 +1,49 @@
 package {{.Group}}
 
 import (
- "bytes"
- "encoding/json"
- "io"
- "unicode/utf8"
- models "{{.Module}}/internal/models/{{.OperationGroup}}"
- jobs "github.com/plutoframework/pluto-jobs"
+	"bytes"
+	"encoding/json"
+	"io"
+	"unicode/utf8"
+	models "{{.Module}}/internal/models/{{.OperationGroup}}"
+	jobs "github.com/plutoframework/pluto-jobs"
 )
 
 // {{.Action}}Payload is the same portable input contract used by every entry.
 type {{.Action}}Payload = models.{{.OperationAction}}Request
 
-func New{{.Action}}(payload {{.Action}}Payload, options jobs.Options) (jobs.Request,error) {
- {{if .Multi}}if options.TenantID==nil || *options.TenantID=="" {return jobs.Request{},jobs.ErrInvalid}{{end}}
- return jobs.NewRequest({{.Action}}Kind,payload,options)
+func New{{.Action}}(
+	payload {{.Action}}Payload,
+	options jobs.Options,
+) (jobs.Request, error) {
+	{{if .Multi}}
+	if options.TenantID == nil || *options.TenantID == "" {
+		return jobs.Request{}, jobs.ErrInvalid
+	}{{end}}
+
+	return jobs.NewRequest({{.Action}}Kind, payload, options)
 }
 
-func Decode{{.Action}}(job jobs.Job) ({{.Action}}Payload,error) {
- var input {{.Action}}Payload
- if !utf8.Valid(job.Payload){return input,jobs.ErrInvalid}
- if err:=job.Validate();err!=nil || job.Kind!={{.Action}}Kind{return input,jobs.ErrInvalid}
- decoder:=json.NewDecoder(bytes.NewReader(job.Payload));decoder.DisallowUnknownFields()
- if err:=decoder.Decode(&input);err!=nil{return input,jobs.ErrInvalid}
- if err:=decoder.Decode(new(any));err!=io.EOF{return input,jobs.ErrInvalid}
- return input,nil
+func Decode{{.Action}}(job jobs.Job) ({{.Action}}Payload, error) {
+	var input {{.Action}}Payload
+	if !utf8.Valid(job.Payload) {
+		return input, jobs.ErrInvalid
+	}
+
+	if err := job.Validate(); err != nil || job.Kind != {{.Action}}Kind {
+		return input, jobs.ErrInvalid
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(job.Payload))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&input); err != nil {
+		return input, jobs.ErrInvalid
+	}
+
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return input, jobs.ErrInvalid
+	}
+
+	return input, nil
 }
