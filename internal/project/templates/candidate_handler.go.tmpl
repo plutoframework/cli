@@ -1,0 +1,44 @@
+package {{.Group}}
+
+import (
+ "net/http"
+ "strconv"
+ "strings"
+ "{{.Module}}/internal/access"
+ models "{{.Module}}/internal/models/{{.Group}}"
+ operations "{{.Module}}/internal/operations/{{.Group}}"
+ "{{.Module}}/internal/paths"
+ "{{.Module}}/internal/transport"
+ "github.com/go-chi/chi/v5"
+)
+
+type {{.Action}}Operations = operations.{{.Action}}Boundary
+func Register{{.Action}}(reg transport.Registrar,operation {{.Action}}Operations,bodyLimit int64){
+ reg.Handle(paths.{{.Symbol}},func(w http.ResponseWriter,r *http.Request){
+  input:=models.{{.Action}}Request{}
+  {{if .Body}}if !transport.Decode(w,r,&input,bodyLimit){return}{{end}}
+  source:={{q .ResourceSource}}
+  selected:=""
+  switch {
+  case strings.HasPrefix(source,"path:"):selected=chi.URLParam(r,strings.TrimPrefix(source,"path:"))
+  case strings.HasPrefix(source,"query:"):selected=r.URL.Query().Get(strings.TrimPrefix(source,"query:"))
+  case source=="body":selected=input.ResourceID
+  case source=="collection":
+   if raw:=r.URL.Query().Get("limit");raw!=""{value,err:=strconv.Atoi(raw);if err!=nil||value<=0{transport.Error(w,r,400,"invalid_limit");return};input.Limit=value}
+   input.Cursor=r.URL.Query().Get("cursor")
+  default:transport.Error(w,r,500,"unsupported_resource_source");return
+  }
+  if source!="collection"{
+   if selected==""||(input.ResourceID!=""&&input.ResourceID!=selected){transport.Error(w,r,400,"resource_binding_conflict");return}
+   input.ResourceID=selected
+  }
+  key:=r.Header.Get("Idempotency-Key")
+  {{if eq .Contract.Idempotency "required"}}if key==""{transport.Error(w,r,400,"idempotency_key_required");return}{{end}}
+  if key!=""{if input.IdempotencyKey!=""&&input.IdempotencyKey!=key{transport.Error(w,r,400,"idempotency_key_conflict");return};input.IdempotencyKey=key}
+  caller,err:=access.CallerFromHTTP(r.Context(),r.Header.Get("X-Tenant-ID"))
+  if err!=nil{transport.OperationError(w,r,err);return}
+  output,err:=operation.Execute(r.Context(),caller,input)
+  if err!=nil{transport.OperationError(w,r,err);return}
+  transport.JSON(w,paths.{{.Symbol}}.SuccessStatus,models.{{.Action}}Response{Data:output{{if .Collection}}.Data,Page:output.Page{{end}}})
+ })
+}

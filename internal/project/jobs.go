@@ -10,10 +10,11 @@ import (
 )
 
 type Job struct {
-	Operation string `toml:"operation"`
-	Group     string `toml:"group"`
-	Action    string `toml:"action"`
-	Kind      string `toml:"kind"`
+	MaxAttempts int    `toml:"max_attempts,omitempty"`
+	Operation   string `toml:"operation"`
+	Group       string `toml:"group"`
+	Action      string `toml:"action"`
+	Kind        string `toml:"kind"`
 }
 
 func validateJobs(jobs []Job) error {
@@ -110,6 +111,10 @@ func jobData(m Manifest, job Job) (templateData, error) {
 }
 
 func JobFiles(m Manifest, job Job) (map[string][]byte, error) {
+	if m.Boundary.Mode == "candidate" {
+		return map[string][]byte{}, nil
+	}
+
 	data, err := jobData(m, job)
 	if err != nil {
 		return nil, err

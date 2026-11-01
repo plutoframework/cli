@@ -472,7 +472,7 @@ func TestGeneratedApplications(t *testing.T) {
 				before := snapshot(t, root)
 				mustInvoke(t, root, "fmt")
 				assertUnchanged(t, before, snapshot(t, root))
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 				assertUnchanged(t, before, snapshot(t, root))
 			})
 

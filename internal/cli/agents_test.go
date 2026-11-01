@@ -84,7 +84,7 @@ func TestAgentScaffoldConsumers(t *testing.T) {
 				external(t, root, "go", "test", "-race", "./...")
 				external(t, root, "go", "vet", "./...")
 				mustInvoke(t, root, "fmt")
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 			},
 		)
 	}

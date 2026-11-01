@@ -135,7 +135,7 @@ sql:
         sql_package: pgx/v5
 `)
 	files["db/migrations/001_initial.sql"] = []byte(
-		"-- Foundation only: no application tables or migration runner yet.\nCREATE TABLE schema_metadata (version bigint PRIMARY KEY);\nINSERT INTO schema_metadata (version) VALUES (1);\n",
+		initialMigrationSQL,
 	)
 	files["db/queries/schema.sql"] = []byte(
 		"-- name: SchemaVersion :one\nSELECT version FROM schema_metadata ORDER BY version DESC LIMIT 1;\n",

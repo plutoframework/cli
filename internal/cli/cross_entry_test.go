@@ -124,16 +124,7 @@ func TestCrossEntryOperationConsumer(t *testing.T) {
 
 	external(t, root, "go", "mod", "tidy")
 	external(t, root, "go", "test", "-race", "./...")
-	mustInvoke(
-		t,
-		root,
-		"architecture",
-		"check",
-		"--directory",
-		root,
-		"--format",
-		"json",
-	)
+	assertPublishedDraft(t, root)
 
 	// A separately constructed worker can compile but cannot enter the supported
 	// app through an authored registry replacement, even without Handler/Job types.

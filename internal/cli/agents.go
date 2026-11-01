@@ -13,6 +13,7 @@ import (
 
 func addAgentCommand(options Options) *cobra.Command {
 	var (
+		approval    string
 		permission  string
 		operationID string
 		provider    string
@@ -55,6 +56,7 @@ func addAgentCommand(options Options) *cobra.Command {
 				Action:     args[1],
 				Permission: permission,
 				Provider:   provider,
+				Approval:   approval,
 			}
 			m.SchemaVersion = project.SchemaVersion
 
@@ -157,6 +159,8 @@ func addAgentCommand(options Options) *cobra.Command {
 			return nil
 		},
 	}
+	command.Flags().
+		StringVar(&approval, "approval", "", "Candidate write tool approval: host")
 	command.Flags().
 		StringVar(&operationID, "operation", "", "Declared protected read operation to invoke")
 	command.Flags().

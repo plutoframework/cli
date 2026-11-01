@@ -83,6 +83,19 @@ func Vet(
 		return err
 	}
 
+	for _, diagnostic := range InspectArchitecture(root).Diagnostics {
+		if diagnostic.ID == "ARCH401" {
+			return fmt.Errorf(
+				"architecture: %s:%d: %s: %s; %s",
+				diagnostic.File,
+				diagnostic.Line,
+				diagnostic.ID,
+				diagnostic.Message,
+				diagnostic.Repair,
+			)
+		}
+	}
+
 	tool, err := linter(ctx)
 	if err != nil {
 		return err
@@ -368,7 +381,7 @@ func Contracts(root string, m Manifest) error {
 			strings.HasPrefix(
 				diagnostic.ID,
 				"ARCH30",
-			) || strings.HasPrefix(diagnostic.ID, "ARCH50") {
+			) || strings.HasPrefix(diagnostic.ID, "ARCH50") || strings.HasPrefix(diagnostic.ID, "ARCH6") {
 			return fmt.Errorf(
 				"architecture: %s:%d: %s: %s; %s",
 				diagnostic.File,

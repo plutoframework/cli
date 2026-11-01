@@ -78,16 +78,7 @@ func TestManagedOperationGateConsumer(t *testing.T) {
 		"-count=1",
 		"./internal/operations/widgets",
 	)
-	mustInvoke(
-		t,
-		root,
-		"architecture",
-		"check",
-		"--directory",
-		root,
-		"--format",
-		"json",
-	)
+	assertPublishedDraft(t, root)
 
 	bypassPath := filepath.Join(
 		root,

@@ -1,0 +1,21 @@
+package identity
+
+import (
+ "context"
+ "{{.Module}}/internal/domain"
+ "github.com/jackc/pgx/v5/pgxpool"
+ rbac "github.com/plutoframework/pluto-rbac"
+)
+
+// Memberships reads current assignments for the exact verified subject/tenant.
+// Constructors and callers are restricted to the managed composition root.
+type Memberships struct{pool *pgxpool.Pool}
+func NewMemberships(pool *pgxpool.Pool)*Memberships{return &Memberships{pool:pool}}
+func(m *Memberships)Resolve(ctx context.Context,subject,tenant string)(domain.Principal,error){
+ if m==nil||m.pool==nil||subject==""||tenant==""{return domain.Principal{},domain.ErrUnauthenticated}
+ var values []string
+ if err:=m.pool.QueryRow(ctx,`SELECT "roles" FROM "pluto_resource_memberships" WHERE "actor_id"=$1 AND "tenant_id"=$2`,subject,tenant).Scan(&values);err!=nil{return domain.Principal{},domain.ErrForbidden}
+ roles:=make([]rbac.RoleID,len(values));for index,value:=range values{roles[index]=rbac.RoleID(value)}
+ return domain.Principal{ActorID:subject,TenantID:tenant,Roles:roles},nil
+}
+func(m *Memberships)VerifyMembership(ctx context.Context,subject,tenant string)error{_,err:=m.Resolve(ctx,subject,tenant);return err}

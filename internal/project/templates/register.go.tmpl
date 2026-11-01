@@ -16,7 +16,7 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 "github.com/plutoframework/pluto-auth/httpauth"
  "github.com/plutoframework/pluto-core/httpidem"
- "github.com/plutoframework/pluto-core/idempotency"
+ {{if not .Candidate}}"github.com/plutoframework/pluto-core/idempotency"{{end}}
 )
 
 // Authenticator validates bearer credentials and, for multi tenancy, selected
@@ -112,16 +112,16 @@ func (reg Registrar) Handle(endpoint paths.Endpoint, handler http.HandlerFunc) {
 				return
 			}
 
-   if endpoint.Idempotent {
+   {{if not .Candidate}}if endpoint.Idempotent {
     if reg.Idempotency==nil { Error(writer,r,503,"idempotency_unavailable");return }
     reg.Idempotency.Serve(writer,r,idempotency.Scope{Subject:principal.ActorID,{{if .Multi}}Tenant:principal.TenantID,{{end}}Operation:endpoint.ID},handler)
     return
-   }
+   }{{end}}
 			handler(writer, r)
         })
     var secured http.Handler = invoke
     if endpoint.Authenticated && reg.Sessions != nil {
-        secured = reg.Sessions.Require(invoke)
+        secured = reg.Sessions.{{if .Candidate}}RequireIdentity{{else}}Require{{end}}(invoke)
     } else if endpoint.SessionOnly {
         secured = http.HandlerFunc(func(w http.ResponseWriter,r *http.Request) { Error(w,r,401,"unauthenticated") })
     }

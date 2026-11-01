@@ -94,6 +94,10 @@ func OperationFiles(
 	m Manifest,
 	operation Operation,
 ) (map[string][]byte, error) {
+	if m.Boundary.Mode == "candidate" {
+		return map[string][]byte{}, nil
+	}
+
 	files := map[string][]byte{}
 
 	for _, item := range []struct{ directory, template, suffix string }{{"models", "models.go", ".go"}, {"operations", "operation.go", ".go"}, {"operations", "operation_test.go", "_test.go"}} {
@@ -167,7 +171,8 @@ func validateOperations(m Manifest) error {
 
 	for _, agent := range m.Agents {
 		operation, ok := m.Operation(agent.Operation)
-		if !ok || operation.Public || operation.Write ||
+		if !ok || operation.Public ||
+			(operation.Write && m.Boundary.Mode != "candidate") ||
 			operation.Permission == "" ||
 			operation.Collection {
 			return fmt.Errorf(

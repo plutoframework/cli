@@ -59,7 +59,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 	root, err := filepath.Abs(directory)
 	r := ArchitectureReport{
 		Version:      1,
-		CheckedScope: "passed means only implemented production Go dependency, inventory, manifest, managed operation/entry ownership, source-derived lifecycle boundary and local invocation checks have no diagnostics; unassessed guarantees are never implied",
+		CheckedScope: "passed means only implemented production Go dependency, inventory, manifest, managed operation/entry ownership, supported candidate contract/source confinement, source-derived lifecycle boundary and local invocation checks have no diagnostics; unassessed guarantees are never implied",
 		Directory:    root,
 		Packages:     []ArchitecturePackage{},
 		Diagnostics:  []ArchitectureDiagnostic{},
@@ -98,7 +98,8 @@ func InspectArchitecture(directory string) ArchitectureReport {
 	manifest, err := os.ReadFile(filepath.Join(root, "pluto.toml"))
 
 	var m struct {
-		SchemaVersion int `toml:"schema_version"`
+		SchemaVersion int             `toml:"schema_version"`
+		Boundary      BoundaryProfile `toml:"boundary"`
 	}
 	if err != nil {
 		add(
@@ -396,6 +397,10 @@ func InspectArchitecture(directory string) ArchitectureReport {
 		)
 	}
 
+	if m.Boundary.Mode == "candidate" {
+		r.Unassessed[0] = "supported candidate source ownership and declared capability shape are checked; arbitrary business semantics, deployed SQL behavior, downstream idempotency, dependency runtime correctness and trusted CI execution are not proved by source inspection"
+	}
+
 	r.Diagnostics = append(
 		r.Diagnostics,
 		operationBoundaryDiagnostics(root, manifest)...)
@@ -408,6 +413,16 @@ func InspectArchitecture(directory string) ArchitectureReport {
 	)
 	r.Diagnostics = append(r.Diagnostics, lifecycleDiagnostics...)
 	r.Unassessed = append(r.Unassessed, lifecycleUnassessed...)
+	r.Diagnostics = append(
+		r.Diagnostics,
+		inspectCandidateModules(root, manifest)...)
+	candidateDiagnostics, candidateUnassessed := inspectCandidateBoundaries(
+		root,
+		module,
+		manifest,
+	)
+	r.Diagnostics = append(r.Diagnostics, candidateDiagnostics...)
+	r.Unassessed = append(r.Unassessed, candidateUnassessed...)
 	primitiveDiagnostics, primitiveUnassessed := inspectPrimitiveBoundaries(
 		root,
 		module,
@@ -438,7 +453,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 }
 
 func architectureRole(path string) string {
-	for _, item := range []struct{ root, role string }{{"cmd", "composition"}, {"internal/app", "composition"}, {"internal/config", "configuration"}, {"internal/access", "policy"}, {"internal/features", "domain"}, {"internal/pluto", "entry"}, {"internal/development", "composition"}, {"internal/handlers", "entry"}, {"internal/background", "entry"}, {"internal/jobs", "entry"}, {"internal/agents", "entry"}, {"internal/jobcontracts", "contract"}, {"internal/transport", "entry"}, {"internal/tools", "entry"}, {"internal/operations", "operations"}, {"internal/domain", "domain"}, {"internal/storage", "data"}, {"internal/caching", "data"}, {"internal/auth", "infrastructure"}, {"internal/infrastructure", "infrastructure"}, {"internal/paths", "contract"}, {"internal/models", "contract"}, {"internal/api", "contract"}, {"web", "presentation"}} {
+	for _, item := range []struct{ root, role string }{{"cmd", "composition"}, {"internal/app", "composition"}, {"internal/config", "configuration"}, {"internal/access", "policy"}, {"internal/features", "domain"}, {"internal/pluto", "entry"}, {"internal/development", "composition"}, {"internal/handlers", "entry"}, {"internal/background", "entry"}, {"internal/jobs", "entry"}, {"internal/agents", "entry"}, {"internal/jobcontracts", "contract"}, {"internal/transport", "entry"}, {"internal/tools", "entry"}, {"internal/operations", "operations"}, {"internal/domain", "domain"}, {"internal/storage", "data"}, {"internal/caching", "data"}, {"internal/auth", "infrastructure"}, {"internal/infrastructure", "infrastructure"}, {"internal/paths", "contract"}, {"internal/models", "contract"}, {"internal/ports", "contract"}, {"internal/api", "contract"}, {"web", "presentation"}} {
 		if path == item.root || strings.HasPrefix(path, item.root+"/") {
 			return item.role
 		}

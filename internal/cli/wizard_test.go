@@ -403,7 +403,7 @@ func TestWizardCoversGeneratorFlags(t *testing.T) {
 
 		command.Flags().VisitAll(func(flag *pflag.Flag) {
 			if flag.Name != "interactive" && flag.Name != "no-input" &&
-				!fields[flag.Name] {
+				!fields[flag.Name] && !directWizardFlag(flag.Name) {
 				t.Errorf(
 					"%s flag --%s has no wizard field",
 					command.CommandPath(),
@@ -431,5 +431,23 @@ func TestWizardMaintenancePlans(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(plan, test.want) {
 			t.Fatal(test.kind, plan, err)
 		}
+	}
+}
+
+func TestWizardRejectsDirectOnlyCandidateFlagsWithoutWrites(t *testing.T) {
+	for _, test := range []struct{ args []string }{{[]string{"init", ".", "--boundary-profile", "candidate"}}, {[]string{"init", ".", "--candidate-auth-source", "/missing/auth"}}, {[]string{"init", ".", "--candidate-rbac-source", "/missing/rbac"}}, {[]string{"init", ".", "--candidate-core-source", "/missing/core"}}, {[]string{"init", ".", "--candidate-jobs-source", "/missing/jobs"}}, {[]string{"add", "endpoint", "widgets", "Read", "--resource-source", "body"}}, {[]string{"add", "job", "widgets", "Read", "--max-attempts", "3"}}, {[]string{"add", "agent", "widgets", "Read", "--approval", "host"}}} {
+		root := temporary(t)
+		before := snapshot(t, root)
+
+		args := append([]string{"--interactive"}, test.args...)
+		if _, err := invoke(
+			t,
+			root,
+			args...); err == nil ||
+			!strings.Contains(err.Error(), "requires --no-input") {
+			t.Fatalf("candidate choice lost in wizard %v: %v", args, err)
+		}
+
+		assertUnchanged(t, before, snapshot(t, root))
 	}
 }

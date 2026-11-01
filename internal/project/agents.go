@@ -8,6 +8,7 @@ import (
 const AgentVersion = "v0.1.3"
 
 type Agent struct {
+	Approval   string `toml:"approval,omitempty"`
 	Operation  string `toml:"operation"`
 	Group      string `toml:"group"`
 	Action     string `toml:"action"`
@@ -67,6 +68,10 @@ func agentData(m Manifest, a Agent) (templateData, error) {
 }
 
 func AgentFiles(m Manifest, a Agent) (map[string][]byte, error) {
+	if m.Boundary.Mode == "candidate" {
+		return map[string][]byte{}, nil
+	}
+
 	data, err := agentData(m, a)
 	if err != nil {
 		return nil, err

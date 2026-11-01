@@ -11,6 +11,7 @@ import (
 
 func addJobCommand(options Options) *cobra.Command {
 	var (
+		maxAttempts int
 		kind        string
 		operationID string
 		permission  string
@@ -49,10 +50,11 @@ func addJobCommand(options Options) *cobra.Command {
 			}
 
 			job := project.Job{
-				Group:     args[0],
-				Action:    args[1],
-				Kind:      kind,
-				Operation: operation.ID(),
+				Group:       args[0],
+				Action:      args[1],
+				Kind:        kind,
+				MaxAttempts: maxAttempts,
+				Operation:   operation.ID(),
 			}
 
 			manifest.Jobs = append(
@@ -128,6 +130,8 @@ func addJobCommand(options Options) *cobra.Command {
 			return nil
 		},
 	}
+	command.Flags().
+		IntVar(&maxAttempts, "max-attempts", 0, "Explicit finite candidate delivery attempt budget (1..100)")
 	command.Flags().
 		StringVar(&operationID, "operation", "", "Declared gated operation to invoke")
 	command.Flags().

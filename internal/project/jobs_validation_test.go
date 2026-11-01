@@ -10,8 +10,11 @@ func TestJobKindUniqueness(t *testing.T) {
 	if err := validateJobs(jobs); err != nil {
 		t.Fatal(err)
 	}
+
 	jobs[1].Kind = jobs[0].Kind
 	if err := validateJobs(jobs); err == nil {
-		t.Fatal("distinct job identities accepted duplicate persisted delivery kind")
+		t.Fatal(
+			"distinct job identities accepted duplicate persisted delivery kind",
+		)
 	}
 }

@@ -11,6 +11,8 @@ import (
 
 	"{{.Module}}/internal/domain"
  "github.com/plutoframework/pluto-core/pagination"
+ "github.com/plutoframework/pluto-core/idempotency"
+ auth "github.com/plutoframework/pluto-auth"
 
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -42,7 +44,11 @@ func Error(w http.ResponseWriter, r *http.Request, status int, code string) {
 
 func OperationError(w http.ResponseWriter, r *http.Request, err error) {
  if errors.Is(err,pagination.ErrInvalid) {Error(w,r,400,"invalid_pagination");return}
-	if errors.Is(err, domain.ErrUnauthenticated) {
+	if errors.Is(err,domain.ErrInvalidInput) { Error(w,r,http.StatusBadRequest,"invalid_input");return }
+ if errors.Is(err,idempotency.ErrInProgress) {Error(w,r,http.StatusConflict,"idempotency_pending");return}
+ if errors.Is(err,domain.ErrConflict)||errors.Is(err,idempotency.ErrConflict)||errors.Is(err,idempotency.ErrOwnership) { Error(w,r,http.StatusConflict,"conflict");return }
+ if errors.Is(err,domain.ErrExportLimit) { Error(w,r,http.StatusUnprocessableEntity,"export_limit");return }
+ if errors.Is(err, domain.ErrUnauthenticated)||errors.Is(err,auth.ErrUnauthenticated) {
 		Error(w, r, http.StatusUnauthorized, "unauthenticated")
 
 		return

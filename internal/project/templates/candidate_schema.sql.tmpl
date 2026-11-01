@@ -1,0 +1,23 @@
+-- Explicit application migration. Never execute this from a constructor.
+CREATE TABLE "{{ .Resource.Table }}" (
+    "tenant_id" text NOT NULL,
+    "id" text NOT NULL,
+    "owner_id" text NOT NULL,
+    "state" text NOT NULL CHECK ("state" IN ({{ range $index, $state := .Resource.States }}{{ if $index }}, {{ end }}'{{ $state }}'{{ end }})),
+    "version" bigint NOT NULL CHECK ("version" >= 1),
+    "value" text NOT NULL CHECK (octet_length("value") <= {{ .Resource.MaxValueBytes }}),
+    PRIMARY KEY ("tenant_id", "id")
+);
+
+-- Shared across declared resources. The validator reserves the pluto_ prefix.
+-- Core idempotency and Jobs migrations must also be applied explicitly once.
+CREATE TABLE IF NOT EXISTS "pluto_resource_audit" (
+    "resource" text NOT NULL,
+    "tenant_id" text NOT NULL,
+    "id" text NOT NULL,
+    "version" bigint NOT NULL,
+    "operation" text NOT NULL,
+    "actor_id" text NOT NULL,
+    "event" text NOT NULL,
+    PRIMARY KEY ("resource", "tenant_id", "id", "version", "operation")
+);

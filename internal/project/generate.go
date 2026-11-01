@@ -16,6 +16,8 @@ import (
 var templates embed.FS
 
 type templateData struct {
+	Manifest             Manifest
+	MaxAttempts          int
 	Resource             ResourceContract
 	Contract             OperationContract
 	ContractOperations   []OperationContract
@@ -56,6 +58,8 @@ func dataFor(m Manifest, e Endpoint) templateData {
 	}
 
 	return templateData{
+		Manifest:         m,
+		Candidate:        m.Boundary.Mode == "candidate",
 		Module:           m.Project.Module,
 		Name:             m.Project.Name,
 		Prefix:           m.Project.EnvPrefix,
@@ -89,7 +93,19 @@ func render(name string, data templateData) ([]byte, error) {
 	}
 
 	tmpl, err := template.New(name).
-		Funcs(template.FuncMap{"q": strconv.Quote}).
+		Funcs(template.FuncMap{"q": strconv.Quote, "upperFirst": func(value string) string {
+			if value == "" {
+				return ""
+			}
+
+			return strings.ToUpper(value[:1]) + value[1:]
+		}, "lowerFirst": func(value string) string {
+			if value == "" {
+				return ""
+			}
+
+			return strings.ToLower(value[:1]) + value[1:]
+		}}).
 		Parse(string(source))
 	if err != nil {
 		return nil, err
@@ -110,6 +126,14 @@ func render(name string, data templateData) ([]byte, error) {
 // Managed derives only files wholly owned by the generator. User source files
 // are created once and never edited. No string replacement of user code occurs.
 func Managed(m Manifest) (map[string][]byte, error) {
+	if m.Boundary.Mode == "candidate" {
+		return candidateManaged(m)
+	}
+
+	return managedPublished(m)
+}
+
+func managedPublished(m Manifest) (map[string][]byte, error) {
 	resolved := []Endpoint{}
 
 	for _, entry := range m.Endpoints {
@@ -379,6 +403,10 @@ func Managed(m Manifest) (map[string][]byte, error) {
 }
 
 func EndpointFiles(m Manifest, e Endpoint) (map[string][]byte, error) {
+	if m.Boundary.Mode == "candidate" {
+		return map[string][]byte{}, nil
+	}
+
 	view, err := m.OperationEndpoint(e)
 	if err != nil {
 		return nil, err
@@ -471,6 +499,16 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	for path, name := range layout {
+		if m.Boundary.Mode == "candidate" {
+			if _, exists := files[path]; exists {
+				continue
+			}
+
+			if strings.HasSuffix(path, ".go") {
+				continue
+			}
+		}
+
 		data, err := render(name, dataFor(m, Endpoint{}))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
@@ -481,6 +519,15 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 
 	for path, data := range ToolFiles(m) {
 		files[path] = data
+	}
+
+	files["go.mod"], err = ConfigureBoundaryModules(
+		m.Boundary,
+		len(m.Agents) > 0,
+		files["go.mod"],
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	manifest, err := Encode(m)

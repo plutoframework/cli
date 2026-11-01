@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -100,6 +101,15 @@ func decorateWizard(
 			return cmd.Help()
 		}
 
+		for _, name := range []string{"boundary-profile", "candidate-auth-source", "candidate-rbac-source", "candidate-core-source", "candidate-jobs-source", "resource-source", "max-attempts", "approval"} {
+			if flag := cmd.Flags().Lookup(name); flag != nil && flag.Changed {
+				return fmt.Errorf(
+					"--%s requires --no-input; this candidate choice is not supported by the wizard",
+					name,
+				)
+			}
+		}
+
 		if !options.terminal(cmd.InOrStdin(), cmd.OutOrStdout()) {
 			return errors.New(
 				"wizard requires terminal input and output; use explicit arguments with --no-input",
@@ -153,4 +163,22 @@ func decorateWizard(
 			return next.ExecuteContext(cmd.Context())
 		}
 	}
+}
+
+// Candidate choices are intentionally direct-only until the wizard can preserve
+// the complete profile. Explicit flags must fail rather than be discarded.
+func directWizardFlag(name string) bool {
+	switch name {
+	case "boundary-profile",
+		"candidate-auth-source",
+		"candidate-rbac-source",
+		"candidate-core-source",
+		"candidate-jobs-source",
+		"resource-source",
+		"max-attempts",
+		"approval":
+		return true
+	}
+
+	return false
 }

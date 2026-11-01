@@ -1,3 +1,63 @@
+{{if .Candidate}}# {{.Name}}
+
+This application uses Pluto's explicit local candidate boundary profile. Candidate
+Auth/RBAC/Core/Jobs APIs are unreleased; pluto.toml records their source checkouts
+and go.mod has validated local replacements. Published dependency pins remain
+visible. Do not remove replacements and claim the candidate contract still works.
+
+Declare supported resources, operations, roles, HTTP entries, jobs and host-approved
+agent tools in an atomic blueprint:
+
+```sh
+pluto --no-input add blueprint --file contracts.toml
+go mod tidy
+pluto fmt
+pluto openapi
+pluto architecture check --directory . --format json
+pluto vet
+```
+
+All production Go is managed. Extend the framework contract for unsupported
+business patterns. Preserve authored files and migrate explicitly; never bypass
+managed integrity by editing generated handlers, operations or storage adapters.
+The supported resource pattern has explicit normalization, pure lifecycle guards,
+current verified session/membership/resource gates, narrow data ports, atomic
+mutation/audit/outbox/replay, visible scoped pages, bounded export and cache reads.
+
+Apply all numbered db/migrations SQL explicitly before starting an API or worker.
+Constructors only connect; they never create schemas, users, sessions, assignments
+or fixture credentials. Provision trusted sessions and exact tenant memberships
+through trusted administration. The declared role catalog grants capabilities to
+role IDs; it never assigns an actor to a role. Empty or revoked assignments deny.
+
+Set deployment configuration using {{.Prefix}} variables. DATABASE_URL must point
+to the migrated PostgreSQL database. Effect destinations use
+{{.Prefix}}EFFECT_<UPPER_GROUP>_<UPPER_ACTION>_URL. Worker service credentials use
+{{.Prefix}}JOB_<UPPER_GROUP>_<UPPER_ACTION>_CREDENTIAL. Never put secrets in metadata,
+model prompts, queue payload authority fields or source code. HTTP bearer/cookie
+verification preserves the configured Origin and ambiguous-credential rules.
+
+```sh
+go run ./cmd/api
+go run ./cmd/worker
+```
+
+The managed runtime exposes sealed shared operations, an HTTP handler, scoped
+verified-session callbacks and immutable worker construction. Agent writes require
+host preparation of the exact opaque operation intent. Model arguments cannot
+choose authority, resource, input or replay key. Agent results separate verified
+write receipts from model narrative; a narrative alone never proves completion.
+
+The data transaction owns idempotency. Reuse the same logical key after uncertain
+outcomes; pending claims are not stolen. Outbox jobs carry typed validated payloads
+and finite attempt budgets. The configured downstream endpoint must honor stable
+Idempotency-Key values; remote exactly-once delivery is not claimed.
+
+Read AGENTS.md for ownership rules. Source checks inspect the supported managed
+shape; real SQL/cross-entry conformance is tested by the framework's candidate
+profile. Arbitrary business semantics and external dependency/provider correctness
+are not established by a passing structural source report.
+{{else}}
 # {{.Name}}
 
 Generated with the provisional Pluto CLI. Requires Go 1.25.5+. These app-local
@@ -95,6 +155,7 @@ pluto add endpoint widgets Get --method GET --path '/api/widgets/{id}' \
 pluto add endpoint reports List --method GET --path /api/reports \
   --name 'List reports' --description 'List authorized reports.'
 pluto fmt
+pluto openapi
 pluto vet
 ```
 
@@ -347,6 +408,7 @@ DDL at startup. For session-only apps, migration 004 is intentionally absent.
 ```sh
 pluto add job invoices Send --kind invoice.send
 pluto fmt
+pluto openapi
 pluto vet
 # Export DATABASE_URL with the app prefix, then:
 go run ./cmd/worker
@@ -473,4 +535,6 @@ OIDC browser starts use a same-origin API POST with `Accept: application/json`,
 then navigate to the server-built `data.authorization_url`. This preserves
 trusted Origin under the default no-referrer policy. A native form may send
 `Origin: null` and is intentionally denied; no Origin guard is weakened.
+{{end}}
+
 {{end}}

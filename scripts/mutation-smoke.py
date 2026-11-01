@@ -8,6 +8,11 @@ import tempfile
 
 root = Path(__file__).resolve().parent.parent
 mutations = [
+    ("candidate compiler directive integrity", "internal/project/candidate_integrity.go", 'matches = candidateSourceEquivalent(actual, files[path])', 'matches = Equivalent(actual, files[path])', './internal/project#TestCandidateIntegrityRejectsExcludedGateAndSQLChanges'),
+    ("candidate constructor ownership", "internal/project/candidate_boundary_source.go", 'rules.capabilities[file.namespace+"."+value.Name]; restricted &&', 'rules.capabilities[file.namespace+"."+value.Name]; restricted && false &&', './internal/project#TestCandidateBoundaryCapabilitiesAndForgery'),
+    ("candidate private authority fields", "internal/project/candidate_boundary.go", 'owners != nil &&', 'owners != nil && false &&', './internal/project#TestCandidateOwnershipBranches'),
+    ("candidate unsafe confinement", "internal/project/candidate_boundary.go", 'if path == "unsafe" {', 'if path == "disabled/unsafe" {', './internal/project#TestCandidateBoundaryCapabilitiesAndForgery'),
+    ("candidate closed production ownership", "internal/project/candidate_boundary.go", 'if rules.managed[file.path] {', 'if true {', './internal/project#TestCandidateOwnershipBranches'),
     ("domain normalization placement", "internal/project/primitive_boundaries.go", 'if operationCode && dependency == "strings" {', 'if false && operationCode && dependency == "strings" {', './internal/project#TestPrimitivePlacementAndHelperBypasses'),
     ("cache boundary placement", "internal/project/primitive_boundaries.go", 'dependency == "github.com/plutoframework/pluto-core/cache"', 'dependency == "disabled/cache"', './internal/project#TestPrimitivePlacementAndHelperBypasses'),
     ("scoped pagination ownership", "internal/project/primitive_boundaries.go", 'capability == "Finish"', 'capability == "disabledFinish"', './internal/project#TestPrimitivePlacementAndHelperBypasses'),
@@ -159,6 +164,20 @@ mutations = [
     ),
 ]
 
+if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
+    mutations.extend([
+        ("candidate authoritative transition guard", "internal/project/templates/candidate_data.go.tmpl", 'return domain.Authorize{{ .Resource.Name }}Actor(operation.event, request.SubjectID, actualOwner)', 'return nil', 'TestCandidateGeneratedConsumer'),
+        ("candidate downstream stable delivery key", "internal/project/templates/candidate_effect.go.tmpl", 'request.Header.Set("Idempotency-Key",command.Key())', 'request.Header.Set("X-Idempotency-Key",command.Key())', 'TestCandidateGeneratedConsumer'),
+    ])
+
+required_assertions = {
+    "candidate private authority fields": "managed sibling altered opaque caller field",
+    "candidate closed production ownership": "unowned initializer accepted",
+    "candidate authoritative transition guard": "FORGED_ACTOR_FACTS_COMMITTED",
+    "candidate downstream stable delivery key": "TYPED_DELIVERY_SINK_REJECTED_PAYLOAD",
+    "candidate compiler directive integrity": "expected precise semantic integrity rejection",
+}
+
 results = []
 for name, relative, old, new, test in mutations:
     with tempfile.TemporaryDirectory(prefix="pluto-mutation-") as temporary:
@@ -185,7 +204,8 @@ for name, relative, old, new, test in mutations:
             if "[build failed]" in output or "syntax error" in output:
                 result = "invalid"
             elif run.returncode and "--- FAIL:" in output:
-                result = "killed"
+                expected = required_assertions.get(name)
+                result = "killed" if expected is None or expected in output else "invalid"
             elif run.returncode:
                 result = "invalid"
             else:

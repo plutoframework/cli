@@ -13,6 +13,7 @@ import (
 
 func initCommand(options Options) *cobra.Command {
 	var (
+		profile                                    project.BoundaryProfile
 		name, module, prefix                       string
 		localCredentials, oidc                     bool
 		cacheBackend                               string
@@ -59,6 +60,7 @@ func initCommand(options Options) *cobra.Command {
 			}
 
 			m := project.Manifest{
+				Boundary:      profile,
 				SchemaVersion: project.SchemaVersion,
 				Project: project.Project{
 					Name:      name,
@@ -161,6 +163,8 @@ func initCommand(options Options) *cobra.Command {
 			return nil
 		},
 	}
+	addBoundaryProfileFlags(command, &profile)
+
 	flags := command.Flags()
 	flags.StringVar(
 		&cacheBackend,

@@ -16,16 +16,21 @@ import (
 const SchemaVersion = 10
 
 type Manifest struct {
-	Operations    []Operation  `toml:"operations,omitempty"`
-	Agents        []Agent      `toml:"agents,omitempty"`
-	SchemaVersion int          `toml:"schema_version"`
-	Project       Project      `toml:"project"`
-	Capabilities  Capabilities `toml:"capabilities"`
-	Database      Database     `toml:"database"`
-	Development   Development  `toml:"development"`
-	Endpoints     []Endpoint   `toml:"endpoints,omitempty"`
-	Jobs          []Job        `toml:"jobs,omitempty"`
-	Frontend      *Frontend    `toml:"frontend,omitempty"`
+	Boundary           BoundaryProfile     `toml:"boundary"`
+	Resources          []ResourceContract  `toml:"resources,omitempty"`
+	OperationContracts []OperationContract `toml:"operation_contracts,omitempty"`
+	Effects            []EffectContract    `toml:"effects,omitempty"`
+	Roles              []RoleContract      `toml:"roles,omitempty"`
+	Operations         []Operation         `toml:"operations,omitempty"`
+	Agents             []Agent             `toml:"agents,omitempty"`
+	SchemaVersion      int                 `toml:"schema_version"`
+	Project            Project             `toml:"project"`
+	Capabilities       Capabilities        `toml:"capabilities"`
+	Database           Database            `toml:"database"`
+	Development        Development         `toml:"development"`
+	Endpoints          []Endpoint          `toml:"endpoints,omitempty"`
+	Jobs               []Job               `toml:"jobs,omitempty"`
+	Frontend           *Frontend           `toml:"frontend,omitempty"`
 }
 
 type Project struct {
@@ -50,19 +55,20 @@ type Development struct {
 	Docker bool `toml:"docker"`
 }
 type Endpoint struct {
-	Operation     string `toml:"operation"`
-	Collection    bool   `toml:"collection"`
-	Idempotency   string `toml:"idempotency"`
-	Group         string `toml:"group"`
-	Action        string `toml:"action"`
-	Name          string `toml:"name"`
-	Description   string `toml:"description"`
-	Method        string `toml:"method"`
-	Path          string `toml:"path"`
-	Public        bool   `toml:"public"`
-	Permission    string `toml:"permission,omitempty"`
-	Feature       string `toml:"feature,omitempty"`
-	ClientVisible bool   `toml:"feature_client_visible"`
+	ResourceSource string `toml:"resource_source,omitempty"`
+	Operation      string `toml:"operation"`
+	Collection     bool   `toml:"collection"`
+	Idempotency    string `toml:"idempotency"`
+	Group          string `toml:"group"`
+	Action         string `toml:"action"`
+	Name           string `toml:"name"`
+	Description    string `toml:"description"`
+	Method         string `toml:"method"`
+	Path           string `toml:"path"`
+	Public         bool   `toml:"public"`
+	Permission     string `toml:"permission,omitempty"`
+	Feature        string `toml:"feature,omitempty"`
+	ClientVisible  bool   `toml:"feature_client_visible"`
 }
 
 var (
@@ -80,6 +86,13 @@ var (
 )
 
 func (m Manifest) Validate() error {
+	if err := ValidateBoundaryProfile(
+		m.Boundary,
+		m.Capabilities.Tenancy,
+	); err != nil {
+		return err
+	}
+
 	if m.Capabilities.OIDC && !m.Capabilities.LocalCredentials {
 		return fmt.Errorf(
 			"OIDC requires --local-credentials for the shared account/session profile",
@@ -123,6 +136,10 @@ func (m Manifest) Validate() error {
 
 	if m.Database.Engine != "postgres" || m.Database.Queries != "sqlc" {
 		return fmt.Errorf("database requires engine=postgres and queries=sqlc")
+	}
+
+	if err := ValidateManifestContracts(m); err != nil {
+		return err
 	}
 
 	if err := validateOperations(m); err != nil {

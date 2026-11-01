@@ -26,10 +26,89 @@ pluto add endpoint widgets Get --method GET --path '/api/widgets/{id}' \
 pluto add endpoint reports List --method GET --path /api/reports \
   --name 'List reports' --description 'List authorized reports.'
 pluto fmt
+pluto openapi
 pluto vet
 go run ./cmd/api
 # curl http://127.0.0.1:8080/healthz
 ```
+
+## Explicit candidate boundary profile
+
+Protected operations in the published compatibility profile are drafts. Canonical
+`pluto architecture check` and `pluto vet` report `ARCH401`; compiling a draft does
+not establish identity, resource or data-contract adoption. There is no flag to
+waive these required obligations.
+
+The supported unreleased candidate profile uses explicit local checkouts. It
+keeps published dependency pins and writes validated local replacements; it never
+pretends those candidate APIs have been released. Candidate initialization needs
+`--no-input` and explicit multi tenancy. The wizard rejects this profile rather
+than losing its source paths.
+
+```sh
+pluto --no-input init /absolute/path/records --module example.com/records \
+  --multi-tenant --boundary-profile candidate \
+  --candidate-auth-source /absolute/path/pluto-auth \
+  --candidate-rbac-source /absolute/path/pluto-rbac \
+  --candidate-core-source /absolute/path/pluto-core \
+  --candidate-jobs-source /absolute/path/pluto-jobs
+cd /absolute/path/records
+pluto --no-input add blueprint --file record-contracts.toml
+go mod tidy
+pluto fmt
+pluto openapi
+pluto architecture check --directory . --format json
+pluto vet
+```
+
+A blueprint adds `resources`, `operations`, `operation_contracts`, `effects`,
+`roles`, `endpoints`, `jobs` and `agents` atomically. Unknown fields, conflicting
+filenames, missing authority or behavior obligations and unsupported combinations
+fail before writes. Existing authored files require explicit migration; generation
+never silently replaces them. Adding metadata never assigns an actor to a role.
+
+`resources` declare `group`, exported `name`, safe SQL `table`, cache `namespace`
+and positive `version`, `visibility` (`owner` or `tenant`), `initial_state`,
+`states`, deterministic `transitions` (`from`, `event`, `to`, explicit `guard`:
+`none`, `owner`, `not_owner`), `normalize` (`trim` or `none`), `max_value_bytes`,
+`page_limit`, `export_limit` and `cache_ttl_seconds`. Page bounds are at most 100;
+exports at most 10000; effect-producing values at most 8192 bytes. SQL identifiers
+are validated and quoted. Migrations are explicit, never constructor side effects.
+
+Each independent operation needs exactly one `operation_contracts` entry with
+matching `id`, `permission`, `public` and `idempotency`. It names a `resource`
+(`group.Name`), `kind` (`create`, `load`, `list`, `export`, `transition`, `effect`),
+`resource_policy` (`create`, `owner`, `tenant`), transition `event`, write replay
+contract (`required` or justified `exempt` using `exemption_reason`) and emitted
+`effects`. Reads require `idempotency = "none"`. List/export policy must match
+resource visibility; incompatible ownership guards fail validation.
+
+An effect declares `name`, target `operation`, typed delivery `kind` and finite
+`max_attempts` (1..100). Jobs declare the same operation reference and explicit
+`max_attempts`; effect-kind budgets must match. Worker identity comes from a
+configured session credential, not payload actor fields. Agent writes require
+`approval = "host"` and required replay: the host supplies the exact opaque
+operation intent; model arguments cannot choose identity, resource, input or key.
+
+HTTP endpoints declare `resource_source`: `body`, `path:name`, `query:name` or
+`collection`. Conflicting resource/key bindings fail. Collections forward bounded
+limit/cursor input into the scoped data port. The data transaction owns replay;
+candidate routes do not create a second HTTP response-capture claim.
+
+The scoped-record candidate owns all production Go files, including foundations,
+resource domain, operation workflow, ports, SQL adapters and entry adapters.
+Unsupported authored hooks, raw SQL clients, alternate handlers, reflection or
+unsafe escape hatches fail canonical checks. Extend the framework contract for
+new business patterns instead of editing generated files. Declared role catalogs
+compile against actual RBAC rules; current memberships come from explicit trusted
+SQL assignments. No users, sessions or assignments are automatically created.
+
+Source inspection checks this supported shape and exact managed integrity. The
+candidate test profile additionally exercises real SQL, current identity/resource
+checks, all three write entries and bounded delivery. It does not prove arbitrary
+business policy, remote provider idempotency or external dependency internals.
+Effects use stable downstream idempotency keys and finite retries; external
+exactly-once delivery is not claimed.
 
 ## Interactive terminal wizard
 
@@ -411,7 +490,12 @@ cookie/no-cache, reset/disable revocation, protected routes and logout. Existing
 single/multi generator tests retain pagination, idempotency, RBAC/flags and session
 compatibility checks. No messages leave test-process memory.
 
-## Jobs and transactional outbox (schema 6)
+## Historical jobs/outbox migration (schema 6)
+
+This section records the former authored-handler contract for migration reference.
+It is not the schema-10 generator contract. Use the independent operation/entry
+commands and explicit candidate profile above for current generation; do not copy
+these historical handler or background-binding ownership rules into a new app.
 
 Every new app imports published Pluto Jobs v0.1.1 and its Postgres adapter v0.1.0.
 It includes explicit migration `005_jobs.sql`, `cmd/worker`, an authored worker
@@ -421,6 +505,7 @@ provider client, implicit worker goroutine or copied worker implementation.
 ```sh
 pluto add job invoices Send --kind invoice.send
 pluto fmt
+pluto openapi
 pluto vet
 go run ./cmd/worker
 ```
@@ -680,6 +765,7 @@ pluto add agent purchases Review --permission purchases:read --dry-run
 pluto add agent purchases Review --permission purchases:read --provider openai
 go mod tidy
 pluto fmt
+pluto openapi
 pluto vet
 ```
 
@@ -743,6 +829,7 @@ change a database schema or wire operations automatically.
 
 ```sh
 pluto fmt
+pluto openapi
 pluto vet
 go test ./internal/domain/purchases -run '^$' -fuzz FuzzLifecycle -fuzztime=5s
 ```

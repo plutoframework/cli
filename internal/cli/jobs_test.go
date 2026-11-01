@@ -142,12 +142,7 @@ func TestGeneratedJobs(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if report := project.InspectArchitecture(root); !report.Passed {
-				t.Fatalf(
-					"generated job consumer has architecture diagnostics: %+v",
-					report.Diagnostics,
-				)
-			}
+			assertPublishedDraft(t, root)
 
 			before = snapshot(t, root)
 			for _, args := range [][]string{
@@ -191,7 +186,7 @@ func TestGeneratedJobs(t *testing.T) {
 
 			if _, err := exec.LookPath("golangci-lint"); err == nil {
 				mustInvoke(t, root, "fmt")
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 			}
 
 			// Managed handler registration must be checked before the next write.

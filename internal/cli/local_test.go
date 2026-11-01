@@ -99,7 +99,7 @@ func TestGeneratedLocalApplications(t *testing.T) {
 				}
 
 				mustInvoke(t, root, "fmt")
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 			})
 
 			before := snapshot(t, root)

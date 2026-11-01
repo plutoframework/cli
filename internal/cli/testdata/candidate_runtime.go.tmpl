@@ -1,0 +1,538 @@
+package app_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"example.test/candidate/internal/access"
+	agententry "example.test/candidate/internal/agents/approvals"
+	app "example.test/candidate/internal/app"
+	"example.test/candidate/internal/config"
+	models "example.test/candidate/internal/models/documents"
+
+	agent "github.com/plutoframework/pluto-agent"
+	"github.com/plutoframework/pluto-agent/providers/scripted"
+	auth "github.com/plutoframework/pluto-auth"
+	authmemory "github.com/plutoframework/pluto-auth/stores/memory"
+	authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+	cachememory "github.com/plutoframework/pluto-core/cache/memory"
+	jobs "github.com/plutoframework/pluto-jobs"
+	jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+type candidateRuntimeProvider struct {
+	inner agent.Provider
+	calls atomic.Int32
+}
+
+func (p *candidateRuntimeProvider) Capabilities() agent.Capabilities { return p.inner.Capabilities() }
+func (p *candidateRuntimeProvider) Generate(ctx context.Context, request agent.Request) (agent.Response, error) {
+	p.calls.Add(1)
+	return p.inner.Generate(ctx, request)
+}
+
+type candidateRuntimeSink struct {
+	mutex     sync.Mutex
+	delivered map[string]string
+	calls     int
+	invalid   bool
+}
+
+func (s *candidateRuntimeSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		ResourceID     string `json:"resource_id"`
+		IdempotencyKey string `json:"idempotency_key"`
+		Value          string `json:"value"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 65537))
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&payload)
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if err != nil || r.Method != http.MethodPost || payload.ResourceID == "" || payload.IdempotencyKey == "" || payload.IdempotencyKey != r.Header.Get("Idempotency-Key") {
+		s.invalid = true
+		w.WriteHeader(400)
+		return
+	}
+	if prior, exists := s.delivered[payload.IdempotencyKey]; exists && prior != payload.ResourceID {
+		s.invalid = true
+		w.WriteHeader(409)
+		return
+	}
+	s.delivered[payload.IdempotencyKey] = payload.ResourceID
+	s.calls++
+	w.WriteHeader(204)
+}
+
+func (s *candidateRuntimeSink) state() (int, int, bool) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.calls, len(s.delivered), s.invalid
+}
+
+type candidateRuntimeFixture struct {
+	sql     *candidateSQLFixture
+	runtime *app.CandidateRuntime
+	alice   string
+	bob     string
+	sink    *candidateRuntimeSink
+}
+
+func candidateRuntimeSetup(t *testing.T) *candidateRuntimeFixture {
+	t.Helper()
+	f := candidateSQLSetup(t)
+	if f.guard != "not_owner" || f.visibility != "tenant" || f.table != "records" {
+		t.Fatal("runtime entry proof requires the main not_owner profile")
+	}
+	for _, name := range []string{"002_auth_sessions.sql", "099_memberships.sql"} {
+		migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.pool.Exec(t.Context(), string(migration)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, actor := range []string{"alice", "bob"} {
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO "pluto_resource_memberships" ("tenant_id","actor_id","roles") VALUES ('north',$1,ARRAY['operator'])`, actor); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := authpostgres.New(f.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer, err := auth.New(store, auth.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice, err := issuer.Start(t.Context(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := issuer.Start(t.Context(), "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &candidateRuntimeSink{delivered: map[string]string{}}
+	destination := httptest.NewServer(sink)
+	t.Cleanup(destination.Close)
+	cfg, err := config.LoadFrom(func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	memory, err := cachememory.New(cachememory.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := app.NewCandidateRuntime(cfg, f.pool, slog.New(slog.NewTextHandler(io.Discard, nil)), memory, "test", map[string]string{"documents.Deliver": destination.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &candidateRuntimeFixture{sql: f, runtime: runtime, alice: alice.Token, bob: bob.Token, sink: sink}
+}
+
+func (f *candidateRuntimeFixture) create(t *testing.T, id string) {
+	t.Helper()
+	err := f.runtime.WithSession(t.Context(), f.alice, "north", func(ctx context.Context, caller access.Caller) error {
+		result, err := f.runtime.Operations.DocumentsCreate.Execute(ctx, caller, models.CreateRequest{ResourceID: id, IdempotencyKey: "create-" + id, Value: "  value  "})
+		if err != nil {
+			return err
+		}
+		if result.Value != "value" || result.ID != id || string(result.State) != "draft" || result.Version != 1 {
+			return errors.New("RUNTIME_CREATE_NORMALIZATION")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *candidateRuntimeFixture) http(t *testing.T, method, path, token, tenant, key, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	request.Header.Set("X-Tenant-ID", tenant)
+	if key != "" {
+		request.Header.Set("Idempotency-Key", key)
+	}
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response := httptest.NewRecorder()
+	f.runtime.Handler().ServeHTTP(response, request)
+	return response
+}
+
+func (f *candidateRuntimeFixture) worker(t *testing.T) {
+	t.Helper()
+	worker, err := f.runtime.Worker(app.CandidateWorkerCredentials{DeliveriesApprove: f.bob, DeliveriesDeliver: f.bob})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("worker shutdown: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("worker did not stop")
+		}
+	})
+}
+
+func candidateRuntimeWait(t *testing.T, check func() (bool, error)) {
+	t.Helper()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		ok, err := check()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatal("RUNTIME_WORK_DID_NOT_SETTLE")
+		case <-ticker.C:
+		}
+	}
+}
+
+func TestCandidateRuntimeSameWriteAcrossAllEntries(t *testing.T) {
+	f := candidateRuntimeSetup(t)
+	for _, id := range []string{"http-1", "worker-1", "agent-1"} {
+		f.create(t, id)
+	}
+	response := f.http(t, "POST", "/records/approve", f.bob, "north", "http-approve", `{"resource_id":"http-1"}`)
+	if response.Code != 200 {
+		t.Fatalf("HTTP_WRITE status=%d body=%s", response.Code, response.Body)
+	}
+	replay := f.http(t, "POST", "/records/approve", f.bob, "north", "http-approve", `{"resource_id":"http-1"}`)
+	if replay.Code != 200 || replay.Body.String() != response.Body.String() {
+		t.Fatalf("HTTP_ATOMIC_REPLAY status=%d", replay.Code)
+	}
+	tenant := "north"
+	queued, err := jobs.NewRequest(jobs.Kind("document.approve"), models.ApproveRequest{ResourceID: "worker-1", IdempotencyKey: "worker-approve"}, jobs.Options{TenantID: &tenant, MaxAttempts: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	durable, err := jobspostgres.New(f.sql.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := durable.Enqueue(t.Context(), queued); err != nil {
+		t.Fatal(err)
+	}
+	provider := &candidateRuntimeProvider{inner: scripted.New(scripted.Calls(agent.ToolCall{ID: "approved", Name: "execute_approved_operation", Arguments: `{}`}), scripted.Final(`{"summary":"completed"}`))}
+	runner, err := agententry.NewApprove(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.runtime.WithSession(t.Context(), f.bob, "north", func(ctx context.Context, caller access.Caller) error {
+		deps, err := agententry.ApproveApprove(ctx, f.runtime.Operations.DocumentsApprove, caller, models.ApproveRequest{ResourceID: "agent-1", IdempotencyKey: "agent-approve"})
+		if err != nil {
+			return err
+		}
+		result, err := agententry.RunApprove(ctx, runner, "approved-run", deps)
+		if err != nil {
+			return err
+		}
+		if !result.Applied || result.Output.ID != "agent-1" || result.Output.Version != 2 {
+			return errors.New("AGENT_HAS_NO_VERIFIED_WRITE_RECEIPT")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls.Load() != 2 {
+		t.Fatal("agent did not execute scripted tool and final steps")
+	}
+	f.worker(t)
+	candidateRuntimeWait(t, func() (bool, error) {
+		var approved, audit, succeeded int
+		if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "records" WHERE "state"='approved' AND "version"=2`).Scan(&approved); err != nil {
+			return false, err
+		}
+		if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "pluto_resource_audit" WHERE "operation"='documents.Approve'`).Scan(&audit); err != nil {
+			return false, err
+		}
+		if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "pluto_jobs" WHERE "state"='succeeded'`).Scan(&succeeded); err != nil {
+			return false, err
+		}
+		calls, unique, invalid := f.sink.state()
+		if invalid {
+			return false, errors.New("TYPED_DELIVERY_SINK_REJECTED_PAYLOAD")
+		}
+		return approved == 3 && audit == 3 && succeeded == 4 && calls == 3 && unique == 3, nil
+	})
+	var actualActors int
+	if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "pluto_resource_audit" WHERE "operation"='documents.Approve' AND "actor_id"='bob'`).Scan(&actualActors); err != nil {
+		t.Fatal(err)
+	}
+	if actualActors != 3 {
+		t.Fatal("ALL_ENTRIES_DID_NOT_USE_VERIFIED_ACTOR")
+	}
+	page := f.http(t, "GET", "/records?limit=2", f.bob, "north", "", "")
+	if page.Code != 200 {
+		t.Fatalf("HTTP_LIST %d %s", page.Code, page.Body)
+	}
+	var first struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+		Page struct {
+			HasMore bool   `json:"has_more"`
+			Next    string `json:"next_cursor"`
+		} `json:"page"`
+	}
+	if err := json.Unmarshal(page.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Data) != 2 || !first.Page.HasMore || first.Page.Next == "" {
+		t.Fatal("HTTP_PAGE_HAS_NO_SCOPED_CONTINUATION")
+	}
+	next := f.http(t, "GET", "/records?limit=2&cursor="+url.QueryEscape(first.Page.Next), f.bob, "north", "", "")
+	if next.Code != 200 {
+		t.Fatalf("HTTP_CONTINUATION %d %s", next.Code, next.Body)
+	}
+	var second struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(next.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Data) != 1 || second.Data[0].ID == first.Data[0].ID || second.Data[0].ID == first.Data[1].ID {
+		t.Fatal("HTTP_CURSOR_IGNORED")
+	}
+	badPath := f.http(t, "GET", "/records/%FF", f.bob, "north", "", "")
+	if badPath.Code != 400 {
+		t.Fatalf("PATH_BINDING_INVALID_UTF8 %d", badPath.Code)
+	}
+	missingKey := f.http(t,"POST","/records/approve",f.bob,"north","",`{"resource_id":"http-1","idempotency_key":"body-only-key"}`)
+ if missingKey.Code!=400{t.Fatalf("REQUIRED_HTTP_IDEMPOTENCY_HEADER %d",missingKey.Code)}
+ mismatch := f.http(t, "POST", "/records/approve", f.bob, "north", "header-key", `{"resource_id":"http-1","idempotency_key":"body-key"}`)
+	badBody := f.http(t, "POST", "/records/approve", f.bob, "north", "raw-utf8", "{\"resource_id\":\""+string([]byte{0xff})+"\"}")
+	if badBody.Code != 400 {
+		t.Fatalf("RAW_HTTP_UTF8 %d", badBody.Code)
+	}
+	if mismatch.Code != 400 {
+		t.Fatalf("HEADER_BODY_KEY_CONFLICT %d", mismatch.Code)
+	}
+}
+
+func TestCandidateRuntimeDeniedBeforeDataOrProvider(t *testing.T) {
+	f := candidateRuntimeSetup(t)
+	f.create(t, "denied-1")
+	input := models.ApproveRequest{ResourceID: "denied-1", IdempotencyKey: "denied-key"}
+	if _, err := f.runtime.Operations.DocumentsApprove.Execute(t.Context(), access.Caller{}, input); err == nil {
+		t.Fatal("ZERO_CALLER")
+	}
+	var escaped access.Caller
+	if err := f.runtime.WithSession(t.Context(), f.bob, "north", func(_ context.Context, caller access.Caller) error { escaped = caller; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.runtime.Operations.DocumentsApprove.Execute(t.Context(), escaped, input); err == nil {
+		t.Fatal("EXPIRED_CALLER")
+	}
+	wrong := f.http(t, "POST", "/records/approve", f.bob, "other", "wrong-tenant", `{"resource_id":"denied-1"}`)
+	if wrong.Code != 403 && wrong.Code != 401 {
+		t.Fatalf("WRONG_TENANT %d", wrong.Code)
+	}
+	foreignStore, err := authmemory.New(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := auth.New(foreignStore, auth.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := foreign.Start(t.Context(), "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = access.WithSession(t.Context(), foreign, issued.Token, "north", func(ctx context.Context, caller access.Caller) error {
+		_, err := f.runtime.Operations.DocumentsApprove.Execute(ctx, caller, input)
+		return err
+	})
+	if !errors.Is(err, auth.ErrUnauthenticated) && !errors.Is(err, rbac.ErrUnauthenticated) {
+		t.Fatalf("FOREIGN_ISSUER %v", err)
+	}
+	provider := &candidateRuntimeProvider{inner: scripted.New(scripted.Final(`{"summary":"forged completion"}`))}
+	runner, err := agententry.NewApprove(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agententry.RunApprove(t.Context(), runner, "forged-host", agententry.ApproveDependencies{}); err == nil || provider.calls.Load() != 0 {
+		t.Fatal("FORGED_HOST_REACHED_PROVIDER")
+	}
+	err = f.runtime.WithSession(t.Context(), f.bob, "north", func(ctx context.Context, caller access.Caller) error {
+		deps, err := agententry.ApproveApprove(ctx, f.runtime.Operations.DocumentsApprove, caller, input)
+		if err != nil {
+			return err
+		}
+		if _, err := f.sql.pool.Exec(ctx, `UPDATE "pluto_resource_memberships" SET "roles"=ARRAY[]::text[] WHERE "tenant_id"='north' AND "actor_id"='bob'`); err != nil {
+			return err
+		}
+		if _, err := agententry.RunApprove(ctx, runner, "revoked-after-host-approval", deps); !errors.Is(err, rbac.ErrForbidden) {
+			return fmt.Errorf("STALE_HOST_AUTHORITY %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls.Load() != 0 {
+		t.Fatal("REVOKED_HOST_CALLED_PROVIDER")
+	}
+	denied := f.http(t, "POST", "/records/approve", f.bob, "north", "revoked-http", `{"resource_id":"denied-1"}`)
+	if denied.Code != 403 {
+		t.Fatalf("ROLE_REVOCATION_HTTP %d", denied.Code)
+	}
+	tenant := "north"
+	queuedRequest, err := jobs.NewRequest(jobs.Kind("document.approve"), models.ApproveRequest{ResourceID: "denied-1", IdempotencyKey: "revoked-worker"}, jobs.Options{TenantID: &tenant, MaxAttempts: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	durable, err := jobspostgres.New(f.sql.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := durable.Enqueue(t.Context(), queuedRequest); err != nil {
+		t.Fatal(err)
+	}
+	f.worker(t)
+	candidateRuntimeWait(t, func() (bool, error) {
+		var attempts int
+		var state, diagnostic string
+		if err := f.sql.pool.QueryRow(t.Context(), `SELECT "attempts","state","diagnostic" FROM "pluto_jobs" WHERE "id"=$1 AND "max_attempts"=5`, queuedRequest.ID).Scan(&attempts, &state, &diagnostic); err != nil {
+			return false, err
+		}
+		if state == "succeeded" {
+			return false, errors.New("REVOKED_WORKER_SUCCEEDED")
+		}
+		return attempts > 0 && state != "running" && diagnostic == "handler_error", nil
+	})
+	var changed, pending, queued int
+	if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "records" WHERE "state"<>'draft'`).Scan(&changed); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "pluto_idempotency" WHERE NOT completed`).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "pluto_jobs" WHERE "kind"='document.approved'`).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	var approvedAudits int
+	if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "pluto_resource_audit" WHERE "operation"='documents.Approve'`).Scan(&approvedAudits); err != nil {
+		t.Fatal(err)
+	}
+	calls, _, invalid := f.sink.state()
+	if approvedAudits != 0 {
+		t.Fatal("DENIED_WORKER_LEFT_APPROVAL_AUDIT")
+	}
+	if changed != 0 || pending != 0 || queued != 0 || calls != 0 || invalid {
+		t.Fatalf("DENIAL_LEFT_DATA_OR_EFFECTS changed=%d pending=%d queued=%d sinks=%d", changed, pending, queued, calls)
+	}
+}
+
+func TestCandidateRuntimeModelCannotReplaceHostIntent(t *testing.T) {
+	f := candidateRuntimeSetup(t)
+	f.create(t, "host-selected")
+	f.create(t, "model-selected")
+	provider := &candidateRuntimeProvider{inner: scripted.New(scripted.Calls(agent.ToolCall{ID: "retarget", Name: "execute_approved_operation", Arguments: `{"resource_id":"model-selected","actor_id":"admin","tenant_id":"other","idempotency_key":"redirected"}`}), scripted.Final(`{"summary":"changed resource"}`))}
+	runner, err := agententry.NewApprove(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.runtime.WithSession(t.Context(), f.bob, "north", func(ctx context.Context, caller access.Caller) error {
+		deps, err := agententry.ApproveApprove(ctx, f.runtime.Operations.DocumentsApprove, caller, models.ApproveRequest{ResourceID: "host-selected", IdempotencyKey: "host-selected-key"})
+		if err != nil {
+			return err
+		}
+		_, _ = agententry.RunApprove(ctx, runner, "model-retarget", deps)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.sql.pool.QueryRow(t.Context(), `SELECT "state" FROM "records" WHERE "tenant_id"='north' AND "id"='model-selected'`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "draft" {
+		t.Fatal("MODEL_REPLACED_HOST_RESOURCE")
+	}
+	var wrongAudit int
+	if err := f.sql.pool.QueryRow(t.Context(), `SELECT count(*) FROM "pluto_resource_audit" WHERE "operation"='documents.Approve' AND "id"='model-selected'`).Scan(&wrongAudit); err != nil {
+		t.Fatal(err)
+	}
+	if wrongAudit != 0 {
+		t.Fatal("MODEL_ARGUMENTS_BECAME_AUTHORITY")
+	}
+}
+
+func TestCandidateRuntimeFinalWithoutToolIsNotCompletion(t *testing.T) {
+	f := candidateRuntimeSetup(t)
+	f.create(t, "no-tool")
+	provider := &candidateRuntimeProvider{inner: scripted.New(scripted.Final(`{"summary":"completed without execution"}`))}
+	runner, err := agententry.NewApprove(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.runtime.WithSession(t.Context(), f.bob, "north", func(ctx context.Context, caller access.Caller) error {
+		deps, err := agententry.ApproveApprove(ctx, f.runtime.Operations.DocumentsApprove, caller, models.ApproveRequest{ResourceID: "no-tool", IdempotencyKey: "no-tool-key"})
+		if err != nil {
+			return err
+		}
+		result, err := agententry.RunApprove(ctx, runner, "no-tool-run", deps)
+		if err == nil || result.Applied {
+			return errors.New("MODEL_FINAL_WAS_TREATED_AS_WRITE_RECEIPT")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls.Load() != 1 {
+		t.Fatal("FINAL_ONLY_PROVIDER_NOT_EXERCISED")
+	}
+	var count int
+	if err := f.sql.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM "records" WHERE "state"<>'draft')+(SELECT count(*) FROM "pluto_resource_audit" WHERE "operation"='documents.Approve')+(SELECT count(*) FROM "pluto_jobs")+(SELECT count(*) FROM "pluto_idempotency" WHERE NOT completed)`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	calls, _, invalid := f.sink.state()
+	if count != 0 || calls != 0 || invalid {
+		t.Fatal("MODEL_FINAL_LEFT_DATA_OR_EFFECTS")
+	}
+}

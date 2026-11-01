@@ -7,7 +7,10 @@ import (
 )
 
 var (
-	ErrNotImplemented = errors.New("operation not implemented")
+	ErrInvalidInput = errors.New("invalid operation input")
+ ErrConflict = errors.New("operation conflict")
+ ErrExportLimit = errors.New("export bound exceeded")
+ ErrNotImplemented = errors.New("operation not implemented")
 	ErrUnauthenticated = rbac.ErrUnauthenticated
 	ErrForbidden = rbac.ErrForbidden
 )

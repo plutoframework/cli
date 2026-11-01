@@ -123,8 +123,19 @@ func TestManagedOperationBoundary(t *testing.T) {
 
 			report := InspectArchitecture(root)
 			if tc.id == "" {
-				if !report.Passed {
-					t.Fatalf("fresh consumer rejected: %+v", report.Diagnostics)
+				if report.Passed {
+					t.Fatal(
+						"published protected fixture incorrectly passed complete gate",
+					)
+				}
+
+				for _, diagnostic := range report.Diagnostics {
+					if diagnostic.ID != "ARCH401" {
+						t.Fatalf(
+							"fresh compatibility consumer rejected: %+v",
+							diagnostic,
+						)
+					}
 				}
 
 				return

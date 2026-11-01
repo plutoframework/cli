@@ -1,4 +1,48 @@
+{{if .Candidate}}# Working on {{.Name}}
+
+This is the explicit, unreleased candidate scoped-record profile. Read pluto.toml
+and README.md. Run pluto fmt, pluto openapi, pluto architecture check --directory . --format json,
+and pluto vet. Keep every file <=1,000 lines and preserve authored migrations.
+
+All production Go is managed, including domain, operation workflow, narrow ports,
+SQL adapters, transport and composition. Do not edit generated source or add hooks,
+initializers, alternate handlers, raw SQL clients, reflection or unsafe escapes.
+Extend the framework's supported contract when business rules need a new pattern.
+Use pluto add blueprint --file contracts.toml for atomic declaration changes.
+
+Schema 10 owns independent operation authority and resource/domain/data contracts.
+Each protected use case shares one opaque identity/resource gate across HTTP,
+worker and host-approved agent entry. Never create identity from actor/role strings
+or trust payload authority. Current verified sessions, tenant assignments, role
+permissions and authoritative resource facts are refreshed before protected work.
+Roles are explicit catalog declarations; adding operations never assigns users.
+
+Commands normalize once in the owning domain constructor. Private records,
+rehydration and machine construction stay in their managed owners. State decisions
+are pure; evaluated changes bind to the exact machine/scope/entity/source/version.
+The data adapter atomically commits mutation, audit, typed outbox work and required
+idempotency completion. Pending or uncertain claims require reconciliation; never
+steal them or retry with a new logical key. Queries apply visibility before LIMIT,
+use stable scoped cursors and reject oversized exports. Cache display snapshots
+only after fresh authorization; lifecycle guards use authoritative SQL facts.
+
+Workers use configured credentials and typed bounded delivery, not payload actor
+claims. Agent writes use host-issued opaque prepared intents and actual execution
+receipts. Model text never proves a write occurred. HTTP, worker and tool adapters
+must invoke the same sealed operation. Provider URLs are deployment configuration;
+external delivery remains at-least-once and requires stable-key deduplication.
+
+Apply explicit database migrations before startup. No constructor creates schemas,
+users, role assignments or fixture credentials. Candidate dependencies are explicit
+local replacements; do not invent release versions or silently switch profiles.
+Never log tokens, bodies, secrets, private records or provider payloads.
+{{else}}
 # Working on {{.Name}}
+
+This is the published compatibility profile. Protected operations are drafts:
+canonical architecture checks and pluto vet report ARCH401 until explicit migration
+to supported identity/resource/data contracts. Compiling this profile does not
+establish those guarantees. There is no compliance bypass flag.
 
 Read README.md first. Run pluto fmt and pluto vet before submitting changes.
 Keep every file <=1,000 lines; prefer expanded readable Go and 80 columns.
@@ -62,3 +106,5 @@ reference one operation and use managed adapters. Portable job contracts belong
 in internal/jobcontracts; no authored worker or agent business callbacks. Worker
 construction and handler registration are managed; supply typed gate dependencies
 through app workerDependencies. Never call raw jobs.NewWorker or Bind callbacks.
+
+{{end}}

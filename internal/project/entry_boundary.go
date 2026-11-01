@@ -19,24 +19,10 @@ func inspectEntryBoundaries(
 	root string,
 	metadata []byte,
 ) []ArchitectureDiagnostic {
-	var declaration struct {
-		Project      Project      `toml:"project"`
-		Operations   []Operation  `toml:"operations"`
-		Jobs         []Job        `toml:"jobs"`
-		Agents       []Agent      `toml:"agents"`
-		Endpoints    []Endpoint   `toml:"endpoints"`
-		Capabilities Capabilities `toml:"capabilities"`
-	}
+	var m Manifest
 
-	_ = toml.Unmarshal(metadata, &declaration)
-	m := Manifest{
-		Project:      declaration.Project,
-		Operations:   declaration.Operations,
-		Jobs:         declaration.Jobs,
-		Agents:       declaration.Agents,
-		Endpoints:    declaration.Endpoints,
-		Capabilities: declaration.Capabilities,
-	}
+	_ = toml.Unmarshal(metadata, &m)
+
 	diagnostics := []ArchitectureDiagnostic{}
 	definitionPackages := workerDefinitionPackages(root)
 	add := func(id, file string, line int, message, repair string) {
@@ -71,7 +57,7 @@ func inspectEntryBoundaries(
 	for _, agent := range m.Agents {
 		if operation, ok := m.Operation(
 			agent.Operation,
-		); !ok || operation.Public || operation.Write ||
+		); !ok || operation.Public || (operation.Write && m.Boundary.Mode != "candidate") ||
 			operation.Permission == "" {
 			add(
 				"ARCH214",
@@ -161,7 +147,7 @@ func inspectEntryBoundaries(
 
 			worker, tool := false, false
 			allowedWorker := managed[relative] &&
-				(strings.HasPrefix(relative, "internal/jobs/") || strings.HasPrefix(relative, "internal/background/") || strings.HasPrefix(relative, "internal/jobcontracts/") || relative == "internal/app/worker_runtime_gen.go")
+				(strings.HasPrefix(relative, "internal/jobs/") || strings.HasPrefix(relative, "internal/background/") || strings.HasPrefix(relative, "internal/jobcontracts/") || relative == "internal/app/worker_runtime_gen.go" || (m.Boundary.Mode == "candidate" && (relative == "internal/app/candidate_operations_gen.go" || relative == "internal/access/caller_gen.go")))
 			allowedTool := managed[relative] &&
 				strings.HasPrefix(relative, "internal/agents/")
 
@@ -206,7 +192,7 @@ func inspectEntryBoundaries(
 
 				if imported == "github.com/plutoframework/pluto-jobs" &&
 					selector.Sel.Name == "NewWorker" &&
-					relative != "internal/app/worker_runtime_gen.go" &&
+					relative != "internal/app/worker_runtime_gen.go" && (m.Boundary.Mode != "candidate" || relative != "internal/app/candidate_operations_gen.go" || !managed[relative]) &&
 					!worker {
 					add(
 						"ARCH211",

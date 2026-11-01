@@ -35,6 +35,13 @@ func operationBoundaryDiagnostics(
 		)
 	}
 
+	var candidate Manifest
+
+	_ = toml.Unmarshal(manifest, &candidate)
+	if candidate.Boundary.Mode == "candidate" {
+		return candidateIntegrity(root, candidate)
+	}
+
 	var declaration struct {
 		Project      Project      `toml:"project"`
 		Capabilities Capabilities `toml:"capabilities"`

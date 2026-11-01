@@ -158,6 +158,12 @@ func addCommand(options Options) *cobra.Command {
 		},
 	}
 	flags := command.Flags()
+	flags.StringVar(
+		&endpoint.ResourceSource,
+		"resource-source",
+		"",
+		"Candidate resource binding: body, path:name, query:name or collection",
+	)
 	flags.BoolVar(
 		&endpoint.Collection,
 		"collection",
@@ -232,6 +238,7 @@ func addCommand(options Options) *cobra.Command {
 	)
 	add.AddCommand(command)
 	add.AddCommand(addOperationCommand(options))
+	add.AddCommand(addBlueprintCommand(options))
 	add.AddCommand(addJobCommand(options))
 	add.AddCommand(addAgentCommand(options))
 	add.AddCommand(addStateCommand(options))

@@ -114,7 +114,7 @@ func TestGeneratedCaches(t *testing.T) {
 
 			if _, err := exec.LookPath("golangci-lint"); err == nil {
 				mustInvoke(t, root, "fmt")
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 			}
 		})
 	}
