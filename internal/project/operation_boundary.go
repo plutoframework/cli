@@ -42,8 +42,10 @@ func operationBoundaryDiagnostics(
 		add("ARCH201", "pluto.toml", 1,
 			"operation boundary metadata cannot be assessed: "+err.Error(),
 			"Repair declarations before selecting a managed boundary mode.")
+
 		return diagnostics
 	}
+
 	if candidate.Boundary.Mode == "candidate" {
 		return candidateIntegrity(root, candidate)
 	}
@@ -258,6 +260,7 @@ func operationBoundaryDiagnostics(
 	sources := []operationBoundarySource{}
 	packageNames := map[string]string{}
 	directories := inspectionDirectories(root, m.Project.Module, nil)
+
 	walkErr := filepath.WalkDir(
 		root,
 		func(
@@ -268,10 +271,12 @@ func operationBoundaryDiagnostics(
 			if err != nil {
 				return err
 			}
+
 			relative, err := filepath.Rel(root, path)
 			if err != nil {
 				return err
 			}
+
 			relative = filepath.ToSlash(relative)
 			if entry.IsDir() {
 				if skipInspectionDirectory(
@@ -281,6 +286,7 @@ func operationBoundaryDiagnostics(
 				) {
 					return filepath.SkipDir
 				}
+
 				if relative != "." {
 					if _, err := os.Stat(
 						filepath.Join(
@@ -291,14 +297,18 @@ func operationBoundaryDiagnostics(
 						return filepath.SkipDir
 					}
 				}
+
 				return nil
 			}
+
 			if !strings.HasSuffix(relative, ".go") ||
 				strings.HasSuffix(relative, "_test.go") ||
 				entry.Type()&os.ModeSymlink != 0 {
 				return nil
 			}
+
 			set := token.NewFileSet()
+
 			tree, err := parser.ParseFile(set, path, nil, parser.AllErrors)
 			if err != nil {
 				add(
@@ -306,15 +316,20 @@ func operationBoundaryDiagnostics(
 					relative,
 					1,
 					"operation source cannot be assessed: "+err.Error(),
-					"Repair Go syntax before inspecting managed boundary ownership.",
+					"Repair Go syntax before inspecting managed boundary "+
+						"ownership.",
 				)
+
 				return nil
 			}
+
 			dir := filepath.ToSlash(filepath.Dir(relative))
+
 			namespace := m.Project.Module
 			if dir != "." {
 				namespace += "/" + dir
 			}
+
 			sources = append(
 				sources,
 				operationBoundarySource{
@@ -326,6 +341,7 @@ func operationBoundaryDiagnostics(
 				},
 			)
 			packageNames[namespace] = tree.Name.Name
+
 			return nil
 		},
 	)
@@ -334,7 +350,9 @@ func operationBoundaryDiagnostics(
 			fmt.Sprintf("operation boundary inventory incomplete: %v", walkErr),
 			"Restore source access and rerun the canonical inspection.")
 	}
+
 	aliases := map[string][]operationBoundaryAlias{}
+
 	for _, source := range sources {
 		imports := operationBoundaryImports(source.tree, packageNames)
 		for _, declaration := range source.tree.Decls {
@@ -342,11 +360,13 @@ func operationBoundaryDiagnostics(
 			if !ok || group.Tok != token.TYPE {
 				continue
 			}
+
 			for _, item := range group.Specs {
 				spec, ok := item.(*ast.TypeSpec)
 				if !ok {
 					continue
 				}
+
 				key := source.namespace + "." + spec.Name.Name
 				aliases[key] = append(aliases[key], operationBoundaryAlias{
 					source.namespace, spec.Type, imports,
@@ -354,9 +374,11 @@ func operationBoundaryDiagnostics(
 			}
 		}
 	}
+
 	for _, source := range sources {
 		relative, dir := source.relative, source.dir
 		set, tree := source.set, source.tree
+
 		inOperations := dir == "internal/operations" ||
 			strings.HasPrefix(dir, "internal/operations/")
 		if inOperations && !declared[dir] && !undeclared[dir] {
@@ -391,6 +413,7 @@ func operationBoundaryDiagnostics(
 			if actual := packageNames[value]; actual != "" {
 				name = actual
 			}
+
 			if spec.Name != nil {
 				name = spec.Name.Name
 			}
@@ -553,7 +576,6 @@ func operationBoundaryDiagnostics(
 
 			return true
 		})
-
 	}
 
 	return diagnostics
@@ -609,17 +631,22 @@ func operationBoundaryImports(
 	packages map[string]string,
 ) map[string]string {
 	imports := map[string]string{}
+
 	for _, spec := range tree.Imports {
 		path, _ := strconv.Unquote(spec.Path.Value)
+
 		name := packages[path]
 		if name == "" {
 			name = filepath.Base(path)
 		}
+
 		if spec.Name != nil {
 			name = spec.Name.Name
 		}
+
 		imports[name] = path
 	}
+
 	return imports
 }
 
@@ -629,6 +656,7 @@ func isOperationBoundaryType(expression ast.Expr, namespace string,
 ) bool {
 	expression = unwrapBoundaryType(expression)
 	name := ""
+
 	switch value := expression.(type) {
 	case *ast.Ident:
 		name = value.Name
@@ -637,10 +665,12 @@ func isOperationBoundaryType(expression ast.Expr, namespace string,
 		if !ok {
 			return false
 		}
+
 		namespace = imports[qualifier.Name]
 		if namespace == "" {
 			return false
 		}
+
 		name = value.Sel.Name
 	case *ast.InterfaceType:
 		for _, field := range value.Methods.List {
@@ -659,6 +689,7 @@ func isOperationBoundaryType(expression ast.Expr, namespace string,
 				return true
 			}
 		}
+
 		return false
 	case *ast.StructType:
 		for _, field := range value.Fields.List {
@@ -677,24 +708,30 @@ func isOperationBoundaryType(expression ast.Expr, namespace string,
 				return true
 			}
 		}
+
 		return false
 	default:
 		return false
 	}
+
 	if known[namespace][name] {
 		return true
 	}
+
 	key := namespace + "." + name
 	if seen[key] {
 		return false
 	}
+
 	seen[key] = true
 	defer delete(seen, key)
+
 	for _, alias := range aliases[key] {
 		if isOperationBoundaryType(alias.expression, alias.namespace,
 			alias.imports, known, aliases, seen) {
 			return true
 		}
 	}
+
 	return false
 }

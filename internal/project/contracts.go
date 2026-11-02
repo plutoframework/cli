@@ -98,7 +98,11 @@ func validateResource(r ResourceContract) error {
 		)
 	}
 
-	if !validOperationID(r.ID()) || !contractSQLName.MatchString(r.Table) ||
+	if err := contractAuthority(r.Group, r.Name, ""); err != nil {
+		return fmt.Errorf("resource %s: %w", r.ID(), err)
+	}
+
+	if !contractSQLName.MatchString(r.Table) ||
 		!contractKey.MatchString(r.Namespace) ||
 		r.Version < 1 ||
 		r.Version > 1_000_000 {

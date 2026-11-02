@@ -238,6 +238,59 @@ mutations = [
         "}); false {",
         "TestGeneratedApplications/single",
     ),
+    (
+        "explicit project root inspection",
+        "internal/project/source_inventory.go",
+        'if relative == "." {\n\t\treturn false\n\t}',
+        'if relative == "." {\n\t\treturn true\n\t}',
+        "./internal/project#TestArchitectureInspectionNeverSkipsRoot",
+    ),
+    (
+        "module root dependency traversal",
+        "internal/project/source_inventory.go",
+        'if imported == module {\n\t\treturn "."\n\t}',
+        'if imported == module {\n\t\treturn ""\n\t}',
+        "./internal/project#TestArchitectureModuleRootAndDirectiveSyntax",
+    ),
+    (
+        "authored handler preservation",
+        "internal/project/write.go",
+        "!bytes.Equal(data, old)",
+        "!bytes.Equal(data, data)",
+        "./internal/project#TestManagedRegenerationPreservesAuthoredHandler",
+    ),
+    (
+        "reserved resource owner",
+        "internal/project/manifest.go",
+        "domain transport context ",
+        "domain transport ",
+        "./internal/project#TestContractsShareCanonicalAuthorityRules",
+    ),
+    (
+        "operation manifest decoding",
+        "internal/project/operation_boundary.go",
+        "if err := toml.Unmarshal(manifest, &candidate); err != nil {",
+        "if err := toml.Unmarshal(manifest, &candidate); err != nil && false {",
+        (
+            "./internal/project#"
+            "TestOperationReviewRejectsPartiallyDecodedCandidate"
+        ),
+    ),
+    (
+        "local sealed boundary aliases",
+        "internal/project/operation_boundary.go",
+        "case *ast.Ident:\n\t\tname = value.Name",
+        "case *ast.Ident:\n\t\treturn false",
+        "./internal/project#TestOperationReviewLocalBoundaryAliasChain",
+    ),
+    (
+        "imported ignored entry inventory",
+        "internal/project/operation_boundary.go",
+        "if entry.IsDir() {",
+        'if entry.IsDir() {\nif entry.Name() == "testdata" || '
+        'entry.Name() == "dist" { return filepath.SkipDir }',
+        "./internal/project#TestOperationReviewImportedIgnoredPackage",
+    ),
 ]
 
 if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
@@ -266,6 +319,19 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
     )
 
 required_assertions = {
+    "operation manifest decoding": "partial metadata reached generation",
+    "local sealed boundary aliases": "local alias chain escaped",
+    "imported ignored entry inventory": "imported production adapter escaped",
+    "explicit project root inspection": (
+        "root name disabled domain effect inspection"
+    ),
+    "module root dependency traversal": (
+        "domain dependency through module root was not traversed"
+    ),
+    "authored handler preservation": (
+        "authored handler was not protected by preflight"
+    ),
+    "reserved resource owner": "reserved owner diagnostic missing",
     "candidate private authority fields": (
         "managed sibling altered opaque caller field"
     ),

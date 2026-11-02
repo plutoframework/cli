@@ -111,10 +111,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 
 	manifest, err := os.ReadFile(filepath.Join(root, "pluto.toml"))
 
-	var m struct {
-		SchemaVersion int             `toml:"schema_version"`
-		Boundary      BoundaryProfile `toml:"boundary"`
-	}
+	var m Manifest
 	if err != nil {
 		add(
 			"ARCH001",
@@ -152,13 +149,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 	module := ""
 
 	if err == nil {
-		for _, line := range strings.Split(string(moduleData), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) == 2 && fields[0] == "module" {
-				module = strings.Trim(fields[1], "\"")
-				break
-			}
-		}
+		module, _ = boundaryModulePath(moduleData)
 	}
 
 	if module == "" {
@@ -171,6 +162,13 @@ func InspectArchitecture(directory string) ArchitectureReport {
 			"Restore a valid module directive.",
 		)
 	}
+
+	var owned map[string]bool
+	if m.Boundary.Mode == "candidate" {
+		owned, _ = CandidateManagedPaths(m)
+	}
+
+	directories := inspectionDirectories(root, module, owned)
 
 	sources := map[string]*architectureSource{}
 
@@ -185,8 +183,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 			rel = filepath.ToSlash(rel)
 
 			if e.IsDir() {
-				switch e.Name() {
-				case ".git", "node_modules", "vendor", "testdata", "dist":
+				if skipInspectionDirectory(rel, e.Name(), directories) {
 					return filepath.SkipDir
 				}
 
@@ -357,13 +354,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 			}
 
 			for _, dep := range s.imports {
-				local := ""
-				if module != "" {
-					local = strings.TrimPrefix(dep.path, module+"/")
-					if local == dep.path {
-						local = ""
-					}
-				}
+				local := localImportDirectory(module, dep.path)
 
 				role := architectureRole(local)
 				if target := sources[local]; target != nil {

@@ -272,25 +272,7 @@ func inspectCandidateBoundaries(
 	}
 
 	rules.managed = owned
-	managedDirectories := map[string]bool{}
-
-	for path := range owned {
-		if !strings.HasSuffix(path, ".go") {
-			continue
-		}
-
-		for directory := filepath.ToSlash(
-			filepath.Dir(
-				path,
-			),
-		); directory != "."; directory = filepath.ToSlash(
-			filepath.Dir(
-				directory,
-			),
-		) {
-			managedDirectories[directory] = true
-		}
-	}
+	managedDirectories := inspectionDirectories(root, module, owned)
 
 	set := token.NewFileSet()
 	files := []*candidateSource{}
@@ -338,16 +320,12 @@ func inspectCandidateBoundaries(
 			}
 
 			if entry.IsDir() {
-				switch entry.Name() {
-				case ".git", "node_modules", "vendor", "testdata", "dist":
-
-					// A declared package may use a conventional ignored
-					// directory name.
-					// Its entire directory must be inspected, including
-					// unmanaged siblings.
-					if !managedDirectories[relative] {
-						return filepath.SkipDir
-					}
+				if skipInspectionDirectory(
+					relative,
+					entry.Name(),
+					managedDirectories,
+				) {
+					return filepath.SkipDir
 				}
 
 				if path != root {

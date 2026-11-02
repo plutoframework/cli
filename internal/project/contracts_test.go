@@ -647,8 +647,22 @@ func TestContractsShareCanonicalAuthorityRules(t *testing.T) {
 	r, o, e = contractFixture()
 
 	r[0].Group = "context"
-	if err := ValidateContracts(r, o, e); err == nil {
-		t.Fatal("reserved owner accepted")
+	for index := range o {
+		o[index].Resource = r[0].ID()
+	}
+
+	if err := ValidateContracts(r, o, e); err == nil ||
+		!strings.Contains(err.Error(), "nonreserved lowercase Go package") {
+		t.Fatalf("reserved owner diagnostic missing: %v", err)
+	}
+
+	r[0].Group = "contexts"
+	for index := range o {
+		o[index].Resource = r[0].ID()
+	}
+
+	if err := ValidateContracts(r, o, e); err != nil {
+		t.Fatalf("nearby allowed owner rejected: %v", err)
 	}
 
 	r, o, e = contractFixture()

@@ -15,10 +15,12 @@ import (
 
 func operationReviewWrite(t *testing.T, root, path, source string) {
 	t.Helper()
+
 	path = filepath.Join(root, filepath.FromSlash(path))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +32,7 @@ func operationReviewHas(all []ArchitectureDiagnostic, id, path string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -46,10 +49,12 @@ func (replacement) Execute() {}
 			operationReviewWrite(t, root, "internal/assembly/use.go",
 				"package assembly\nimport _ \"example.test/boundary/"+
 					"internal/"+directory+"/adapter\"\n")
+
 			metadata, err := Encode(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			diagnostics := operationBoundaryDiagnostics(root, metadata)
 			if !operationReviewHas(diagnostics, "ARCH204", path) {
 				t.Fatalf(
@@ -69,15 +74,18 @@ group="widgets"
 action="Create"
 write="not a boolean"
 `)
+
 	var decoded Manifest
 	if err := toml.Unmarshal(metadata, &decoded); err == nil ||
 		decoded.Boundary.Mode != "candidate" {
 		t.Fatal("fixture must populate candidate mode before decoding fails")
 	}
+
 	found := operationBoundaryDiagnostics(t.TempDir(), metadata)
 	if !operationReviewHas(found, "ARCH201", "pluto.toml") {
 		t.Fatalf("partial candidate metadata escaped: %+v", found)
 	}
+
 	for _, diagnostic := range found {
 		if !strings.Contains(
 			diagnostic.Message,
@@ -94,16 +102,19 @@ func TestOperationReviewLocalBoundaryAliasChain(t *testing.T) {
 		"package widgets\ntype First = CreateBoundary\n")
 	operationReviewWrite(t, root, "internal/operations/widgets/alias.go",
 		"package widgets\ntype Alias = First\n")
+
 	path := "internal/adapters/override.go"
 	operationReviewWrite(t, root, path, `package adapters
 import ops "example.test/boundary/internal/operations/widgets"
 type replacement struct { ops.Alias }
 func (replacement) Execute() {}
 `)
+
 	metadata, err := Encode(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	all := operationBoundaryDiagnostics(root, metadata)
 	for _, expected := range []string{
 		"internal/operations/widgets/first.go",
@@ -134,13 +145,16 @@ type ordinaryEmbedding struct { Local }
 		"package negative\nthis is intentionally not Go\n")
 	operationReviewWrite(t, root, "internal/dist/negative/invalid.go",
 		"package negative\nthis is intentionally not Go\n")
+
 	metadata, err := Encode(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if found := operationBoundaryDiagnostics(root, metadata); len(found) != 0 {
 		t.Fatalf(
-			"named injection, unrelated types or ignored fixtures rejected: %+v",
+			"named injection, unrelated types or ignored fixtures "+
+				"rejected: %+v",
 			found,
 		)
 	}
@@ -185,20 +199,24 @@ func TestOperationReviewDerivedBoundaryShapes(t *testing.T) {
 
 				"package widgets\n"+test.declaration+"\n",
 			)
+
 			path := "internal/adapters/override.go"
 			operationReviewWrite(
 				t,
 				root,
 				path,
-				"package adapters\nimport ops \"example.test/boundary/internal/operations/widgets\"\ntype replacement struct { "+
+				"package adapters\nimport ops \"example.test/boundary/"+
+					"internal/operations/widgets\"\ntype replacement struct { "+
 
 					test.embedding+
 					" }\n",
 			)
+
 			metadata, err := Encode(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			found := operationBoundaryDiagnostics(root, metadata)
 			if !operationReviewHas(found, "ARCH204", path) {
 				t.Fatalf("derived boundary embedding escaped: %+v", found)
@@ -247,10 +265,13 @@ func TestReplacement(t *testing.T) {
 }
 `,
 	)
+
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
+
 	command := exec.CommandContext(ctx, "go", "test", "./...")
 	command.Dir = root
+
 	command.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf(
@@ -259,10 +280,12 @@ func TestReplacement(t *testing.T) {
 			output,
 		)
 	}
+
 	metadata, err := Encode(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	found := operationBoundaryDiagnostics(root, metadata)
 	if !operationReviewHas(found, "ARCH204", "internal/adapters/bypass.go") {
 		t.Fatalf("compiled replacement escaped inspection: %+v", found)
@@ -273,10 +296,12 @@ func TestOperationReviewMalformedSourceFailsClosed(t *testing.T) {
 	root, manifest := boundaryFixture(t)
 	path := "internal/adapters/bad.go"
 	operationReviewWrite(t, root, path, "package adapters\nfunc broken(\n")
+
 	metadata, err := Encode(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if found := operationBoundaryDiagnostics(
 		root,
 		metadata,
@@ -291,6 +316,7 @@ func TestOperationReviewMalformedSourceFailsClosed(t *testing.T) {
 
 func TestOperationReviewAliasCycleTerminates(t *testing.T) {
 	const namespace = "example.test/aliases"
+
 	aliases := map[string][]operationBoundaryAlias{
 		namespace +
 			".First": {
@@ -331,15 +357,18 @@ import ops "example.test/boundary/internal/operations/widgets"
 type Alias = ops.Alias
 `,
 	)
+
 	path := "internal/adapters/override.go"
 	operationReviewWrite(t, root, path, `package adapters
 import "example.test/boundary/internal/bridge"
 type replacement struct { forwarding.Alias }
 `)
+
 	metadata, err := Encode(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if found := operationBoundaryDiagnostics(
 		root,
 		metadata,
