@@ -131,7 +131,26 @@ func assertUnchanged(t *testing.T, before, after map[string][32]byte) {
 }
 
 func TestHelpVersionAndExit(t *testing.T) {
-	for _, args := range [][]string{{"--help"}, {"init", "--help"}, {"add", "endpoint", "--help"}, {"version"}, {"--version"}} {
+	for _, args := range [][]string{
+		{
+			"--help",
+		},
+		{
+			"init",
+			"--help",
+		},
+		{
+			"add",
+			"endpoint",
+			"--help",
+		},
+		{
+			"version",
+		},
+		{
+			"--version",
+		},
+	} {
 		if output := mustInvoke(
 			t,
 			temporary(t),
@@ -202,9 +221,39 @@ func TestGeneratedApplications(t *testing.T) {
 			external(t, root, "go", "test", "./...")
 
 			for _, endpoint := range [][]string{
-				{"widgets", "Create", "--method", "POST", "--path", "/api/widgets/{id}", "--permission", "widgets.write", "--feature", "widgets-create", "--feature-client-visible"},
-				{"widgets", "Get", "--method", "GET", "--path", "/api/widgets/{id}", "--permission", "widgets.write"},
-				{"reports", "List", "--method", "GET", "--path", "/api/reports", "--feature", "private-report"},
+				{
+					"widgets",
+					"Create",
+					"--method",
+					"POST",
+					"--path",
+					"/api/widgets/{id}",
+					"--permission",
+					"widgets.write",
+					"--feature",
+					"widgets-create",
+					"--feature-client-visible",
+				},
+				{
+					"widgets",
+					"Get",
+					"--method",
+					"GET",
+					"--path",
+					"/api/widgets/{id}",
+					"--permission",
+					"widgets.write",
+				},
+				{
+					"reports",
+					"List",
+					"--method",
+					"GET",
+					"--path",
+					"/api/reports",
+					"--feature",
+					"private-report",
+				},
 			} {
 				mustInvoke(
 					t,
@@ -242,7 +291,8 @@ func TestGeneratedApplications(t *testing.T) {
                 {
                     ID: "fixture",
                     Name: "Test reviewer",
-                    Description: "Inherits widget writing for integration tests.",
+                    Description: "Inherits widget writing " +
+				"for integration tests.",
                     Inherits: []rbac.RoleID{"writer"},
                 },
                 {
@@ -267,37 +317,26 @@ func TestGeneratedApplications(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			original = bytes.Replace(
-				original,
-				[]byte("NewCreate(policy *rbac.Policy)"),
-				[]byte("NewCreate(policy *rbac.Policy, _ string)"),
-				1,
-			)
-
 			original = append(
 				original,
 				[]byte(
-					"\n// Author-owned annotation survives subsequent group generation.\n",
+					"\n// Author-owned annotation survives subsequent group "+
+						"generation.\n",
 				)...)
 			if err := os.WriteFile(authored, original, 0o644); err != nil {
 				t.Fatal(err)
 			}
 
-			bindingPath := filepath.Join(root, "internal/app/widgets_create.go")
+			bindingPath := filepath.Join(root, "internal/app/widgets_"+
+				"create.go")
 			bindingOriginal := replaceSource(
 				t,
 				bindingPath,
-				"NewCreate(dependencies.Policy)",
-				`NewCreate(dependencies.Policy, "authored-dependency")`,
-			)
-			replaceSource(
-				t,
-				filepath.Join(
-					root,
-					"internal/operations/widgets/create_test.go",
-				),
-				"NewCreate(policy)",
-				`NewCreate(policy, "unit-fixture")`,
+				"NewCreate(\n\t\tdependencies.Authorizer,\n"+
+					"\t\tdependencies.Memberships)",
+				"NewCreateWithDependencies(dependencies.Authorizer, "+
+					"dependencies.Memberships, widgetsoperations.CreateDe"+
+					"pendencies{})",
 			)
 
 			mustInvoke(
@@ -449,7 +488,8 @@ func TestGeneratedApplications(t *testing.T) {
 				t.Fatal("detail unexpectedly paginated")
 			}
 
-			if openapi.Paths["/api/reports/{id}"]["get"].Permission != "reports:read" {
+			operation := openapi.Paths["/api/reports/{id}"]["get"]
+			if operation.Permission != "reports:read" {
 				t.Fatal("colon-separated RBAC capability missing from OpenAPI")
 			}
 
@@ -479,7 +519,8 @@ func TestGeneratedApplications(t *testing.T) {
 			t.Run("style-and-vet", func(t *testing.T) {
 				if _, err := exec.LookPath("golangci-lint"); err != nil {
 					t.Skip(
-						"put pinned golangci-lint 2.15.0 on PATH to exercise fmt/vet",
+						"put pinned golangci-lint 2.15.0 on PATH to exercise " +
+							"fmt/vet",
 					)
 				}
 
@@ -488,11 +529,12 @@ func TestGeneratedApplications(t *testing.T) {
 				before := snapshot(t, root)
 				mustInvoke(t, root, "fmt")
 				assertUnchanged(t, before, snapshot(t, root))
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 				assertUnchanged(t, before, snapshot(t, root))
 			})
 
-			// Repeat/conflicting/invalid operations must leave every authored file intact.
+			// Repeat/conflicting/invalid operations must leave every authored
+			// file intact.
 			before := snapshot(t, root)
 
 			failures := [][]string{
@@ -508,6 +550,7 @@ func TestGeneratedApplications(t *testing.T) {
 					"Duplicate",
 					"--description",
 					"Duplicate identifier",
+					"--permission", "widgets.write",
 				},
 				{
 					"add",
@@ -520,6 +563,7 @@ func TestGeneratedApplications(t *testing.T) {
 					"Duplicate",
 					"--description",
 					"Duplicate route shape",
+					"--permission", "widgets.write",
 				},
 				{
 					"add",
@@ -585,7 +629,8 @@ func TestGeneratedApplications(t *testing.T) {
 				assertUnchanged(t, before, snapshot(t, root))
 			}
 
-			// Managed semantic tampering is detected; no subsequent generation occurs.
+			// Managed semantic tampering is detected; no subsequent generation
+			// occurs.
 			path := filepath.Join(root, "internal/access/permissions_gen.go")
 
 			content, err := os.ReadFile(path)

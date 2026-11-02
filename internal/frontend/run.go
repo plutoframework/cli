@@ -76,7 +76,8 @@ func Install(
 	} {
 		if err := NPM(ctx, directory, out, errOut, args...); err != nil {
 			return fmt.Errorf(
-				"frontend files remain in place; repair the tool error and run pluto frontend install: %w",
+				"frontend files remain in place; repair the tool error and "+
+					"run pluto frontend install: %w",
 				err,
 			)
 		}

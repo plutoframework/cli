@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"{{.Module}}/internal/features"
- corefeatures "github.com/plutoframework/pluto-core/features"
+	corefeatures "github.com/plutoframework/pluto-core/features"
 	jobs "github.com/plutoframework/pluto-jobs"
 )
 
@@ -20,19 +20,25 @@ type Config struct {
 	Database Database
 	Logging  Logging
 	Features map[string]*bool
-	Jobs jobs.Config
-	Cache Cache
- Auth Auth
- {{if .OIDC}}OIDC OIDC{{end}}
+	Jobs     jobs.Config
+	Cache    Cache
+	Auth     Auth
+	{{if .OIDC}}
+
+	OIDC OIDC{{end}}
 }
 
-type Auth struct { TrustedOrigins []string; SessionTTL time.Duration; IdleTimeout time.Duration }
+type Auth struct {
+	TrustedOrigins []string
+	SessionTTL     time.Duration
+	IdleTimeout    time.Duration
+}
 
 type Cache struct {
-    Backend string
-    Environment string
-    URL string
-    AllowInsecure bool
+	Backend       string
+	Environment   string
+	URL           string
+	AllowInsecure bool
 }
 
 type Server struct {
@@ -44,11 +50,17 @@ type Server struct {
 	BodyLimit    int64
 }
 type (
-	Database struct{ URL string }
-	Logging  struct{ Level string }
+	Database struct {
+		URL string
+	}
+	Logging struct {
+		Level string
+	}
 )
 
-func Load() (Config, error) { return LoadFrom(os.LookupEnv) }
+func Load() (Config, error) {
+	return LoadFrom(os.LookupEnv)
+}
 
 func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 	cfg := Config{
@@ -60,11 +72,18 @@ func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 			IdleTimeout:  60 * time.Second,
 			BodyLimit:    16 * 1024,
 		},
-		Auth: Auth{TrustedOrigins:[]string{"http://127.0.0.1:8080"},SessionTTL:24*time.Hour,IdleTimeout:30*time.Minute},
-Logging:  Logging{Level: "info"},
+		Auth: Auth{
+			TrustedOrigins: []string{"http://127.0.0.1:8080"},
+			SessionTTL:     24 * time.Hour,
+			IdleTimeout:    30 * time.Minute,
+		},
+		Logging:  Logging{Level: "info"},
 		Features: map[string]*bool{},
-		Jobs: jobs.DefaultConfig(),
-		Cache: Cache{Backend: {{q .CacheBackend}}, Environment: "development"},
+		Jobs:     jobs.DefaultConfig(),
+		Cache: Cache{
+			Backend:     {{q .CacheBackend}},
+			Environment: "development",
+		},
 	}
 	for _, setting := range []struct {
 		name   string
@@ -90,48 +109,108 @@ Logging:  Logging{Level: "info"},
 
 		cfg.Server.Gzip = parsed
 	}
-	if value, ok := lookup(Prefix+"CACHE_ALLOW_INSECURE"); ok {
-        parsed, err := strconv.ParseBool(value)
-        if err != nil { return Config{}, fmt.Errorf("CACHE_ALLOW_INSECURE must be boolean") }
-        cfg.Cache.AllowInsecure = parsed
-    }
-    switch cfg.Cache.Backend {
-    case "none", "memory":
-    {{if .Valkey}}case "valkey":{{end}}
-    default: return Config{}, fmt.Errorf("cache backend is not included in this scaffold")
-    }
-    if strings.TrimSpace(cfg.Cache.Environment) == "" { return Config{},fmt.Errorf("CACHE_ENVIRONMENT is required") }
 
-    if value,ok:=lookup(Prefix+"AUTH_TRUSTED_ORIGINS");ok { cfg.Auth.TrustedOrigins=strings.Split(value,",") }
-    for _,setting:=range []struct{name string;target *time.Duration}{
-        {"AUTH_SESSION_TTL",&cfg.Auth.SessionTTL},{"AUTH_IDLE_TIMEOUT",&cfg.Auth.IdleTimeout},
-    } {
-        if value,ok:=lookup(Prefix+setting.name);ok {
-            parsed,err:=time.ParseDuration(value)
-            if err != nil { return Config{},fmt.Errorf("%s%s must be a duration",Prefix,setting.name) }
-            *setting.target=parsed
-        }
-    }
-    if cfg.Auth.SessionTTL<=0 || cfg.Auth.IdleTimeout<0 || cfg.Auth.IdleTimeout>cfg.Auth.SessionTTL || len(cfg.Auth.TrustedOrigins)==0 {
-        return Config{},fmt.Errorf("invalid AUTH session configuration")
-    }
+	if value, ok := lookup(Prefix + "CACHE_ALLOW_INSECURE"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("CACHE_ALLOW_INSECURE must be boolean")
+		}
 
- featureValues, err := corefeatures.ReadEnvironment(features.Declarations(), Prefix+"FEATURE_", lookup)
- if err != nil { return Config{}, err }
- for key, value := range featureValues { cfg.Features[key] = &value }
+		cfg.Cache.AllowInsecure = parsed
+	}
 
- host,port,err:=net.SplitHostPort(cfg.Server.Address)
- if err!=nil { return Config{},fmt.Errorf("%sSERVER_ADDRESS must be host:port",Prefix) }
- number,err:=strconv.Atoi(port)
- if err!=nil || number<1 || number>65535 { return Config{},fmt.Errorf("%sSERVER_ADDRESS requires a numeric port from 1 to 65535",Prefix) }
+	switch cfg.Cache.Backend {
+	case "none", "memory":
+	{{if .Valkey}}
 
-    {{if .LocalCredentials}}
-    if cfg.Database.URL == "" { return Config{},fmt.Errorf("local credentials require DATABASE_URL; no memory fallback") }
-    {{end}}
-    if cfg.Database.URL == "" {
-        address:=net.ParseIP(host)
-        if address==nil || !address.IsLoopback() { return Config{},fmt.Errorf("DATABASE_URL is required outside numeric loopback development") }
-    }
+	case "valkey":{{end}}
+	default:
+		return Config{}, fmt.Errorf(
+			"cache backend is not included in this scaffold")
+	}
+
+	if strings.TrimSpace(cfg.Cache.Environment) == "" {
+		return Config{}, fmt.Errorf("CACHE_ENVIRONMENT is required")
+	}
+
+	if value, ok := lookup(Prefix + "AUTH_TRUSTED_ORIGINS"); ok {
+		cfg.Auth.TrustedOrigins = strings.Split(value, ",")
+	}
+
+	for _, setting := range []struct {
+		name   string
+		target *time.Duration
+	}{
+		{
+			"AUTH_SESSION_TTL",
+			&cfg.Auth.SessionTTL,
+		}, {
+			"AUTH_IDLE_TIMEOUT",
+			&cfg.Auth.IdleTimeout,
+		},
+	} {
+		if value, ok := lookup(Prefix + setting.name); ok {
+			parsed, err := time.ParseDuration(value)
+			if err != nil {
+				return Config{}, fmt.Errorf(
+					"%s%s must be a duration",
+					Prefix,
+					setting.name)
+			}
+
+			*setting.target = parsed
+		}
+	}
+
+	if cfg.Auth.SessionTTL <= 0 || cfg.Auth.IdleTimeout < 0 ||
+		cfg.Auth.IdleTimeout > cfg.Auth.SessionTTL ||
+		len(cfg.Auth.TrustedOrigins) == 0 {
+		return Config{}, fmt.Errorf("invalid AUTH session configuration")
+	}
+
+	featureValues, err := corefeatures.ReadEnvironment(
+		features.Declarations(),
+		Prefix+"FEATURE_",
+		lookup)
+	if err != nil {
+		return Config{}, err
+	}
+
+	for key, value := range featureValues {
+		cfg.Features[key] = &value
+	}
+
+	host, port, err := net.SplitHostPort(cfg.Server.Address)
+	if err != nil {
+		return Config{}, fmt.Errorf(
+			"%sSERVER_ADDRESS must be host:port",
+			Prefix)
+	}
+
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return Config{}, fmt.Errorf(
+			"%sSERVER_ADDRESS requires a numeric port from 1 to 65535",
+			Prefix)
+	}
+
+	{{if .LocalCredentials}}
+
+	if cfg.Database.URL == "" {
+		return Config{}, fmt.Errorf(
+			"local credentials require DATABASE_URL; no memory fallback")
+	}
+	{{end}}
+
+	if cfg.Database.URL == "" {
+		address := net.ParseIP(host)
+		if address == nil || !address.IsLoopback() {
+			return Config{}, fmt.Errorf(
+				"DATABASE_URL is required outside numeric loopback " +
+					"development")
+		}
+	}
+
 	switch cfg.Logging.Level {
 	case "debug", "info", "warn", "error":
 	default:
@@ -141,6 +220,12 @@ Logging:  Logging{Level: "info"},
 		)
 	}
 
-	{{if .OIDC}}cfg.OIDC,err=loadOIDC(lookup);if err!=nil{return Config{},err}{{end}}
- return cfg, nil
+	{{if .OIDC}}
+
+	cfg.OIDC, err = loadOIDC(lookup)
+	if err != nil {
+		return Config{}, err
+	}{{end}}
+
+	return cfg, nil
 }

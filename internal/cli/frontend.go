@@ -41,11 +41,26 @@ func frontendCommand(options Options) *cobra.Command {
 		},
 	}
 	init.Flags().
-		StringVar(&ui, "ui", "native", "UI profile: native, heroui-v3 or shadcn (saved in pluto.toml)")
+		StringVar(
+			&ui,
+			"ui",
+			"native",
+			"UI profile: native, heroui-v3 or shadcn (saved in pluto.toml)",
+		)
 	init.Flags().
-		StringVar(&directory, "directory", "web", "Single project-relative frontend directory")
+		StringVar(
+			&directory,
+			"directory",
+			"web",
+			"Single project-relative frontend directory",
+		)
 	init.Flags().
-		BoolVar(&auth, "auth", false, "Include local credential UI; backend must already support it")
+		BoolVar(
+			&auth,
+			"auth",
+			false,
+			"Include local credential UI; backend must already support it",
+		)
 	frontendFlags(init, &dry, &noInstall)
 
 	add := &cobra.Command{
@@ -59,9 +74,10 @@ func frontendCommand(options Options) *cobra.Command {
 	)
 
 	install := &cobra.Command{
-		Use:   "install",
-		Short: "Install exact dependencies, generate API types, format and check",
-		Args:  cobra.NoArgs,
+		Use: "install",
+		Short: "Install exact dependencies, generate API types, format and " +
+			"check",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root, m, err := project.Discover(options.Directory)
 			if err != nil {
@@ -140,13 +156,24 @@ func frontendAddCommand(options Options, auth bool) *cobra.Command {
 	}
 	if auth {
 		command.Use = "auth"
-		command.Short = "Add sign-in, enrollment, verification and recovery UI"
+		command.Short = "Add sign-in, enrollment, verification and recovery " +
+			"UI"
 		command.Args = cobra.NoArgs
 	} else {
 		command.Flags().
-			StringVar(&from, "from", "", "Local registry item, for example company/date-range-picker")
+			StringVar(
+				&from,
+				"from",
+				"",
+				"Local registry item, for example company/date-range-picker",
+			)
 		command.Flags().
-			StringVar(&kind, "kind", "form", "Component kind: button, input, card, dialog or form")
+			StringVar(
+				&kind,
+				"kind",
+				"form",
+				"Component kind: button, input, card, dialog or form",
+			)
 	}
 
 	frontendFlags(command, &dry, &noInstall)
@@ -156,9 +183,19 @@ func frontendAddCommand(options Options, auth bool) *cobra.Command {
 
 func frontendFlags(cmd *cobra.Command, dry, noInstall *bool) {
 	cmd.Flags().
-		BoolVar(dry, "dry-run", false, "Preflight and list files offline without writes or installs")
+		BoolVar(
+			dry,
+			"dry-run",
+			false,
+			"Preflight and list files offline without writes or installs",
+		)
 	cmd.Flags().
-		BoolVar(noInstall, "no-install", false, "Write files without npm; later run pluto frontend install")
+		BoolVar(
+			noInstall,
+			"no-install",
+			false,
+			"Write files without npm; later run pluto frontend install",
+		)
 }
 
 func applyFrontend(

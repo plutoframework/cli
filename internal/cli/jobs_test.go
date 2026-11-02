@@ -46,6 +46,7 @@ func TestGeneratedJobs(t *testing.T) {
 				"Send",
 				"--kind",
 				"invoice.send",
+				"--permission", "invoices.send",
 				"--dry-run",
 			)
 			assertUnchanged(t, before, snapshot(t, root))
@@ -58,9 +59,10 @@ func TestGeneratedJobs(t *testing.T) {
 				"Send",
 				"--kind",
 				"invoice.send",
+				"--permission", "invoices.send",
 			)
 
-			path := filepath.Join(root, "internal/jobs/invoices/send.go")
+			path := filepath.Join(root, "internal/operations/invoices/send.go")
 
 			source, err := os.ReadFile(path)
 			if err != nil {
@@ -70,7 +72,8 @@ func TestGeneratedJobs(t *testing.T) {
 			source = append(
 				source,
 				[]byte(
-					"\n// Authored marker must survive subsequent jobs/endpoints.\n",
+					"\n// Authored marker must survive subsequent jobs/"+
+						"endpoints.\n",
 				)...)
 			if err := os.WriteFile(path, source, 0o644); err != nil {
 				t.Fatal(err)
@@ -78,7 +81,7 @@ func TestGeneratedJobs(t *testing.T) {
 
 			bindingPath := filepath.Join(
 				root,
-				"internal/background/invoices_send.go",
+				"internal/app/worker.go",
 			)
 
 			binding, err := os.ReadFile(bindingPath)
@@ -102,6 +105,7 @@ func TestGeneratedJobs(t *testing.T) {
 				"Build",
 				"--kind",
 				"export.build",
+				"--permission", "exports.build",
 			)
 			mustInvoke(
 				t,
@@ -138,6 +142,8 @@ func TestGeneratedJobs(t *testing.T) {
 			if err := project.Contracts(root, manifest); err != nil {
 				t.Fatal(err)
 			}
+
+			assertPublishedDraft(t, root)
 
 			before = snapshot(t, root)
 			for _, args := range [][]string{
@@ -181,10 +187,11 @@ func TestGeneratedJobs(t *testing.T) {
 
 			if _, err := exec.LookPath("golangci-lint"); err == nil {
 				mustInvoke(t, root, "fmt")
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 			}
 
-			// Managed handler registration must be checked before the next write.
+			// Managed handler registration must be checked before the next
+			// write.
 			registry := filepath.Join(
 				root,
 				"internal/background/handlers_gen.go",
@@ -212,7 +219,8 @@ func TestGeneratedJobs(t *testing.T) {
 
 			assertUnchanged(t, before, snapshot(t, root))
 
-			// Verify Docker publishes both binaries without auto-running an empty worker.
+			// Verify Docker publishes both binaries without auto-running an
+			// empty worker.
 			compose, err := os.ReadFile(filepath.Join(root, "compose.yaml"))
 			if err != nil ||
 				!strings.Contains(string(compose), "profiles: [\"worker\"]") {

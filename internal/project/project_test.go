@@ -147,7 +147,9 @@ func TestHookExecutionAndWorktree(t *testing.T) {
 	)
 	tools := testRoot(t)
 
-	script := "#!/bin/sh\n[ \"$1 $2\" = 'vet --staged' ] || exit 94\n[ \"$PWD\" = \"$(git rev-parse --show-toplevel)\" ] || exit 93\nexit 17\n"
+	script := "#!/bin/sh\n[ \"$1 $2\" = 'vet --staged' ] || exit 94\n[ " +
+		"\"$PWD\" = \"$(git rev-parse --show-toplevel)\" ] || exit 93\n" +
+		"exit 17\n"
 	if err := os.WriteFile(
 		filepath.Join(tools, "pluto"),
 		[]byte(script),
@@ -314,6 +316,7 @@ func FuzzEndpointValidation(f *testing.F) {
 
 		endpoint := Endpoint{
 			Group:       group,
+			Permission:  "items.write",
 			Action:      action,
 			Method:      "POST",
 			Path:        path,
@@ -324,7 +327,19 @@ func FuzzEndpointValidation(f *testing.F) {
 			return
 		}
 
-		m := Manifest{Project: Project{Module: "example.com/demo"}}
+		m := Manifest{
+			Project: Project{Module: "example.com/demo"},
+			Operations: []Operation{
+				{
+					Group:       group,
+					Action:      action,
+					Permission:  "items.write",
+					Write:       true,
+					Idempotency: "required",
+				},
+			},
+		}
+		endpoint.Operation = group + "." + action
 
 		files, err := EndpointFiles(m, endpoint)
 		if err != nil {

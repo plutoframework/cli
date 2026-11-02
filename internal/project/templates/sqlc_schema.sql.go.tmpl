@@ -15,7 +15,10 @@ SELECT version FROM schema_metadata ORDER BY version DESC LIMIT 1
 
 func (q *Queries) SchemaVersion(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, schemaVersion)
+
 	var version int64
+
 	err := row.Scan(&version)
+
 	return version, err
 }

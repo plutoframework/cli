@@ -147,7 +147,11 @@ func menuForm(kind string, options Options) wizardModel {
 				value,
 				choices...),
 		},
-		build: func(v map[string]string) ([]string, error) { return []string{v["action"]}, nil },
+		build: func(v map[string]string) ([]string, error) {
+			return []string{
+				v["action"],
+			}, nil
+		},
 	}
 	model.focus(0)
 
@@ -161,7 +165,8 @@ func initForm(
 	args []string,
 ) wizardModel {
 	model.title = "Initialize your API"
-	model.context = "Postgres + sqlc / review all settings before files are written"
+	model.context = "Postgres + sqlc / review all settings before files are " +
+		"written"
 	model.fields = []wizardField{
 		textField(
 			"directory",
@@ -178,13 +183,15 @@ func initForm(
 		textField(
 			"module",
 			"Go module",
-			"Use your real module path, for example github.com/you/mission-control.",
+			"Use your real module path, for example github.com/you/"+
+				"mission-control.",
 			seed(cmd, "module", ""),
 		),
 		textField(
 			"env-prefix",
 			"Environment prefix",
-			"Uppercase, ending with one underscore; isolates this app's settings.",
+			"Uppercase, ending with one underscore; isolates this app's "+
+				"settings.",
 			seed(cmd, "env-prefix", ""),
 		),
 		boolField(
@@ -196,7 +203,8 @@ func initForm(
 		boolField(
 			"local-credentials",
 			"Local password authentication",
-			"Enrollment, verification and recovery; you supply delivery, limits and ingress.",
+			"Enrollment, verification and recovery; you supply delivery, "+
+				"limits and ingress.",
 			seed(cmd, "local-credentials", "false"),
 		),
 		boolField(
@@ -208,12 +216,14 @@ func initForm(
 		choiceField(
 			"cache",
 			"Data cache",
-			"Optional data optimization; authentication and permissions remain live.",
+			"Optional data optimization; authentication and permissions "+
+				"remain live.",
 			seed(cmd, "cache", "none"),
 			wizardChoice{"None", "none"},
 			wizardChoice{"Bounded in-process memory", "memory"},
 			wizardChoice{
-				"Valkey / Redis (adds optional client and development service)",
+				"Valkey / Redis (adds optional client and development " +
+					"service)",
 				"valkey",
 			},
 		),
@@ -276,7 +286,9 @@ func initForm(
 
 		return filepath.Base(target)
 	}
-	model.fields[2].fallback = func(v map[string]string) string { return "example.com/" + v["name"] }
+	model.fields[2].fallback = func(v map[string]string) string {
+		return "example.com/" + v["name"]
+	}
 	model.fields[3].fallback = func(v map[string]string) string {
 		return strings.ToUpper(strings.ReplaceAll(v["name"], "-", "_")) + "_"
 	}
@@ -374,31 +386,36 @@ func endpointForm(
 		boolField(
 			"public",
 			"Public endpoint",
-			"Default No requires authentication. Multi-tenant business routes stay authenticated.",
+			"Default No requires authentication. Multi-tenant business "+
+				"routes stay authenticated.",
 			seed(cmd, "public", "false"),
 		),
 		textField(
 			"permission",
 			"RBAC permission",
-			"Optional capability, for example purchases:create; never grants roles automatically.",
+			"Optional capability, for example purchases:create; never grants "+
+				"roles automatically.",
 			seed(cmd, "permission", ""),
 		),
 		textField(
 			"feature",
 			"Feature flag",
-			"Optional default-false gate, for example purchases.export; blank means no flag.",
+			"Optional default-false gate, for example purchases.export; "+
+				"blank means no flag.",
 			seed(cmd, "feature", ""),
 		),
 		boolField(
 			"feature-client-visible",
 			"Expose feature state to clients",
-			"Only meaningful with a feature flag; uses the authenticated feature API.",
+			"Only meaningful with a feature flag; uses the authenticated "+
+				"feature API.",
 			seed(cmd, "feature-client-visible", "false"),
 		),
 		choiceField(
 			"collection",
 			"Paginated collection",
-			"Auto enables pagination for GET List; choose explicitly for other names.",
+			"Auto enables pagination for GET List; choose explicitly for "+
+				"other names.",
 			seed(cmd, "collection", "auto"),
 			wizardChoice{"Auto (GET List)", "auto"},
 			wizardChoice{"Yes", "true"},
@@ -407,12 +424,20 @@ func endpointForm(
 		choiceField(
 			"idempotency",
 			"Idempotency policy",
-			"Auto requires keys on authenticated business writes; exempt only deliberately.",
+			"Auto requires keys on authenticated business writes; exempt "+
+				"only deliberately.",
 			seed(cmd, "idempotency", "auto"),
 			wizardChoice{"Auto", "auto"},
 			wizardChoice{"Required", "required"},
 			wizardChoice{"Exempt", "exempt"},
 		),
+		textField(
+			"operation",
+			"Existing operation",
+			"Optional declared group.Action; blank creates this use case.",
+			seed(cmd, "operation", ""),
+		),
+
 		boolField(
 			"dry-run",
 			"Preview files only",
@@ -420,11 +445,17 @@ func endpointForm(
 			seed(cmd, "dry-run", "false"),
 		),
 	}
-	model.fields[3].fallback = func(v map[string]string) string { return "/api/" + v["group"] }
-	model.fields[4].fallback = func(v map[string]string) string { return v["action"] + " " + v["group"] }
+	model.fields[3].fallback = func(v map[string]string) string {
+		return "/api/" + v["group"]
+	}
+	model.fields[4].fallback = func(v map[string]string) string {
+		return v["action"] + " " + v["group"]
+	}
 	model.build = func(v map[string]string) ([]string, error) {
 		collection := v["collection"] == "true" ||
-			(v["collection"] == "auto" && v["method"] == "GET" && v["action"] == "List")
+			(v["collection"] == "auto" &&
+				v["method"] == "GET" &&
+				v["action"] == "List")
 		endpoint := project.Endpoint{
 			Group:         v["group"],
 			Action:        v["action"],
@@ -440,6 +471,27 @@ func endpointForm(
 			Idempotency:   v["idempotency"],
 		}
 		candidate := m
+
+		operation, _, err := ensureEntryOperation(
+			&candidate,
+			v["operation"],
+			endpoint.Group,
+			endpoint.Action,
+			endpoint.Permission,
+			endpoint.Method != "GET" && endpoint.Method != "HEAD" &&
+				endpoint.Method != "OPTIONS",
+			endpoint.Public,
+			endpoint.Collection,
+			endpoint.Idempotency,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		endpoint.Operation = operation.ID()
+		endpoint.Permission = operation.Permission
+		endpoint.Public = operation.Public
+		endpoint.Collection = operation.Collection
 
 		candidate.Endpoints = append(
 			append([]project.Endpoint(nil), m.Endpoints...),
@@ -492,6 +544,20 @@ func jobForm(
 			"Stable lowercase identifier, for example invoice.send.",
 			seed(cmd, "kind", ""),
 		),
+		textField(
+			"operation",
+			"Existing operation",
+			"Optional protected group.Action; blank creates a write "+
+				"operation.",
+			seed(cmd, "operation", ""),
+		),
+		textField(
+			"permission",
+			"New operation permission",
+			"Required when declaring a new write use case.",
+			seed(cmd, "permission", ""),
+		),
+
 		boolField(
 			"dry-run",
 			"Preview files only",
@@ -499,16 +565,33 @@ func jobForm(
 			seed(cmd, "dry-run", "false"),
 		),
 	}
-	model.fields[2].fallback = func(v map[string]string) string { return v["group"] + "." + strings.ToLower(v["action"]) }
+	model.fields[2].fallback = func(v map[string]string) string {
+		return v["group"] + "." + strings.ToLower(v["action"])
+	}
 	model.build = func(v map[string]string) ([]string, error) {
 		candidate := m
+
+		operation, _, err := ensureEntryOperation(
+			&candidate,
+			v["operation"],
+			v["group"],
+			v["action"],
+			v["permission"],
+			true,
+			false,
+			false,
+		)
+		if err != nil {
+			return nil, err
+		}
 
 		candidate.Jobs = append(
 			append([]project.Job(nil), m.Jobs...),
 			project.Job{
-				Group:  v["group"],
-				Action: v["action"],
-				Kind:   v["kind"],
+				Operation: operation.ID(),
+				Group:     v["group"],
+				Action:    v["action"],
+				Kind:      v["kind"],
 			},
 		)
 		if err := candidate.Validate(); err != nil {
@@ -521,6 +604,8 @@ func jobForm(
 			v["group"],
 			v["action"],
 			"--kind=" + v["kind"],
+			"--operation=" + v["operation"],
+			"--permission=" + v["permission"],
 			"--dry-run=" + v["dry-run"],
 		}, nil
 	}

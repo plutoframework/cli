@@ -1,0 +1,186 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"{{.Module}}/internal/app"
+	"{{.Module}}/internal/caching"
+	"{{.Module}}/internal/config"
+	"{{.Module}}/internal/storage/postgres"
+)
+
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	if cfg.Database.URL == "" {
+		return errors.New(
+			"candidate runtime requires DATABASE_URL and explicit migrations")
+	}
+
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.Logging.Level)); err != nil {
+		return errors.New("invalid logging configuration")
+	}
+
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM)
+	defer stop()
+
+	startup, cancelStartup := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelStartup()
+
+	observability, err := newTelemetry(startup)
+	if err != nil {
+		return errors.New("telemetry startup failed")
+	}
+
+	logger := slog.New(
+		observability.Handler(
+			slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
+
+	defer func() {
+		shutdown, cancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second)
+		defer cancel()
+
+		if err := observability.Shutdown(shutdown); err != nil {
+			logger.Error("telemetry shutdown failed")
+		}
+	}()
+
+	pool, err := postgres.OpenWithTracer(
+		startup,
+		cfg.Database.URL,
+		observability.PGXTracer())
+	if err != nil {
+		return errors.New(
+			"postgres connectivity failed; verify DATABASE_URL and " +
+				"database availability",
+		)
+	}
+
+	defer pool.Close()
+
+	dataCache, closeCache, err := caching.New(cfg.Cache)
+	if err != nil {
+		return errors.New("invalid cache configuration")
+	}
+
+	defer closeCache()
+
+	dataCache = observability.Cache(dataCache)
+
+	// Destinations are deployment configuration, never tool or request
+	// arguments.
+	destinations := map[string]string{}
+
+	for _, operationID := range []string{
+{{range .Manifest.OperationContracts}}
+{{if eq .Kind "effect"}}
+		{{q .ID}},
+{{end}}
+{{end}}
+	} {
+		key := strings.ToUpper(strings.ReplaceAll(operationID, ".", "_"))
+		destinations[operationID] = os.Getenv(
+			config.Prefix + "EFFECT_" + key + "_URL")
+	}
+
+	runtime, err := app.NewCandidateRuntime(
+		cfg,
+		pool,
+		logger,
+		dataCache,
+		cfg.Cache.Environment,
+		destinations)
+	if err != nil {
+		return errors.New(
+			"candidate runtime configuration failed; verify declared " +
+				"policy, data and effect settings",
+		)
+	}
+
+	router := chi.NewRouter()
+	router.Use(observability.Middleware)
+	router.Mount("/", runtime.Handler())
+
+	server := &http.Server{
+		Addr:    cfg.Server.Address,
+		Handler: router,
+
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
+
+		MaxHeaderBytes: 16 * 1024,
+	}
+	done := make(chan struct{})
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+
+		select {
+		case <-ctx.Done():
+			shutdown, cancel := context.WithTimeout(
+				context.Background(),
+				10*time.Second)
+			defer cancel()
+
+			if err := server.Shutdown(shutdown); err != nil {
+				logger.Error("HTTP shutdown deadline reached")
+
+				_ = server.Close()
+			}
+		case <-done:
+		}
+	}()
+
+	defer func() {
+		close(done)
+		<-shutdownDone
+	}()
+
+	logger.Info(
+		"listening",
+		"address",
+		server.Addr,
+		"authentication",
+		"verified PostgreSQL sessions and current tenant memberships")
+
+	err = server.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+
+	if err != nil {
+		return errors.New("HTTP server stopped unexpectedly")
+	}
+
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("candidate server failed", "error", err)
+		os.Exit(1)
+	}
+}

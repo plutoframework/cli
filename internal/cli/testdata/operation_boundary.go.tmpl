@@ -1,0 +1,189 @@
+package widgets
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"example.test/boundary/internal/access"
+	"example.test/boundary/internal/domain"
+	models "example.test/boundary/internal/models/widgets"
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+type assignments struct {
+	roles    []rbac.RoleID
+	mismatch bool
+	deny     bool
+	lookups  int
+	cancel   context.CancelFunc
+}
+
+func (a *assignments) Resolve(
+	_ context.Context,
+	actor string,
+) (domain.Principal, error) {
+	a.lookups++
+	if a.cancel != nil {
+		a.cancel()
+	}
+
+	if a.deny {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+
+	if a.mismatch {
+		actor = "another-actor"
+	}
+
+	return domain.Principal{ActorID: actor, Roles: a.roles}, nil
+}
+
+func TestManagedGatePrecedesAuthoredEffects(t *testing.T) {
+	policy, err := rbac.New(
+		rbac.Definition{
+			Permissions: access.Permissions(),
+			Roles: []rbac.Role{
+				{
+					ID:          "writer",
+					Name:        "Writer",
+					Description: "Test grant",
+					Permissions: []rbac.PermissionID{
+						access.WidgetsCreatePermission,
+					},
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lookup := &assignments{}
+
+	authorization, err := access.NewAuthorizer(policy, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calls := 0
+	operation := NewCreateWithDependencies(
+		authorization,
+		lookup,
+		CreateDependencies{Calls: &calls},
+	)
+	caller := domain.Principal{ActorID: "actor", Roles: []rbac.RoleID{"writer"}}
+
+	input := models.CreateRequest{}
+	if _, err := operation.Execute(
+		context.Background(),
+		caller,
+		input,
+	); !errors.Is(
+		err,
+		domain.ErrForbidden,
+	) ||
+		calls != 0 {
+		t.Fatal("forged roles reached authored effect", err, calls)
+	}
+
+	lookup.roles = []rbac.RoleID{"writer"}
+
+	caller.Roles = nil
+	if _, err := operation.Execute(
+		context.Background(),
+		caller,
+		input,
+	); !errors.Is(
+		err,
+		domain.ErrNotImplemented,
+	) ||
+		calls != 1 {
+		t.Fatal("current grant did not reach implementation", err, calls)
+	}
+
+	lookup.roles = nil
+
+	caller.Roles = []rbac.RoleID{"writer"}
+	if _, err := operation.Execute(
+		context.Background(),
+		caller,
+		input,
+	); !errors.Is(
+		err,
+		domain.ErrForbidden,
+	) ||
+		calls != 1 {
+		t.Fatal("revoked assignment reached authored effect", err, calls)
+	}
+
+	lookup.roles = []rbac.RoleID{"writer"}
+	lookup.mismatch = true
+
+	if _, err := operation.Execute(
+		context.Background(),
+		caller,
+		input,
+	); !errors.Is(
+		err,
+		domain.ErrUnauthenticated,
+	) ||
+		calls != 1 {
+		t.Fatal("wrong identity reached implementation", err, calls)
+	}
+
+	lookup.mismatch = false
+	lookup.deny = true
+
+	if _, err := operation.Execute(
+		context.Background(),
+		caller,
+		input,
+	); !errors.Is(
+		err,
+		domain.ErrUnauthenticated,
+	) ||
+		calls != 1 {
+		t.Fatal("unverified caller reached implementation", err, calls)
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	before := lookup.lookups
+	if _, err := operation.Execute(cancelled, caller, input); !errors.Is(
+		err,
+		context.Canceled,
+	) ||
+		calls != 1 ||
+		lookup.lookups != before {
+		t.Fatal("cancelled execution reached resolver/effect", err, calls)
+	}
+
+	lookup.deny = false
+	midContext, midCancel := context.WithCancel(context.Background())
+	lookup.cancel = midCancel
+
+	if _, err := operation.Execute(midContext, caller, input); !errors.Is(
+		err,
+		context.Canceled,
+	) ||
+		calls != 1 {
+		t.Fatal(
+			"cancellation during identity resolution reached effect",
+			err,
+			calls,
+		)
+	}
+
+	lookup.cancel = nil
+
+	zero := &Create{}
+	if _, err := zero.Execute(context.Background(), caller, input); !errors.Is(
+		err,
+		domain.ErrUnauthenticated,
+	) ||
+		calls != 1 {
+		t.Fatal("zero value bypassed gate", err, calls)
+	}
+}

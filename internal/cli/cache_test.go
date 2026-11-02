@@ -59,7 +59,9 @@ func TestGeneratedCaches(t *testing.T) {
 			var output bytes.Buffer
 			if err := tmpl.Execute(
 				&output,
-				struct{ Mode string }{mode},
+				struct {
+					Mode string
+				}{mode},
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -114,7 +116,7 @@ func TestGeneratedCaches(t *testing.T) {
 
 			if _, err := exec.LookPath("golangci-lint"); err == nil {
 				mustInvoke(t, root, "fmt")
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 			}
 		})
 	}

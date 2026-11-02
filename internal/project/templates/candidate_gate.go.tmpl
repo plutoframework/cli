@@ -1,0 +1,260 @@
+package {{.Group}}
+
+import (
+	"context"
+	"fmt"
+
+	"{{.Module}}/internal/access"
+	commonDomain "{{.Module}}/internal/domain"
+	domain "{{.Module}}/internal/domain/{{.Resource.Group}}"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	ports "{{.Module}}/internal/ports/{{.Resource.Group}}"
+	"github.com/plutoframework/pluto-core/idempotency"
+	"github.com/plutoframework/pluto-core/state"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
+)
+
+type {{.Action}}Boundary interface {
+	sealed{{.Action}}()
+	Prepare(
+		context.Context,
+		access.Caller,
+		models.{{.Action}}Request) (*{{.Action}}Intent, error)
+	AuthorizeIntent(context.Context, *{{.Action}}Intent) (access.Actor, error)
+	ExecutePrepared(
+		context.Context,
+		*{{.Action}}Intent) (models.{{.Action}}Data, error)
+	Execute(
+		context.Context,
+		access.Caller,
+		models.{{.Action}}Request) (models.{{.Action}}Data, error)
+}
+
+// {{.Action}}Intent is normalized once and bound to the exact operation
+// instance
+// and verified identity scope. It is not reusable authorization: every
+// execution
+// revalidates identity, membership, permission and resource before work.
+type {{.Action}}Intent struct {
+	{{lowerFirst .Action}}IntentOwner   *{{.Action}}
+	{{lowerFirst .Action}}IntentCaller  access.Caller
+	{{lowerFirst .Action}}IntentCommand domain.{{.Resource.Name}}Command
+}
+
+type {{.Action}} struct {
+	{{lowerFirst .Action}}Gate    *identitygate.Gate
+	{{lowerFirst .Action}}Machine *state.Machine[
+		domain.{{.Resource.Name}}Status,
+		domain.{{.Resource.Name}}Event,
+		bool,
+	]
+{{if eq .Contract.Kind "effect"}}
+
+	{{lowerFirst .Action}}Data ports.{{.Resource.Name}}EffectData
+{{else if eq .Contract.Kind "transition"}}
+	{{lowerFirst .Action}}Data ports.{{.Resource.Name}}TransitionData
+{{else if eq .Contract.Kind "create"}}
+	{{lowerFirst .Action}}Data ports.{{.Resource.Name}}CreateData
+{{else if eq .Contract.Kind "list"}}
+	{{lowerFirst .Action}}Data ports.{{.Resource.Name}}ListData
+{{else if eq .Contract.Kind "export"}}
+	{{lowerFirst .Action}}Data ports.{{.Resource.Name}}ExportData
+{{else}}
+	{{lowerFirst .Action}}Data ports.{{.Resource.Name}}LoadData
+{{end}}
+}
+
+func New{{.Action}}(
+	gate *identitygate.Gate,
+	machine *state.Machine[
+		domain.{{.Resource.Name}}Status,
+		domain.{{.Resource.Name}}Event,
+		bool,
+	],
+{{if eq .Contract.Kind "effect"}}
+
+	data ports.{{.Resource.Name}}EffectData,
+{{else if eq .Contract.Kind "transition"}}
+	data ports.{{.Resource.Name}}TransitionData,
+{{else if eq .Contract.Kind "create"}}
+	data ports.{{.Resource.Name}}CreateData,
+{{else if eq .Contract.Kind "list"}}
+	data ports.{{.Resource.Name}}ListData,
+{{else if eq .Contract.Kind "export"}}
+	data ports.{{.Resource.Name}}ExportData,
+{{else}}
+	data ports.{{.Resource.Name}}LoadData,
+{{end}}
+) *{{.Action}} {
+	return &{{.Action}}{
+		{{lowerFirst .Action}}Gate:    gate,
+		{{lowerFirst .Action}}Machine: machine,
+		{{lowerFirst .Action}}Data:    data,
+	}
+}
+func (*{{.Action}}) sealed{{.Action}}() {}
+
+func (operation *{{.Action}}) intent(
+	caller access.Caller,
+	input models.{{.Action}}Request,
+) (*{{.Action}}Intent, error) {
+	if operation == nil || caller.Identity() == nil {
+		return nil, commonDomain.ErrUnauthenticated
+	}
+
+	command, err := domain.New{{.Resource.Name}}Command(
+		{{q .Contract.Kind}},
+		input.ResourceID,
+		input.IdempotencyKey,
+		input.Value,
+		input.Limit,
+		input.Cursor)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", commonDomain.ErrInvalidInput, err)
+	}
+	{{if eq .Contract.Idempotency "required"}}
+
+	if !idempotency.ValidKey(command.Key()) {
+		return nil, fmt.Errorf(
+			"%w: %w",
+			commonDomain.ErrInvalidInput,
+			domain.Err{{.Resource.Name}}Input)
+	}
+{{else}}
+	_ = idempotency.ValidKey
+{{end}}
+
+	return &{{.Action}}Intent{
+		{{lowerFirst .Action}}IntentOwner:   operation,
+		{{lowerFirst .Action}}IntentCaller:  caller,
+		{{lowerFirst .Action}}IntentCommand: command,
+	}, nil
+}
+
+func (operation *{{.Action}}) within(
+	ctx context.Context,
+	intent *{{.Action}}Intent,
+	run func(context.Context, *identitygate.Execution) error,
+) error {
+	if ctx == nil || operation == nil ||
+		operation.{{lowerFirst .Action}}Gate == nil ||
+		operation.{{lowerFirst .Action}}Data == nil ||
+		intent == nil ||
+		intent.{{lowerFirst .Action}}IntentOwner != operation {
+		return commonDomain.ErrUnauthenticated
+	}
+
+	caller, command := intent.{{lowerFirst .Action}}IntentCaller,
+		intent.{{lowerFirst .Action}}IntentCommand
+	if caller.Identity() == nil {
+		return commonDomain.ErrUnauthenticated
+	}
+
+	if err := command.Validate(); err != nil {
+		return err
+	}
+{{if or (eq .Contract.Kind "list") (eq .Contract.Kind "export")}}
+
+	resource := {{q .Resource.ID}}
+{{else}}
+	resource := command.ID()
+{{end}}
+	{{if eq .Contract.Kind "effect"}}
+
+	if caller.WorkID() == "" || caller.WorkID() != command.Key() {
+		return commonDomain.ErrForbidden
+	}
+
+	switch caller.WorkKind() {
+{{range .ContractEffects}}{{if eq .Operation $.Contract.ID}}
+	case {{q .Kind}}:
+{{end}}{{end}}
+	default:
+		return commonDomain.ErrForbidden
+	}
+	{{end}}
+
+	return operation.{{lowerFirst .Action}}Gate.Within(
+		ctx,
+		caller.Identity(),
+		caller.TenantID(),
+		resource,
+		run)
+}
+
+func (operation *{{.Action}}) Prepare(
+	ctx context.Context,
+	caller access.Caller,
+	input models.{{.Action}}Request,
+) (*{{.Action}}Intent, error) {
+	intent, err := operation.intent(caller, input)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := operation.AuthorizeIntent(ctx, intent); err != nil {
+		return nil, err
+	}
+
+	return intent, nil
+}
+
+func (operation *{{.Action}}) AuthorizeIntent(
+	ctx context.Context,
+	intent *{{.Action}}Intent,
+) (access.Actor, error) {
+	var actor access.Actor
+
+	err := operation.within(
+		ctx,
+		intent,
+		func(_ context.Context, execution *identitygate.Execution) error {
+			actor = access.Actor{
+				SubjectID: execution.SubjectID(),
+				TenantID:  execution.TenantID(),
+			}
+
+			return nil
+		})
+
+	return actor, err
+}
+
+func (operation *{{.Action}}) ExecutePrepared(
+	ctx context.Context,
+	intent *{{.Action}}Intent,
+) (models.{{.Action}}Data, error) {
+	var output models.{{.Action}}Data
+
+	err := operation.within(
+		ctx,
+		intent,
+		func(ctx context.Context, execution *identitygate.Execution) error {
+			var err error
+
+			output, err = operation.execute(
+				ctx,
+				execution,
+				intent.{{lowerFirst .Action}}IntentCommand)
+
+			return err
+		})
+	if err != nil {
+		return models.{{.Action}}Data{}, err
+	}
+
+	return output, nil
+}
+
+func (operation *{{.Action}}) Execute(
+	ctx context.Context,
+	caller access.Caller,
+	input models.{{.Action}}Request,
+) (models.{{.Action}}Data, error) {
+	intent, err := operation.intent(caller, input)
+	if err != nil {
+		return models.{{.Action}}Data{}, err
+	}
+
+	return operation.ExecutePrepared(ctx, intent)
+}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"text/template"
 
@@ -76,7 +77,9 @@ func TestGeneratedLocalApplications(t *testing.T) {
 			var output bytes.Buffer
 			if err := tmpl.Execute(
 				&output,
-				struct{ Multi bool }{multi},
+				struct {
+					Multi bool
+				}{multi},
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -98,7 +101,7 @@ func TestGeneratedLocalApplications(t *testing.T) {
 				}
 
 				mustInvoke(t, root, "fmt")
-				mustInvoke(t, root, "vet")
+				mustVetPublishedCompatibility(t, root)
 			})
 
 			before := snapshot(t, root)
@@ -107,7 +110,7 @@ func TestGeneratedLocalApplications(t *testing.T) {
 				root,
 				"add",
 				"endpoint",
-				"auth",
+				"records",
 				"Signin",
 				"--method",
 				"POST",
@@ -115,10 +118,19 @@ func TestGeneratedLocalApplications(t *testing.T) {
 				"/auth/signin",
 				"--name",
 				"Unsafe duplicate",
+				"--permission",
+				"records.signin",
 				"--description",
 				"Must not replace the lifecycle.",
-			); err == nil {
-				t.Fatal("auth namespace not reserved")
+			); err == nil ||
+				!strings.Contains(
+					err.Error(),
+					"duplicate/reserved endpoint",
+				) {
+				t.Fatalf(
+					"auth namespace reservation was not the rejection: %v",
+					err,
+				)
 			}
 
 			assertUnchanged(t, before, snapshot(t, root))

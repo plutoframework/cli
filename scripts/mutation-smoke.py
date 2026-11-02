@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Bounded seeded security mutations in disposable copies, not a mutation engine."""
+"""Run bounded security mutations in disposable copies."""
+
 from pathlib import Path
 import os
 import shutil
@@ -8,6 +9,113 @@ import tempfile
 
 root = Path(__file__).resolve().parent.parent
 mutations = [
+    (
+        "candidate compiler directive integrity",
+        "internal/project/candidate_integrity.go",
+        "matches = candidateSourceEquivalent(actual, files[path])",
+        "matches = Equivalent(actual, files[path])",
+        (
+            "./internal/project#TestCandidateIntegrityRejectsExcludedGateAndS"
+            "QLChanges"
+        ),
+    ),
+    (
+        "candidate constructor ownership",
+        "internal/project/candidate_boundary_source.go",
+        'capabilityName := file.namespace + "." + value.Name',
+        ('capabilityName := "disabled." + value.Name'),
+        "./internal/project#TestCandidateBoundaryCapabilitiesAndForgery",
+    ),
+    (
+        "candidate private authority fields",
+        "internal/project/candidate_boundary.go",
+        "owners != nil &&",
+        "owners != nil && false &&",
+        "./internal/project#TestCandidateOwnershipBranches",
+    ),
+    (
+        "candidate unsafe confinement",
+        "internal/project/candidate_boundary.go",
+        'if path == "unsafe" {',
+        'if path == "disabled/unsafe" {',
+        "./internal/project#TestCandidateBoundaryCapabilitiesAndForgery",
+    ),
+    (
+        "candidate closed production ownership",
+        "internal/project/candidate_boundary.go",
+        "if rules.managed[file.path] {",
+        "if true {",
+        "./internal/project#TestCandidateOwnershipBranches",
+    ),
+    (
+        "domain normalization placement",
+        "internal/project/primitive_boundaries.go",
+        'if operationCode && dependency == "strings" {',
+        'if false && operationCode && dependency == "strings" {',
+        "./internal/project#TestPrimitivePlacementAndHelperBypasses",
+    ),
+    (
+        "cache boundary placement",
+        "internal/project/primitive_boundaries.go",
+        'dependency == "github.com/plutoframework/pluto-core/cache"',
+        'dependency == "disabled/cache"',
+        "./internal/project#TestPrimitivePlacementAndHelperBypasses",
+    ),
+    (
+        "scoped pagination ownership",
+        "internal/project/primitive_boundaries.go",
+        'capability == "Finish"',
+        'capability == "disabledFinish"',
+        "./internal/project#TestPrimitivePlacementAndHelperBypasses",
+    ),
+    (
+        "required replay contract",
+        "internal/project/contracts.go",
+        'operation.Idempotency != "required"',
+        "false",
+        (
+            "./internal/project#TestContractsRejectMissingAndContradictoryObl"
+            "igations"
+        ),
+    ),
+    (
+        "declared query visibility",
+        "internal/project/contracts.go",
+        "operation.ResourcePolicy != resource.Visibility",
+        "false",
+        (
+            "./internal/project#TestContractsRejectMissingAndContradictoryObl"
+            "igations"
+        ),
+    ),
+    (
+        "owned worker construction",
+        "internal/project/entry_boundary.go",
+        'selector.Sel.Name == "NewWorker"',
+        'selector.Sel.Name == "disabledWorker"',
+        "TestCrossEntryOperationConsumer",
+    ),
+    (
+        "public lifecycle field inspection",
+        "internal/project/lifecycle_boundary.go",
+        "if fieldName.IsExported() {",
+        "if fieldName.IsExported() && false {",
+        "TestLifecycleArchitectureCheck",
+    ),
+    (
+        "raw lifecycle writer inspection",
+        "internal/project/lifecycle_boundary.go",
+        "lifecycleType{parameter.Type, file, false}",
+        "lifecycleType{nil, file, false}",
+        "TestLifecycleArchitectureCheck",
+    ),
+    (
+        "managed operation gate integrity",
+        "internal/project/operation_boundary.go",
+        "if !Equivalent(actual, expected) {",
+        "if !Equivalent(actual, expected) && false {",
+        "TestManagedOperationGateConsumer",
+    ),
     (
         "OIDC account profile guard",
         "internal/project/manifest.go",
@@ -55,20 +163,23 @@ mutations = [
         "internal/project/jobs.go",
         "identifiers[identifier] || kinds[job.Kind]",
         "identifiers[identifier]",
-        "TestGeneratedJobs/single",
+        "./internal/project#TestJobKindUniqueness",
     ),
     (
         "job tenant delivery guard",
-        "internal/project/templates/job.go.tmpl",
-        'if job.TenantID == nil || *job.TenantID == ""',
-        'if false',
+        "internal/project/templates/job_handler.go.tmpl",
+        (
+            'if job.TenantID == nil || *job.TenantID == "" {\n'
+            "\t\t\treturn jobs.Permanent(jobs.ErrInvalid)"
+        ),
+        "if false {\n\t\t\treturn jobs.Permanent(jobs.ErrInvalid)",
         "TestGeneratedJobs/multi",
     ),
     (
         "auth route namespace reservation",
         "internal/project/manifest.go",
-        'strings.HasPrefix(e.Path, "/auth/")',
-        "false",
+        '"/auth/"',
+        '"/disabled-auth/"',
         "TestGeneratedLocalApplications/single",
     ),
     (
@@ -110,7 +221,7 @@ mutations = [
         "anti-sniffing header",
         "internal/project/templates/security.go.tmpl",
         'headers.Set("X-Content-Type-Options", "nosniff")',
-        '// Anti-sniffing header removed by mutation.',
+        "// Anti-sniffing header removed by mutation.",
         "TestGeneratedApplications/single",
     ),
     (
@@ -122,20 +233,62 @@ mutations = [
     ),
     (
         "direct operation RBAC gate",
-        "internal/project/templates/operation.go.tmpl",
-        "if !principal.Can(operation.policy, access.{{.Symbol}}Permission) {",
-        "if false && !principal.Can(operation.policy, access.{{.Symbol}}Permission) {",
+        "internal/project/templates/operation_gate.go.tmpl",
+        "}); err != nil {",
+        "}); false {",
         "TestGeneratedApplications/single",
     ),
 ]
+
+if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
+    mutations.extend(
+        [
+            (
+                "candidate authoritative transition guard",
+                "internal/project/templates/candidate_data.go.tmpl",
+                (
+                    "return domain.Authorize{{ .Resource.Name }}Actor(\n"
+                    "\t\t\t\t\toperation.event,\n"
+                    "\t\t\t\t\trequest.SubjectID,\n"
+                    "\t\t\t\t\tactualOwner)"
+                ),
+                "return nil",
+                "TestCandidateGeneratedConsumer",
+            ),
+            (
+                "candidate downstream stable delivery key",
+                "internal/project/templates/candidate_effect.go.tmpl",
+                'request.Header.Set("Idempotency-Key", command.Key())',
+                'request.Header.Set("X-Idempotency-Key", command.Key())',
+                "TestCandidateGeneratedConsumer",
+            ),
+        ]
+    )
+
+required_assertions = {
+    "candidate private authority fields": (
+        "managed sibling altered opaque caller field"
+    ),
+    "candidate closed production ownership": "unowned initializer accepted",
+    "candidate authoritative transition guard": "FORGED_ACTOR_FACTS_COMMITTED",
+    "candidate downstream stable delivery key": (
+        "TYPED_DELIVERY_SINK_REJECTED_PAYLOAD"
+    ),
+    "candidate compiler directive integrity": (
+        "expected precise semantic integrity rejection"
+    ),
+}
 
 results = []
 for name, relative, old, new, test in mutations:
     with tempfile.TemporaryDirectory(prefix="pluto-mutation-") as temporary:
         checkout = Path(temporary).resolve() / "cli"
         shutil.copytree(
-            root, checkout,
-            ignore=shutil.ignore_patterns(".git", "bin", "pluto", "__pycache__"),
+            root,
+            checkout,
+            ignore=shutil.ignore_patterns(
+                ".git", "bin", "pluto", "__pycache__"
+            ),
         )
         source = checkout / relative
         text = source.read_text()
@@ -143,16 +296,27 @@ for name, relative, old, new, test in mutations:
             raise SystemExit(f"Mutation target drifted: {name}")
         source.write_text(text.replace(old, new, 1))
         try:
+            package = "./internal/cli"
+            if "#" in test:
+                package, test = test.split("#", 1)
             run = subprocess.run(
-                ["go", "test", "./internal/cli", "-run", f"^{test}$", "-count=1"],
-                cwd=checkout, capture_output=True, text=True, timeout=120,
+                ["go", "test", package, "-run", f"^{test}$", "-count=1"],
+                cwd=checkout,
+                capture_output=True,
+                text=True,
+                timeout=120,
                 env={**os.environ, "GOWORK": "off"},
             )
             output = run.stdout + run.stderr
             if "[build failed]" in output or "syntax error" in output:
                 result = "invalid"
             elif run.returncode and "--- FAIL:" in output:
-                result = "killed"
+                expected = required_assertions.get(name)
+                result = (
+                    "killed"
+                    if expected is None or expected in output
+                    else "invalid"
+                )
             elif run.returncode:
                 result = "invalid"
             else:
@@ -162,8 +326,12 @@ for name, relative, old, new, test in mutations:
         results.append(result)
         print(f"{name}: {result}", flush=True)
         if result != "killed":
-            print(output if 'output' in locals() else "timeout", flush=True)
+            print(output if "output" in locals() else "timeout", flush=True)
 
-print("; ".join(f"{kind}={results.count(kind)}" for kind in
-                ["killed", "survived", "invalid", "timed-out"]))
+print(
+    "; ".join(
+        f"{kind}={results.count(kind)}"
+        for kind in ["killed", "survived", "invalid", "timed-out"]
+    )
+)
 raise SystemExit(0 if all(result == "killed" for result in results) else 1)

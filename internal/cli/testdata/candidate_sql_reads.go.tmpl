@@ -1,0 +1,380 @@
+package app_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	domain "example.test/candidate/internal/domain/documents"
+	data "example.test/candidate/internal/storage/documents"
+	"github.com/plutoframework/pluto-core/cache"
+	"github.com/plutoframework/pluto-core/pagination"
+	"github.com/plutoframework/pluto-core/state"
+	rbac "github.com/plutoframework/pluto-rbac"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
+)
+
+func TestCandidateSQLAuthoritativeGuardAndCache(t *testing.T) {
+	f := candidateSQLSetup(t)
+	f.create(t, "alice", "north", "doc-1", "create-1", "value")
+
+	actor := "alice"
+	if f.guard == "owner" {
+		actor = "bob"
+	}
+
+	poison := map[string]any{
+		"ID":       "doc-1",
+		"TenantID": "north",
+		"OwnerID":  "bob",
+		"State":    "draft",
+		"Version":  1,
+		"Value":    "value",
+	}
+	if f.guard == "none" {
+		poison["OwnerID"] = "alice"
+		poison["Version"] = 99
+	}
+
+	encoded, err := json.Marshal(poison)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key, err := cache.Key(
+		cache.Scope{
+			App:         "candidate-sql",
+			Environment: "test",
+			Namespace:   "document-records",
+			Version:     "1",
+			TenantID:    "north",
+			SubjectID:   actor,
+		},
+		"doc-1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.cache.Set(t.Context(), key, encoded, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	err = f.run(
+		t,
+		"documents.Load",
+		actor,
+		"north",
+		"doc-1",
+		func(
+			ctx context.Context,
+			execution *identitygate.Execution,
+			repository *data.RecordData,
+		) error {
+			record, err := repository.Load(ctx, execution, "doc-1")
+			if err != nil {
+				return err
+			}
+
+			if f.guard == "none" && record.Version() != 99 {
+				return errors.New("CACHE_POISON_CONTROL")
+			}
+
+			if f.guard != "none" && record.OwnerID() != "bob" {
+				return errors.New("CACHE_POISON_CONTROL")
+			}
+
+			before := f.cache.reads.Load()
+			f.denyRole.Store(true)
+
+			if _, err := repository.Load(ctx, execution, "doc-1"); !errors.Is(
+				err,
+				rbac.ErrForbidden,
+			) {
+				return fmt.Errorf("CACHE_PERMISSION %v", err)
+			}
+
+			f.denyRole.Store(false)
+			f.denyMembership.Store(true)
+
+			if _, err := repository.Load(ctx, execution, "doc-1"); !errors.Is(
+				err,
+				rbac.ErrForbidden,
+			) {
+				return fmt.Errorf("CACHE_MEMBERSHIP %v", err)
+			}
+
+			f.denyMembership.Store(false)
+			f.denyResource.Store(true)
+
+			if _, err := repository.Load(ctx, execution, "doc-1"); !errors.Is(
+				err,
+				rbac.ErrForbidden,
+			) {
+				return fmt.Errorf("CACHE_RESOURCE %v", err)
+			}
+
+			f.denyResource.Store(false)
+
+			if f.cache.reads.Load() != before {
+				return errors.New("DENIED_AUTHORITY_TOUCHED_CACHE")
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	command := candidateSQLCommand(
+		t,
+		"transition",
+		"doc-1",
+		"guard-1",
+		"",
+		0,
+		"",
+	)
+	reached := false
+
+	err = f.run(
+		t,
+		"documents.Approve",
+		actor,
+		"north",
+		"doc-1",
+		func(
+			ctx context.Context,
+			execution *identitygate.Execution,
+			repository *data.RecordData,
+		) error {
+			reached = true
+
+			attempt, err := repository.Start(ctx, execution, command)
+			if err != nil {
+				return err
+			}
+
+			record, err := repository.Load(ctx, execution, "doc-1")
+			if err != nil {
+				return err
+			}
+
+			change, err := domain.EvaluateRecord(
+				f.machine,
+				record,
+				"submit",
+				execution.SubjectID(),
+			)
+			if f.guard != "none" {
+				if !errors.Is(err, state.ErrGuard) {
+					return errors.New("CACHE_GUARD_AUTHORITY")
+				}
+
+				return nil
+			}
+
+			if err != nil {
+				return fmt.Errorf("AUTHORITATIVE_NONE_GUARD %w", err)
+			}
+
+			_, err = repository.Commit(ctx, execution, attempt, change)
+
+			return err
+		},
+	)
+	if f.guard != "none" {
+		if !errors.Is(err, state.ErrGuard) || reached {
+			t.Fatalf(
+				"AUTHORITATIVE_ACTOR_POLICY err=%v callback=%v",
+				err,
+				reached,
+			)
+		}
+
+		f.assertState(t, "doc-1", "draft", 1, 0, 0, 1, 0)
+	} else {
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		f.assertState(t, "doc-1", "approved", 2, 1, 1, 2, 0)
+	}
+}
+
+func TestCandidateSQLVisiblePagesAndExport(t *testing.T) {
+	f := candidateSQLSetup(t)
+	f.create(t, "alice", "south", "00-foreign", "foreign-1", "hidden")
+
+	if f.visibility == "owner" {
+		f.create(t, "bob", "north", "00-other-owner", "other-owner", "hidden")
+	}
+
+	for index := 1; index <= 3; index++ {
+		id := fmt.Sprintf("doc-%d", index)
+		f.create(t, "alice", "north", id, id, "value")
+	}
+
+	var cursor string
+
+	err := f.run(
+		t,
+		"documents.List",
+		"alice",
+		"north",
+		"documents.Record",
+		func(
+			ctx context.Context,
+			execution *identitygate.Execution,
+			repository *data.RecordData,
+		) error {
+			page, err := repository.List(
+				ctx,
+				execution,
+				candidateSQLCommand(t, "list", "", "", "", 2, ""),
+			)
+			if err != nil {
+				return err
+			}
+
+			if len(page.Data) != 2 || page.Data[0].ID != "doc-1" ||
+				page.Data[1].ID != "doc-2" ||
+				!page.Page.HasMore {
+				return errors.New("VISIBILITY_BEFORE_LIMIT")
+			}
+
+			cursor = page.Page.NextCursor
+
+			next, err := repository.List(
+				ctx,
+				execution,
+				candidateSQLCommand(t, "list", "", "", "", 2, cursor),
+			)
+			if err != nil {
+				return err
+			}
+
+			if len(next.Data) != 1 || next.Data[0].ID != "doc-3" ||
+				next.Page.HasMore {
+				return errors.New("VISIBLE_CONTINUATION")
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = f.run(
+		t,
+		"documents.List",
+		"bob",
+		"north",
+		"documents.Record",
+		func(
+			ctx context.Context,
+			execution *identitygate.Execution,
+			repository *data.RecordData,
+		) error {
+			_, err := repository.List(
+				ctx,
+				execution,
+				candidateSQLCommand(t, "list", "", "", "", 2, cursor),
+			)
+			if !errors.Is(err, pagination.ErrInvalid) {
+				return fmt.Errorf("ACTOR_CURSOR_REPLAY %v", err)
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = f.run(
+		t,
+		"documents.List",
+		"alice",
+		"south",
+		"documents.Record",
+		func(
+			ctx context.Context,
+			execution *identitygate.Execution,
+			repository *data.RecordData,
+		) error {
+			_, err := repository.List(
+				ctx,
+				execution,
+				candidateSQLCommand(t, "list", "", "", "", 2, cursor),
+			)
+			if !errors.Is(err, pagination.ErrInvalid) {
+				return fmt.Errorf("TENANT_CURSOR_REPLAY %v", err)
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = f.run(
+		t,
+		"documents.Export",
+		"alice",
+		"north",
+		"documents.Record",
+		func(
+			ctx context.Context,
+			execution *identitygate.Execution,
+			repository *data.RecordData,
+		) error {
+			rows, err := repository.Export(
+				ctx,
+				execution,
+				candidateSQLCommand(t, "export", "", "", "", 4, ""),
+			)
+			if err != nil {
+				return err
+			}
+
+			if len(rows) != 3 {
+				return errors.New("VISIBLE_EXPORT")
+			}
+
+			rows, err = repository.Export(
+				ctx,
+				execution,
+				candidateSQLCommand(t, "export", "", "", "", 2, ""),
+			)
+			if !errors.Is(err, data.ErrRecordExport) || rows != nil {
+				return fmt.Errorf("EXPORT_BOUND %v", err)
+			}
+
+			f.denyMembership.Store(true)
+
+			rows, err = repository.Export(
+				ctx,
+				execution,
+				candidateSQLCommand(t, "export", "", "", "", 4, ""),
+			)
+
+			f.denyMembership.Store(false)
+
+			if !errors.Is(err, rbac.ErrForbidden) || rows != nil {
+				return fmt.Errorf("EXPORT_REAUTH %v", err)
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

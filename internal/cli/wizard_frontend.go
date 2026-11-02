@@ -33,7 +33,11 @@ func frontendMenu(kind string) wizardModel {
 				choices[0].value,
 				choices...),
 		},
-		build: func(v map[string]string) ([]string, error) { return []string{v["action"]}, nil },
+		build: func(v map[string]string) ([]string, error) {
+			return []string{
+				v["action"],
+			}, nil
+		},
 	}
 	m.focus(0)
 
@@ -78,7 +82,8 @@ func frontendForm(
 			boolField(
 				"auth",
 				"Include auth screens",
-				"Requires an existing local-credential backend; never enables credential issuance.",
+				"Requires an existing local-credential backend; never "+
+					"enables credential issuance.",
 				seed(cmd, "auth", "false"),
 			),
 		}
@@ -93,7 +98,8 @@ func frontendForm(
 			choiceField(
 				"kind",
 				"Component kind",
-				"Automatically adds required controls for your saved UI library.",
+				"Automatically adds required controls for your saved UI "+
+					"library.",
 				seed(cmd, "kind", "form"),
 				wizardChoice{
 					"Form",
@@ -110,7 +116,8 @@ func frontendForm(
 			choiceField(
 				"feature",
 				"Feature",
-				"Sign-in, enrollment, verification and recovery. Go owns authentication.",
+				"Sign-in, enrollment, verification and recovery. Go owns "+
+					"authentication.",
 				"auth",
 				wizardChoice{"Authentication", "auth"},
 			),

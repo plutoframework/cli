@@ -34,7 +34,11 @@ func frontendApp(t *testing.T, local bool) string {
 }
 
 func TestFrontendPackagePreflight(t *testing.T) {
-	for _, kind := range []string{"null-package", "null-dependencies", "dev-conflict"} {
+	for _, kind := range []string{
+		"null-package",
+		"null-dependencies",
+		"dev-conflict",
+	} {
 		t.Run(kind, func(t *testing.T) {
 			root := frontendApp(t, true)
 			mustInvoke(
@@ -61,7 +65,8 @@ func TestFrontendPackagePreflight(t *testing.T) {
 			case "null-dependencies":
 				pkg["dependencies"] = nil
 			case "dev-conflict":
-				pkg["devDependencies"].(map[string]any)["class-variance-authority"] = "0.1.0"
+				pkg["devDependencies"].(map[string]any)["class-variance-autho"+
+					"rity"] = "0.1.0"
 			}
 
 			data, err := json.MarshalIndent(pkg, "", "  ")
@@ -161,7 +166,13 @@ func TestFrontendProfiles(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			for _, kind := range []string{"button", "input", "card", "dialog", "form"} {
+			for _, kind := range []string{
+				"button",
+				"input",
+				"card",
+				"dialog",
+				"form",
+			} {
 				mustInvoke(
 					t,
 					root,
@@ -217,9 +228,27 @@ func TestFrontendProfiles(t *testing.T) {
 
 func TestFrontendPreflight(t *testing.T) {
 	for name, args := range map[string][]string{
-		"traversal":       {"frontend", "init", "--directory", "../escape", "--no-install"},
-		"reserved":        {"frontend", "init", "--directory", "internal", "--no-install"},
-		"unknown-ui":      {"frontend", "init", "--ui", "unknown", "--no-install"},
+		"traversal": {
+			"frontend",
+			"init",
+			"--directory",
+			"../escape",
+			"--no-install",
+		},
+		"reserved": {
+			"frontend",
+			"init",
+			"--directory",
+			"internal",
+			"--no-install",
+		},
+		"unknown-ui": {
+			"frontend",
+			"init",
+			"--ui",
+			"unknown",
+			"--no-install",
+		},
 		"auth-capability": {"frontend", "init", "--auth", "--no-install"},
 	} {
 		t.Run(name, func(t *testing.T) {

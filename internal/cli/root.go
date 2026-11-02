@@ -69,16 +69,25 @@ func New(options Options) *cobra.Command {
 	}
 
 	root := &cobra.Command{
-		Use:               "pluto",
-		Short:             "Generate and check explicit Go APIs and React applications",
-		Long:              "Pluto scaffolds Go/Chi APIs with explicit operations and shared Pluto libraries.\nRun pluto without arguments in a terminal for the guided wizard.\nUse explicit arguments and --no-input for agents and scripts.",
-		Version:           options.Version,
-		SilenceErrors:     true,
-		SilenceUsage:      true,
-		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return cmd.Context().Err() },
+		Use:   "pluto",
+		Short: "Generate and check explicit Go APIs and React applications",
+		Long: "Pluto scaffolds Go/Chi APIs with explicit operations " +
+			"and shared Pluto libraries.\nRun pluto without arguments in " +
+			"a terminal for the guided wizard.\nUse explicit arguments " +
+			"and --no-input for agents and scripts.",
+		Version:       options.Version,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Context().Err()
+		},
 	}
 	root.PersistentFlags().
-		Bool("interactive", false, "Open the terminal wizard (can prefill with arguments/flags)")
+		Bool(
+			"interactive",
+			false,
+			"Open the terminal wizard (can prefill with arguments/flags)",
+		)
 	root.PersistentFlags().
 		Bool("no-input", false, "Never prompt; use explicit command arguments")
 	root.SetIn(options.In)
@@ -89,9 +98,12 @@ func New(options Options) *cobra.Command {
 			Use:   "version",
 			Short: "Print CLI version",
 			Args:  cobra.NoArgs,
-			Run:   func(cmd *cobra.Command, _ []string) { cmd.Println("pluto " + options.Version) },
+			Run: func(cmd *cobra.Command, _ []string) {
+				cmd.Println("pluto " + options.Version)
+			},
 		},
 	)
+	root.AddCommand(architectureCommand(options))
 	root.AddCommand(initCommand(options))
 	root.AddCommand(addCommand(options))
 	root.AddCommand(
@@ -119,9 +131,10 @@ func New(options Options) *cobra.Command {
 	}
 	hook.AddCommand(
 		&cobra.Command{
-			Use:   "install",
-			Short: "Install without replacing existing hooks or changing Git config",
-			Args:  cobra.NoArgs,
+			Use: "install",
+			Short: "Install without replacing existing hooks or changing Git " +
+				"config",
+			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				root, _, err := project.Discover(options.Directory)
 				if err != nil {

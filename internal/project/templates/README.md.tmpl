@@ -1,8 +1,86 @@
+{{if .Candidate}}# {{.Name}}
+
+This application uses Pluto's explicit local candidate boundary profile.
+Candidate
+Auth/RBAC/Core/Jobs APIs are unreleased; pluto.toml records their source
+checkouts
+and go.mod has validated local replacements. Published dependency pins remain
+visible. Do not remove replacements and claim the candidate contract still
+works.
+
+Declare supported resources, operations, roles, HTTP entries, jobs and
+host-approved
+agent tools in an atomic blueprint:
+
+```sh
+pluto --no-input add blueprint --file contracts.toml
+go mod tidy
+pluto fmt
+pluto openapi
+pluto architecture check --directory . --format json
+pluto vet
+```
+
+All production Go is managed. Extend the framework contract for unsupported
+business patterns. Preserve authored files and migrate explicitly; never bypass
+managed integrity by editing generated handlers, operations or storage adapters.
+The supported resource pattern has explicit normalization, pure lifecycle
+guards,
+current verified session/membership/resource gates, narrow data ports, atomic
+mutation/audit/outbox/replay, visible scoped pages, bounded export and cache
+reads.
+
+Apply all numbered db/migrations SQL explicitly before starting an API or
+worker.
+Constructors only connect; they never create schemas, users, sessions,
+assignments
+or fixture credentials. Provision trusted sessions and exact tenant memberships
+through trusted administration. The declared role catalog grants capabilities to
+role IDs; it never assigns an actor to a role. Empty or revoked assignments
+deny.
+
+Set deployment configuration using {{.Prefix}} variables. DATABASE_URL must
+point
+to the migrated PostgreSQL database. Effect destinations use
+{{.Prefix}}EFFECT_<UPPER_GROUP>_<UPPER_ACTION>_URL. Worker service credentials
+use
+{{.Prefix}}JOB_<UPPER_GROUP>_<UPPER_ACTION>_CREDENTIAL. Never put secrets in
+metadata,
+model prompts, queue payload authority fields or source code. HTTP bearer/cookie
+verification preserves the configured Origin and ambiguous-credential rules.
+
+```sh
+go run ./cmd/api
+go run ./cmd/worker
+```
+
+The managed runtime exposes sealed shared operations, an HTTP handler, scoped
+verified-session callbacks and immutable worker construction. Agent writes
+require
+host preparation of the exact opaque operation intent. Model arguments cannot
+choose authority, resource, input or replay key. Agent results separate verified
+write receipts from model narrative; a narrative alone never proves completion.
+
+The data transaction owns idempotency. Reuse the same logical key after
+uncertain
+outcomes; pending claims are not stolen. Outbox jobs carry typed validated
+payloads
+and finite attempt budgets. The configured downstream endpoint must honor stable
+Idempotency-Key values; remote exactly-once delivery is not claimed.
+
+Read AGENTS.md for ownership rules. Source checks inspect the supported managed
+shape; real SQL/cross-entry conformance is tested by the framework's candidate
+profile. Arbitrary business semantics and external dependency/provider
+correctness
+are not established by a passing structural source report.
+{{else}}
 # {{.Name}}
 
 Generated with the provisional Pluto CLI. Requires Go 1.25.5+. These app-local
-primitives will be candidates for framework extraction; published Pluto Core, Auth and RBAC libraries
-provide sessions and capability evaluation. Chi is the HTTP router, PostgreSQL/pgx + sqlc the database direction.
+primitives will be candidates for framework extraction; published Pluto Core,
+Auth and RBAC libraries
+provide sessions and capability evaluation. Chi is the HTTP router,
+PostgreSQL/pgx + sqlc the database direction.
 
 ```sh
 go mod download
@@ -10,15 +88,20 @@ go run ./cmd/api
 # Another terminal: curl http://127.0.0.1:8080/healthz
 ```
 
-Authentication uses the pinned published pluto-auth module. `/healthz` is public.
+Authentication uses the pinned published pluto-auth module. `/healthz` is
+public.
 Protected routes verify an opaque session, then resolve a principal through
-`internal/access/memberships.go`. That authored resolver denies until implemented;
-there are no default users or automatic role grants.{{if .Multi}} It must resolve
-this exact subject and selected X-Tenant-ID; tenant headers never prove membership.{{else}}
+`internal/access/memberships.go`. That authored resolver denies until
+implemented;
+there are no default users or automatic role grants.{{if .Multi}} It must
+resolve
+this exact subject and selected X-Tenant-ID; tenant headers never prove
+membership.{{else}}
 Single tenancy does not use tenant headers.{{end}}
 
 {{if .LocalCredentials}}
-This project opted into local credentials (`capabilities.local_credentials=true`).
+This project opted into local credentials
+(`capabilities.local_credentials=true`).
 Startup requires DATABASE_URL and stops until you implement `localIntegrations`
 in cmd/api/credentials.go. That authored function must supply a real Sender,
 shared AttemptLimiter, trusted-client/concurrency Ingress and optional local
@@ -26,48 +109,68 @@ PasswordPolicy. There is no production no-op sender, demo password, admin
 bootstrap, memory credential fallback or placeholder success.
 
 Apply migrations 001 through 007 explicitly. `postgres.NewLocal` is the single
-account/session backend and `transport.NewLocalAuthentication` builds the published
+account/session backend and `transport.NewLocalAuthentication` builds the
+published
 password.Service/passwordhttp adapter around it. Always use service.Sessions()
 for local authentication, revocation and rotation; never issue local accounts
 through session-only postgres.New or Manager.Start. Reset/disable fence stale
-issuance and revoke existing sessions. authentication.Accounts exposes only trusted
-Disable administration after application authorization; it is never a public route. Existing session-only providers can retain
+issuance and revoke existing sessions. authentication.Accounts exposes only
+trusted
+Disable administration after application authorization; it is never a public
+route. Existing session-only providers can retain
 the separate NewAuthentication path when intentionally configured.
 
-POST /auth/enroll, /verification, /verify, /signin, /recovery, /reset and /logout
+POST /auth/enroll, /verification, /verify, /signin, /recovery, /reset and
+/logout
 mount before tenant/membership and idempotency handling. Each requires an exact
-trusted Origin, including unauthenticated flows and bearer logout. JSON is bounded
-to 8 KiB and rejects duplicate/unknown fields and trailing JSON. Responses contain
+trusted Origin, including unauthenticated flows and bearer logout. JSON is
+bounded
+to 8 KiB and rejects duplicate/unknown fields and trailing JSON. Responses
+contain
 only an opaque code; sign-in additionally sets a secure cookie. Enrollment,
 verification resend and recovery return 202 without eligibility details; reset
-requires reauthentication. Invalid credentials return 401, challenges 400, limits
+requires reauthentication. Invalid credentials return 401, challenges 400,
+limits
 429, dependencies 503. GET never consumes a challenge. Delivery failures accept
-without an existence oracle; observe only the redacted DeliveryError callback and
-ask for an explicit resend. Duplicate enrollment never resends or changes a hash.
+without an existence oracle; observe only the redacted DeliveryError callback
+and
+ask for an explicit resend. Duplicate enrollment never resends or changes a
+hash.
 
 The Sender must honor deadlines, build links only from fixed trusted HTTPS
-confirmation destinations (prefer token fragments), and never log Notification or
-persist plaintext challenge/outbox data. Provide real TLS/auth/config/timeouts at
+confirmation destinations (prefer token fragments), and never log Notification
+or
+persist plaintext challenge/outbox data. Provide real TLS/auth/config/timeouts
+at
 the delivery boundary. Ingress must enforce authenticated proxy/client identity,
-network limits, bounded concurrency/queueing and request deadlines before JSON/KDF;
+network limits, bounded concurrency/queueing and request deadlines before
+JSON/KDF;
 never trust arbitrary X-Forwarded-For. Account limits must be bounded and shared
-across replicas, with dependency failure denying requests. The library WindowLimiter
-is process-local only. Active Argon2 work cannot be interrupted. Configure storage
-abuse limits, abandoned-account retention, session/challenge pruning, DML-only DB
-credentials and a maintained password blocklist if required. No production provider
+across replicas, with dependency failure denying requests. The library
+WindowLimiter
+is process-local only. Active Argon2 work cannot be interrupted. Configure
+storage
+abuse limits, abandoned-account retention, session/challenge pruning, DML-only
+DB
+credentials and a maintained password blocklist if required. No production
+provider
 or operational scheduler is bundled. Tests use bounded in-process delivery only;
 the Pluto purchasing example demonstrates disposable loopback Mailpit delivery.
 
 Enrollment owns only credentials; app membership resolution still denies until
-you explicitly implement trusted provisioning. Never grant roles/tenant membership
+you explicitly implement trusted provisioning. Never grant roles/tenant
+membership
 from enrollment fields or email matching. There is no public admin bootstrap.
 {{else}}
 The composition root creates a shared session manager: bounded memory storage
 for numeric-loopback development without DATABASE_URL, or the published pgx/sqlc
 store with DATABASE_URL. Apply db/migrations explicitly; startup never creates
-schema. Compose mounts migrations for a new development database; existing volumes
-need new migrations separately. No credential verification/login route is mounted.
-For external credential providers, verify credentials before Manager.Start, guard
+schema. Compose mounts migrations for a new development database; existing
+volumes
+need new migrations separately. No credential verification/login route is
+mounted.
+For external credential providers, verify credentials before Manager.Start,
+guard
 browser login with HTTP.Guard, and use HTTP.WriteCookie. For local passwords use
 `pluto init --local-credentials` and its fenced lifecycle instead.
 {{end}}
@@ -76,25 +179,30 @@ GET /auth/session returns metadata and DELETE /auth/session revokes the server
 record before clearing its cookie. Neither requires tenant membership. Cookies
 remain Secure, HttpOnly, SameSite=Lax and host-only; browsers need HTTPS. Unsafe
 cookie requests require an exact trusted Origin. Opaque bearer sessions are
-explicitly enabled; mixed/duplicate credentials fail closed. Auth endpoints never
+explicitly enabled; mixed/duplicate credentials fail closed. Auth endpoints
+never
 cache cookies/tokens through idempotency. Never log credentials or bodies.
-AUTH_TRUSTED_ORIGINS, AUTH_SESSION_TTL and AUTH_IDLE_TIMEOUT use the saved prefix;
+AUTH_TRUSTED_ORIGINS, AUTH_SESSION_TTL and AUTH_IDLE_TIMEOUT use the saved
+prefix;
 defaults are the local development origin, 24h absolute and 30m idle. CORS, TLS,
 trusted proxies and production integrations remain application responsibilities.
 Incomplete business operations return 501. The root Auth module is stdlib-only;
-password uses x/crypto. The current published PostgreSQL adapter contains the local
+password uses x/crypto. The current published PostgreSQL adapter contains the
+local
 store in its package, so password/crypto are transitive dependencies even for a
 session-only PG app. The CLI itself imports neither adapter nor password module.
 
 ```sh
 pluto add endpoint widgets Create --method POST --path /api/widgets \
-  --name 'Create widget' --description 'Create a widget after resource checks.' \
+  --name 'Create widget' \
+  --description 'Create a widget after resource checks.' \
   --permission widgets.write --feature widgets-create --feature-client-visible
 pluto add endpoint widgets Get --method GET --path '/api/widgets/{id}' \
   --name 'Read widget' --description 'Read a widget in the verified scope.'
 pluto add endpoint reports List --method GET --path /api/reports \
   --name 'List reports' --description 'List authorized reports.'
 pluto fmt
+pluto openapi
 pluto vet
 ```
 
@@ -104,21 +212,46 @@ endpoint additions do not enable omitted presets. Core lint/config/SQL files
 are always included and Git hooks remain opt-in.
 
 Commands discover pluto.toml in cwd/parents; saved tenancy/prefix are reused.
-`pluto.toml` is project metadata, never runtime settings/secrets. Schema 7 includes typed jobs and optional data cache configuration.
+`pluto.toml` is project metadata, never runtime settings/secrets. Schema 7
+includes typed jobs and optional data cache configuration.
 Unknown fields/settings fail; no automatic schema migration is implied.
-For schema 2/3/4 apps, migrate authored app/config/main/transport wiring, module pins,
-static paths, session storage and migration manually before updating the manifest.
+For schema 2/3/4 apps, migrate authored app/config/main/transport wiring, module
+pins,
+static paths, session storage and migration manually before updating the
+manifest.
 The CLI refuses old schemas instead of overwriting authored authentication code.
-For schema 4, review the new published pins, choose local_credentials explicitly,
+For schema 4, review the new published pins, choose local_credentials
+explicitly,
 compare the thin constructor/routes with a fresh scaffold, and apply 004 only if
 local credentials are enabled before changing schema_version to 7.
 
-Authorization imports `github.com/plutoframework/pluto-rbac` at the exact version
-in go.mod/go.sum, with no sibling checkout or local replacement. Startup compiles
-one immutable policy and injects it into the router and operations.
+Authorization imports `github.com/plutoframework/pluto-rbac` at the exact
+version
+in go.mod/go.sum, with no sibling checkout or local replacement. Startup
+compiles
+one immutable policy and injects it into the router. Managed operation gates
+receive a published RBAC Authorizer plus the same trusted membership resolver.
+They refresh exact actor/tenant identity and resolve current grants before
+invoking the private authored execute implementation; caller-supplied Roles do
+not confer authority. Protected writes require explicit permission metadata.
 `internal/access/permissions_gen.go` declares capabilities and named endpoint
 permission constants from the manifest. Authored `internal/access/roles.go`
 starts empty: adding a permission does not automatically grant it to anyone.
+
+Schema 9 makes each declared handler and `<action>_gate_gen.go` managed. Keep
+business orchestration in authored `(*Action).execute`, and consumer-owned ports
+in `ActionDependencies`; wire them with `NewActionWithDependencies` from the
+authored app binding. Both direct and transport calls use `Execute`. The gate
+checks capability, not resource ownership or restricted persistence-write proof.
+A Principal remains an application trust contract, not unforgeable identity.
+
+Upgrading an older authored app is explicit: inventory all use cases in endpoint
+metadata, move business bodies behind private execute methods, retain typed
+ports, update constructor wiring with Authorizer/Memberships, and review the
+managed handler/gate diff before changing schema_version to 9. Do not relabel an
+old schema or overwrite authored business logic. The standalone architecture
+inspection still reports absent gates on legacy packages without endpoint
+metadata; optional Authorize calls are not a supported replacement boundary.
 
 After adding the sample widgets Create endpoint, edit `access.Roles()`:
 
@@ -137,34 +270,46 @@ func Roles() []rbac.Role {
 
 Role inheritance uses `Inherits: []rbac.RoleID{"member"}` on another named role.
 Authored `access.Permissions()` can customize capability names/descriptions or
-append capabilities outside HTTP. Unknown grants, parents or cycles fail startup.
-The authenticator resolves `Principal.Roles` from verified server-side membership;
+append capabilities outside HTTP. Unknown grants, parents or cycles fail
+startup.
+The authenticator resolves `Principal.Roles` from verified server-side
+membership;
 never trust an arbitrary role header/claim. A subject can have different roles
-in different tenants. Route and direct operation checks use `principal.Can` with
-the same injected policy. Unknown roles (even alongside known roles), absent
-grants and a missing policy deny permission checks. Scope/ownership checks and
-membership freshness remain application responsibilities. The library evaluates
-trusted role IDs; this adapter uses the membership snapshot returned by auth.
-`pluto fmt` and `pluto vet` validate the resulting app and exercise both boundaries.
+in different tenants. Routes apply an early policy check. Managed direct
+operation
+gates refresh membership and invoke the published Authorizer against current
+assignments. Unknown roles (even alongside known roles), absent grants, missing
+authorizers/resolvers and mismatched subject/scope deny. Resource ownership and
+transaction-time revalidation remain application responsibilities; this does not
+make Principal an unforgeable identity or prove restricted write adoption.
+`pluto fmt` and `pluto vet` validate the resulting app and exercise both
+boundaries.
 
-Metadata in `[[endpoints]]` is the generation source for CLI-owned permissions, paths,
+Metadata in `[[endpoints]]` is the generation source for CLI-owned permissions,
+paths,
 feature declarations and group/composition registries (`*_gen.go`). Do not edit
-these files; vet checks their semantic content against the manifest. Route strings
+these files; vet checks their semantic content against the manifest. Route
+strings
 appear only in paths at runtime. Models, per-endpoint handlers/operations/tests,
 config and transport are authored files: the CLI creates them once and refuses
-overwrite. Additions regenerate only managed files after checking prior ownership.
-Manual catalog additions require taking over the generator contract deliberately.
+overwrite. Additions regenerate only managed files after checking prior
+ownership.
+Manual catalog additions require taking over the generator contract
+deliberately.
 
 `internal/handlers/<group>` only decodes input, reads verified context, calls a
 consumer-owned operation interface and maps output. Business policies belong in
-`internal/operations/<group>`, without HTTP or DB imports. Models are independent
+`internal/operations/<group>`, without HTTP or DB imports. Models are
+independent
 wire types. Path parameters reach the operation via Request.Path, not JSON.
-Inject real domain-specific repositories into operations when persistence is needed;
+Inject real domain-specific repositories into operations when persistence is
+needed;
 there is no universal database interface, ORM, resource authorization or durable
 business audit implementation. Slog is diagnostic output, not durable audit.
 
 Runtime defaults then explicit environment overrides, loaded/validated once and
-injected. No implicit .env loading. `.env.example` documents {{.Prefix}} variables.
+injected. No implicit .env loading. `.env.example` documents {{.Prefix}}
+variables.
 `FEATURE_<UPPERCASE_KEY>` normalizes dots/hyphens to underscores. Flags default
 false; explicit false is preserved using pointers. Client-visible declarations
 alone reach authenticated `/api/features`; route gates use the same evaluator.
@@ -177,7 +322,8 @@ Known duplicate JSON keys use stdlib last-value semantics; bodies must be JSON
 objects. GET/DELETE/HEAD/OPTIONS starters have no body contract. Add explicit
 domain validation and resource policies; OpenAPI cannot infer them. The server
 sets timeouts/security headers/no-store, negotiates gzip, and logs endpoint,
-status, generated request ID and verified actor{{if .Multi}}/tenant{{end}}, never bodies or credentials.
+status, generated request ID and verified actor{{if .Multi}}/tenant{{end}},
+never bodies or credentials.
 
 Browser security defaults live in authored `internal/transport/security.go`,
 registered globally before recovery/authentication. They apply to successful,
@@ -192,7 +338,8 @@ denied, missing, method-error and recovered-panic responses:
 - DNS prefetch is off; legacy download/cross-domain policies are restricted;
   `X-XSS-Protection: 0` disables obsolete browser XSS filters.
 
-These are inspired by [Fiber Helmet](https://docs.gofiber.io/next/middleware/helmet/),
+These are inspired by [Fiber
+Helmet](https://docs.gofiber.io/next/middleware/helmet/),
 implemented with net/http and no additional dependency. Adjust the authored
 middleware deliberately if serving HTML, interactive documentation or embeddable
 resources. CSP controls this API response document, not a separately hosted UI.
@@ -201,20 +348,23 @@ Cross-origin frontend access still requires a reviewed CORS origin allowlist.
 Set HSTS at your HTTPS terminator after choosing the domain policy. The local
 HTTP scaffold neither sets HSTS nor trusts forwarded protocol headers; it never
 opts a domain into includeSubDomains or preload. Headers do not replace
-authentication, authorization, input validation or CSRF defenses for cookie auth.
+authentication, authorization, input validation or CSRF defenses for cookie
+auth.
 
 ```sh
 go test ./...
 go vet ./...
 go run ./cmd/openapi -check
-go test ./internal/transport -run '^$' -fuzz '^FuzzDecode$' -fuzztime=3s -parallel=2
+go test ./internal/transport -run '^$' \
+  -fuzz '^FuzzDecode$' -fuzztime=3s -parallel=2
 pluto fmt                 # formatters + wsl fixes + formatters
 pluto vet                 # nonmutating; appropriate for CI
 pluto vet --staged        # conservative index/working-tree policy; see below
 ```
 
 Install golangci-lint 2.15.0 from its official releases and put it on PATH, or
-use `mise exec golangci-lint@2.15.0 -- pluto vet`. The CLI requires the exact tool
+use `mise exec golangci-lint@2.15.0 -- pluto vet`. The CLI requires the exact
+tool
 version and fails with guidance if absent. `.golangci.yml` is configurable; its
 80-column golines target permits indivisible strings/comments. Vet also enforces
 architecture imports (transitively), file sizes, manifest/generated contracts,
@@ -226,8 +376,10 @@ Hook installation is opt-in (`pluto init --hook` or `pluto hook install`). It
 refuses existing pre-commit hooks, honors core.hooksPath and never changes Git
 config. Installing from a nested project refuses to alter ancestor hooks. An
 installed hook invokes `pluto vet --staged` from the resolved project root.
-Staged policy: refuse any unstaged, untracked or ignored project files, unresolved index
-entries and staged symlinks; verify indexed regular files against their raw Git blob hashes, then vet the
+Staged policy: refuse any unstaged, untracked or ignored project files,
+unresolved index
+entries and staged symlinks; verify indexed regular files against their raw Git
+blob hashes, then vet the
 identical working-tree contents. Ignored .env/bin files must be outside the
 project for hook use; clean/smudge transformations that differ are refused.
 No stash/index rewrite or claim to check a different staged snapshot. Stage all
@@ -236,7 +388,8 @@ are bypassable convenience; CI should run pluto vet.
 
 Database foundation: optional {{.Prefix}}DATABASE_URL opens and pings pgxpool at
 startup, then closes on shutdown. No operation uses it yet. db/migrations and
-queries provide only a schema metadata probe, not domain persistence. Regenerate:
+queries provide only a schema metadata probe, not domain persistence.
+Regenerate:
 
 ```sh
 sqlc generate  # pin 1.31.1; sqlc.yaml uses pgx/v5, version 2
@@ -246,18 +399,25 @@ SQL integration requires a real dedicated database; default tests make no SQL
 integration claim. No migration runner or production pool tuning is supplied.
 {{if .Mise}}
 `mise.toml` pins Go, golangci-lint and sqlc and supplies run/fmt/check/openapi
- tasks. Review before `mise trust; mise install`. Install pluto locally first.{{end}}
+ tasks. Review before `mise trust; mise install`. Install pluto locally
+ first.{{end}}
 {{if .Fnox}}
 `fnox.toml` has only a nonsecret local log-level value. Run
 `fnox exec -- go run ./cmd/api` to scope environment injection to the child.
-{{if .Mise}}`mise run run` supplies this command with pinned fnox 1.43.0.{{else}}Install
+{{if .Mise}}`mise run run` supplies this command with pinned fnox
+1.43.0.{{else}}Install
 fnox 1.43.0 on PATH; this project omitted mise.{{end}}
 For real secrets, install age, generate a key outside the repo with
-`age-keygen -o ~/.config/fnox/age.txt` (do not overwrite an existing key), and add
-`[providers.age]`, `type = "age"`, `recipients = ["<your public age recipient>"]`.
-Set top-level `default_provider = "age"`, then `fnox set {{.Prefix}}DATABASE_URL --provider age` uses a hidden prompt and
-writes ciphertext. Remove the plaintext local value/provider first; keep private keys outside
-Git and arrange key access separately in CI. `fnox check --all` validates without
+`age-keygen -o ~/.config/fnox/age.txt` (do not overwrite an existing key), and
+add
+`[providers.age]`, `type = "age"`, `recipients = ["<your public age
+recipient>"]`.
+Set top-level `default_provider = "age"`, then `fnox set {{.Prefix}}DATABASE_URL
+--provider age` uses a hidden prompt and
+writes ciphertext. Remove the plaintext local value/provider first; keep private
+keys outside
+Git and arrange key access separately in CI. `fnox check --all` validates
+without
 dumping secrets. Never commit .env/private keys or run env dumps for diagnosis.
 See https://fnox.jdx.dev/guide/quick-start and provider docs.{{end}}
 {{if .Docker}}
@@ -269,18 +429,22 @@ no domain SQL integration is implied. `docker compose down -v` discards local
 state. Docker images use version tags, not immutable digests; review/pin digests
 for deployment. Container checks require a running Docker daemon.{{end}}
 
-Prototype boundaries: no external identity/delivery provider, RBAC management, durable audit,
+Prototype boundaries: no external identity/delivery provider, RBAC management,
+durable audit,
 domain SQL generator, distributed flags, production deployment, complete OpenAPI
 schema inference (recursive types unsupported), or automatic migrations. No
 network-free/offline promise: Go modules and optional tools may need downloads.
-Generation preflights known conflicts/symlinks and rolls back its own file writes
+Generation preflights known conflicts/symlinks and rolls back its own file
+writes
 on ordinary failures, but concurrent writers/process crashes are outside its
 transaction guarantee. Keep a backup/version control for authored changes.
 
-Per-endpoint `internal/app/<group>_<action>.go` bindings are authored constructor
+Per-endpoint `internal/app/<group>_<action>.go` bindings are authored
+constructor
 choices. Change the operation constructor and this binding together when adding
 repositories. Add typed fields to app.Dependencies and construct/inject them in
-app.New. Generated group registries accept narrow Operations interfaces and never
+app.New. Generated group registries accept narrow Operations interfaces and
+never
 choose concrete implementations; additions preserve authored constructor wiring.
 
 ## Pagination and idempotency defaults
@@ -298,35 +462,45 @@ If visibility depends on additional policy state, include it in the binding.
 Authenticated business writes require Idempotency-Key (1–128 ASCII letters,
 digits or -_.:) per intended action; reuse it for retries. Stable endpoint IDs
 namespace verified subject{{if .Multi}}/tenant{{end}} keys after current auth,
-RBAC and feature gates. Add --idempotency=exempt for sensitive/streaming responses.
+RBAC and feature gates. Add --idempotency=exempt for sensitive/streaming
+responses.
 Public writes and session lifecycle are exempt: public deduplication requires
 an explicit authored safe application scope. Never wrap login/token responses.
 
 DATABASE_URL wires durable pluto-core Postgres storage; explicitly apply
-003_idempotency.sql. Without it protected writes return 503 until durable storage
-is supplied. Tests inject bounded process-local memory; production never silently
+003_idempotency.sql. Without it protected writes return 503 until durable
+storage
+is supplied. Tests inject bounded process-local memory; production never
+silently
 falls back to it. Completed responses retain 24h; conflicts and pending claims
 return 409. Uncertain requests remain blocked for operator reconciliation, even
 past expiry; no automatic lease stealing. JSON responses are bounded to 256 KiB;
-only Content-Type, bytes and status are replayed. Set-Cookie/auth/security headers
-are not cached. Application 401/403/5xx remain uncached and leave pending claims.
+only Content-Type, bytes and status are replayed. Set-Cookie/auth/security
+headers
+are not cached. Application 401/403/5xx remain uncached and leave pending
+claims.
 
 The generic helper records completion after the operation and cannot guarantee
-exactly-once external effects. To make database mutation/audit/completion atomic,
-use core NewClaim/Store primitives and the Postgres adapter bound to the SAME pgx
+exactly-once external effects. To make database mutation/audit/completion
+atomic,
+use core NewClaim/Store primitives and the Postgres adapter bound to the SAME
+pgx
 transaction as typed application queries. See the published core README and
 transaction example. Keep domain policy separate from these transport adapters.
 For schema 3 migration review the CLI README; never overwrite authored source.
 
 ## Background jobs and transactional outbox
 
-Pluto Jobs v0.1.1 / Postgres adapter v0.1.0 supply the runtime. Apply the explicit
-`db/migrations/005_jobs.sql` migration before producers or workers run. Never run
+Pluto Jobs v0.1.1 / Postgres adapter v0.1.0 supply the runtime. Apply the
+explicit
+`db/migrations/005_jobs.sql` migration before producers or workers run. Never
+run
 DDL at startup. For session-only apps, migration 004 is intentionally absent.
 
 ```sh
 pluto add job invoices Send --kind invoice.send
 pluto fmt
+pluto openapi
 pluto vet
 # Export DATABASE_URL with the app prefix, then:
 go run ./cmd/worker
@@ -337,7 +511,8 @@ Job payloads, handlers and unit/fuzz tests are authored files under
 explicit registrations. Additional jobs preserve your existing handlers. Handler
 stubs return an error until implemented; change the scaffold's test to assert
 actual effects when implementing it. An empty worker refuses to claim any work.
-Inject consumer-sized sender/repository interfaces in authored worker composition.
+Inject consumer-sized sender/repository interfaces in authored worker
+composition.
 
 For transactional delivery, construct a typed request, then use the published
 adapter inside your repository's existing business transaction:
@@ -353,15 +528,18 @@ if err := outbox.EnqueueTx(ctx, tx, request); err != nil { return err }
 return tx.Commit(ctx)
 ```
 
-Construct outbox with `jobpostgres.New(pool)` at your composition boundary; import
+Construct outbox with `jobpostgres.New(pool)` at your composition boundary;
+import
 `jobs` from github.com/plutoframework/pluto-jobs and `jobpostgres` from its
 stores/postgres module. Application operations consume narrow repository
 interfaces and never import pgx. Independent Enqueue cannot make a separate
 business write atomic. Derive tenant metadata from verified scope; handlers must
 load canonical records with tenant predicates. Keep raw passwords, auth tokens,
-challenges and other secrets out of payloads. Credential delivery remains separate.
+challenges and other secrets out of payloads. Credential delivery remains
+separate.
 
-Worker defaults are explicit in nested `config.Config.Jobs`. The dedicated process
+Worker defaults are explicit in nested `config.Config.Jobs`. The dedicated
+process
 honors SIGTERM/interrupt and cooperative handler cancellation. Tune timeouts and
 lease bounds together. Delivery is at least once, with finite attempts and no
 heartbeat; make effects idempotent with job.ID or a stable domain event key.
@@ -378,47 +556,63 @@ Schema 5 migration is manual: compare a fresh schema-6 scaffold, add Jobs module
 pins/sums, migration 005, worker/config/background files and an empty managed
 registry before updating the manifest version. Preserve authored business code.
 
-The mise sqlc pin uses the explicit Go backend instead of an unavailable registry
-alias. sqlc 1.31.1 needs Go 1.26+ for generation; Go can fetch that toolchain without
+The mise sqlc pin uses the explicit Go backend instead of an unavailable
+registry
+alias. sqlc 1.31.1 needs Go 1.26+ for generation; Go can fetch that toolchain
+without
 changing the application's Go 1.25.5+ target or runtime dependency graph.
 
 
 ## Optional data cache
 
-This scaffold selected `{{.CacheBackend}}` in `capabilities.cache`. Core's shared
+This scaffold selected `{{.CacheBackend}}` in `capabilities.cache`. Core's
+shared
 cache contract is exposed as `app.Dependencies.Cache`; inject it into operations
 that need non-authoritative data caching. `internal/caching` owns construction,
 and the API closes the store on shutdown. No responses are cached automatically.
 
-Memory uses a bounded expiring LRU; none bypasses storage. Only scaffolds created
-with `--cache valkey` include the optional Valkey/Redis adapter and client. Re-init
+Memory uses a bounded expiring LRU; none bypasses storage. Only scaffolds
+created
+with `--cache valkey` include the optional Valkey/Redis adapter and client.
+Re-init
 never upgrades authored code. Runtime CACHE_BACKEND can select only included
 backends. All environment variables use the `{{.Prefix}}` prefix.
 
 {{if .Valkey}}Set `{{.Prefix}}CACHE_URL` to your authenticated endpoint. With
 Docker enabled, Compose supplies a local authenticated, memory-bounded Valkey
-service automatically. For a host process use the loopback address in .env.example.
+service automatically. For a host process use the loopback address in
+.env.example.
 External endpoints should use `rediss://` with verified TLS. Plaintext beyond
 loopback requires explicit `{{.Prefix}}CACHE_ALLOW_INSECURE=true`, which local
 Compose sets for its private development network. Do not use local credentials
 in production or commit real cache URLs/secrets. URL query options are rejected.
 {{end}}
-Set CACHE_ENVIRONMENT separately for each deployment. Build keys with `cache.Key`
-using application/environment/namespace/version plus verified tenant/subject scope.
-Use `cache.Loader[T].Remember` for bounded JSON cache-aside reads; defaults bypass
-backend failures and reload from the repository. Use fixed error hooks for metrics,
+Set CACHE_ENVIRONMENT separately for each deployment. Build keys with
+`cache.Key`
+using application/environment/namespace/version plus verified tenant/subject
+scope.
+Use `cache.Loader[T].Remember` for bounded JSON cache-aside reads; defaults
+bypass
+backend failures and reload from the repository. Use fixed error hooks for
+metrics,
 never raw credentials, keys, values or backend errors. Bound TTLs and invalidate
-relevant keys after writes. TTL/delete does not provide transactional consistency
-or eliminate concurrent refill races. Capacity/encoding/loader errors still fail.
+relevant keys after writes. TTL/delete does not provide transactional
+consistency
+or eliminate concurrent refill races. Capacity/encoding/loader errors still
+fail.
 
-Live authentication, membership and permission checks must run before every cache
+Live authentication, membership and permission checks must run before every
+cache
 access. Never use this best-effort data cache for sessions, credentials, roles,
 authorization decisions, idempotency, locks or rate limiting. See the published
 Core README for guarantees, explicit strict mode and tested server versions.
 
-Schema 6 migration is manual: compare a fresh schema-7 scaffold, upgrade Core and
-add the cache factory/config plus authored constructor/cleanup wiring. Explicitly
-set capabilities.cache to none, memory or valkey, include the adapter/service only
+Schema 6 migration is manual: compare a fresh schema-7 scaffold, upgrade Core
+and
+add the cache factory/config plus authored constructor/cleanup wiring.
+Explicitly
+set capabilities.cache to none, memory or valkey, include the adapter/service
+only
 for valkey, then change schema_version to 7. No cache SQL migration is required.
 Preserve authored handlers, operations and composition; old schemas fail before
 writes. Complete earlier manual migrations first.
@@ -428,23 +622,30 @@ writes. Complete earlier manual migrations first.
 
 OIDC support was saved in `capabilities.oidc`. Runtime sign-in remains disabled
 until `{{.Prefix}}OIDC_ENABLED=true`. Configure the trusted issuer, client ID,
-client secret, exact HTTPS callback and host-managed base64 32-byte encryption key
+client secret, exact HTTPS callback and host-managed base64 32-byte encryption
+key
 from `.env.example`. Never store secrets in TOML or commit them.
 
 Apply migration 007 after the earlier account migrations. Configure real local
-integrations/ingress in `cmd/api/credentials.go`; missing integrations fail startup.
-Public enrollment is separately opt-in with `OIDC_ALLOW_ENROLLMENT=true`; it grants
+integrations/ingress in `cmd/api/credentials.go`; missing integrations fail
+startup.
+Public enrollment is separately opt-in with `OIDC_ALLOW_ENROLLMENT=true`; it
+grants
 no business role or tenant membership. Existing accounts never merge by email.
 
 Routes: trusted-Origin POST `/auth/oidc/begin`, browser-bound GET
-`/auth/oidc/callback`, and public provider-ID GET `/auth/providers`. Auth responses
+`/auth/oidc/callback`, and public provider-ID GET `/auth/providers`. Auth
+responses
 bypass business idempotency. Callback success returns to the fixed `/` path.
 Use HTTPS at the browser (including local development), preserving Secure and
-HttpOnly cookies and exact Origin. GitHub OAuth, linking and native MFA are separate
+HttpOnly cookies and exact Origin. GitHub OAuth, linking and native MFA are
+separate
 work; required-factor accounts fail closed.
 
-When adding a frontend, use `pluto frontend init --auth --ui heroui-v3` (or native /
-shadcn). Provider UI is shown only when the backend advertises a configured client.
+When adding a frontend, use `pluto frontend init --auth --ui heroui-v3` (or
+native /
+shadcn). Provider UI is shown only when the backend advertises a configured
+client.
 Existing authored frontends are never silently rewritten.
 {{end}}
 
@@ -453,4 +654,6 @@ OIDC browser starts use a same-origin API POST with `Accept: application/json`,
 then navigate to the server-built `data.authorization_url`. This preserves
 trusted Origin under the default no-referrer policy. A native form may send
 `Origin: null` and is intentionally denied; no Origin guard is weakened.
+{{end}}
+
 {{end}}

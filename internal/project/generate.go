@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
-	"go/format"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -16,6 +15,13 @@ import (
 var templates embed.FS
 
 type templateData struct {
+	Manifest             Manifest
+	MaxAttempts          int
+	Resource             ResourceContract
+	Contract             OperationContract
+	ContractOperations   []OperationContract
+	ContractEffects      []EffectContract
+	Candidate            bool
 	Module, Name, Prefix string
 	Multi                bool
 	OIDC                 bool
@@ -24,12 +30,14 @@ type templateData struct {
 	Valkey               bool
 	Development
 	Endpoint
-	Symbol        string
-	JobKind       string
-	AgentProvider string
-	Params        []string
-	Body          bool
-	TestPath      string
+	Symbol          string
+	JobKind         string
+	OperationGroup  string
+	OperationAction string
+	AgentProvider   string
+	Params          []string
+	Body            bool
+	TestPath        string
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {
@@ -49,6 +57,8 @@ func dataFor(m Manifest, e Endpoint) templateData {
 	}
 
 	return templateData{
+		Manifest:         m,
+		Candidate:        m.Boundary.Mode == "candidate",
 		Module:           m.Project.Module,
 		Name:             m.Project.Name,
 		Prefix:           m.Project.EnvPrefix,
@@ -82,7 +92,21 @@ func render(name string, data templateData) ([]byte, error) {
 	}
 
 	tmpl, err := template.New(name).
-		Funcs(template.FuncMap{"q": strconv.Quote}).
+		Funcs(template.FuncMap{"q": strconv.Quote, "upperFirst": func(
+			value string,
+		) string {
+			if value == "" {
+				return ""
+			}
+
+			return strings.ToUpper(value[:1]) + value[1:]
+		}, "lowerFirst": func(value string) string {
+			if value == "" {
+				return ""
+			}
+
+			return strings.ToLower(value[:1]) + value[1:]
+		}}).
 		Parse(string(source))
 	if err != nil {
 		return nil, err
@@ -94,7 +118,7 @@ func render(name string, data templateData) ([]byte, error) {
 	}
 
 	if strings.HasSuffix(name, ".go") {
-		return format.Source(out.Bytes())
+		return formatGenerated(out.Bytes(), data.Module)
 	}
 
 	return out.Bytes(), nil
@@ -103,7 +127,91 @@ func render(name string, data templateData) ([]byte, error) {
 // Managed derives only files wholly owned by the generator. User source files
 // are created once and never edited. No string replacement of user code occurs.
 func Managed(m Manifest) (map[string][]byte, error) {
+	if m.Boundary.Mode == "candidate" {
+		return candidateManaged(m)
+	}
+
+	return managedPublished(m)
+}
+
+func managedPublished(m Manifest) (map[string][]byte, error) {
+	resolved := []Endpoint{}
+
+	for _, entry := range m.Endpoints {
+		view, err := m.OperationEndpoint(entry)
+		if err != nil {
+			return nil, err
+		}
+
+		resolved = append(resolved, view)
+	}
+
+	m.Endpoints = resolved
 	files := map[string][]byte{}
+
+	workerRuntime, err := render("worker_runtime.go", dataFor(m, Endpoint{}))
+	if err != nil {
+		return nil, err
+	}
+
+	files["internal/app/worker_runtime_gen.go"] = workerRuntime
+
+	authorization, err := render("authorization.go", dataFor(m, Endpoint{}))
+	if err != nil {
+		return nil, err
+	}
+
+	files["internal/access/authorization_gen.go"] = authorization
+
+	for _, operation := range m.Operations {
+		source, err := render(
+			"operation_gate.go",
+			dataFor(m, operation.Endpoint()),
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		files["internal/operations/"+operation.Group+"/"+strings.ToLower(
+			operation.Action,
+		)+"_gate_gen.go"] = source
+	}
+
+	for _, endpoint := range m.Endpoints {
+		source, err := render("handler.go", dataFor(m, endpoint))
+		if err != nil {
+			return nil, err
+		}
+
+		files["internal/handlers/"+endpoint.Group+"/"+strings.ToLower(
+			endpoint.Action,
+		)+".go"] = source
+	}
+
+	agentFiles, err := managedAgents(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range agentFiles {
+		files[path] = source
+	}
+
+	jobFiles, err := managedJobs(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range jobFiles {
+		files[path] = source
+	}
+
+	dependencies, err := jobDependencies(m)
+	if err != nil {
+		return nil, err
+	}
+
+	files["internal/background/dependencies.go"] = dependencies
 
 	jobs, err := jobRegistry(m)
 	if err != nil {
@@ -136,7 +244,8 @@ func Managed(m Manifest) (map[string][]byte, error) {
 
 	var catalog, composition, definitions strings.Builder
 	catalog.WriteString(
-		"package paths\nfunc All() []Endpoint { return []Endpoint{Health, GetFeatures, GetSession, DeleteSession,",
+		"package paths\nfunc All() []Endpoint { return []Endpoint{\nHealth,\n" +
+			"GetFeatures,\nGetSession,\nDeleteSession,\n",
 	)
 	composition.WriteString(
 		"package app\nimport (\n" + strconv.Quote(
@@ -153,7 +262,8 @@ func Managed(m Manifest) (map[string][]byte, error) {
 	}
 
 	composition.WriteString(
-		")\nfunc RegisterGenerated(reg transport.Registrar,dependencies Dependencies) {\n",
+		")\nfunc RegisterGenerated(reg transport.Registrar,dependencies " +
+			"Dependencies) {\n",
 	)
 
 	featureMap := map[string]bool{}
@@ -163,7 +273,9 @@ func Managed(m Manifest) (map[string][]byte, error) {
 		paths.WriteString(
 			"package paths\nimport (" + strconv.Quote(
 				m.Project.Module+"/internal/models/"+name,
-			) + "\n" + strconv.Quote(m.Project.Module+"/internal/access") + ")\n",
+			) + "\n" + strconv.Quote(
+				m.Project.Module+"/internal/access",
+			) + ")\n",
 		)
 		register.WriteString(
 			"package " + name + "\nimport " + strconv.Quote(
@@ -181,7 +293,8 @@ func Managed(m Manifest) (map[string][]byte, error) {
 		}
 
 		register.WriteString(
-			"}\nfunc Register(reg transport.Registrar,operations Operations,bodyLimit int64) {\n",
+			"}\nfunc Register(reg transport.Registrar,operations Operations," +
+				"bodyLimit int64) {\n",
 		)
 		fmt.Fprintf(
 			&composition,
@@ -200,7 +313,12 @@ func Managed(m Manifest) (map[string][]byte, error) {
 
 			fmt.Fprintf(
 				&paths,
-				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\nMethod:%q,\nPath:%q,\nAuthenticated:%t,\nPermission:access.%sPermission,\nFeature:%q,\nRequest:%s,\nResponse:%s.%sResponse{},\nSuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n}\n",
+				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\n"+
+					"Method:%q,\nPath:%q,\nAuthenticated:%t,\n"+
+					"Permission:access.%sPermission,\nFeature:%q,\n"+
+					"Request:%s,\nResponse:%s.%sResponse{},\n"+
+					"SuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n"+
+					"}\n",
 				d.Symbol,
 				e.Group+"."+e.Action,
 				e.Name,
@@ -247,18 +365,20 @@ func Managed(m Manifest) (map[string][]byte, error) {
 
 	if m.Capabilities.LocalCredentials {
 		catalog.WriteString(
-			"Enroll,RequestVerification,VerifyEmail,SignIn,RequestRecovery,ResetPassword,Logout,\n",
+			"Enroll,\nRequestVerification,\nVerifyEmail,\nSignIn,\n" +
+				"RequestRecovery,\nResetPassword,\nLogout,\n",
 		)
 	}
 
 	if m.Capabilities.OIDC {
-		catalog.WriteString("OIDCBegin,OIDCCallback,OIDCProviders,\n")
+		catalog.WriteString("OIDCBegin,\nOIDCCallback,\nOIDCProviders,\n")
 	}
 
 	catalog.WriteString("}\n}\n")
 	composition.WriteString("}\n")
 	definitions.WriteString(
-		"package features\nfunc Declarations() []Definition { return []Definition{\n",
+		"package features\nfunc Declarations() []Definition { return " +
+			"[]Definition{\n",
 	)
 
 	keys := []string{}
@@ -286,7 +406,7 @@ func Managed(m Manifest) (map[string][]byte, error) {
 
 	files["internal/app/routes_gen.go"] = []byte(composition.String())
 	for path, source := range files {
-		formatted, err := format.Source(source)
+		formatted, err := formatGenerated(source, m.Project.Module)
 		if err != nil {
 			return nil, fmt.Errorf("generate %s: %w", path, err)
 		}
@@ -300,34 +420,46 @@ func Managed(m Manifest) (map[string][]byte, error) {
 }
 
 func EndpointFiles(m Manifest, e Endpoint) (map[string][]byte, error) {
+	if m.Boundary.Mode == "candidate" {
+		return map[string][]byte{}, nil
+	}
+
+	view, err := m.OperationEndpoint(e)
+	if err != nil {
+		return nil, err
+	}
+
+	e = view
 	files := map[string][]byte{}
 
-	for _, entry := range []struct{ dir, template string }{
-		{"models", "models.go"},
-		{"operations", "operation.go"},
-		{"operations", "operation_test.go"},
-		{"handlers", "handler.go"},
-		{"handlers", "handler_test.go"},
-	} {
-		suffix := ".go"
-		if strings.HasSuffix(entry.template, "_test.go") {
-			suffix = "_test.go"
-		}
-
-		data, err := render(entry.template, dataFor(m, e))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", entry.template, err)
-		}
-
-		files[filepath.Join("internal", entry.dir, e.Group, strings.ToLower(e.Action)+suffix)] = data
+	source, err := render("handler_test.go", dataFor(m, e))
+	if err != nil {
+		return nil, err
 	}
+
+	files[filepath.ToSlash(
+		filepath.Join(
+			"internal",
+			"handlers",
+			e.Group,
+			strings.ToLower(
+				e.Action,
+			)+"_test.go",
+		),
+	)] = source
 
 	binding, err := render("binding.go", dataFor(m, e))
 	if err != nil {
 		return nil, err
 	}
 
-	files[filepath.Join("internal", "app", e.Group+"_"+strings.ToLower(e.Action)+".go")] = binding
+	files[filepath.Join(
+		"internal",
+		"app",
+		e.Group+"_"+strings.ToLower(
+			e.Action,
+		)+".go",
+	)] = binding
 
 	return files, nil
 }
@@ -344,7 +476,7 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		"docs/TELEMETRY.md":                          "telemetry.md",
 		"internal/caching/cache.go":                  "cache.go",
 		"cmd/worker/main.go":                         "worker_main.go",
-		"internal/background/worker.go":              "worker.go",
+		"internal/app/worker.go":                     "worker.go",
 		"db/migrations/005_jobs.sql":                 "jobs_schema.sql",
 		"internal/access/policy.go":                  "policy.go",
 		"internal/access/memberships.go":             "memberships.go",
@@ -387,9 +519,12 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		layout["internal/transport/credentials.go"] = "credentials.go"
 		layout["internal/paths/credentials.go"] = "credentials_paths.go"
 		layout["cmd/api/credentials.go"] = "credentials_main.go"
-		layout["db/migrations/004_local_credentials.sql"] = "credentials_schema.sql"
-		layout["db/migrations/006_authentication.sql"] = "authentication_schema.sql"
-		layout["db/migrations/007_external_accounts.sql"] = "external_accounts.sql"
+		layout["db/migrations/004_local_credentials.sql"] = "credentials_" +
+			"schema.sql"
+		layout["db/migrations/006_authentication.sql"] = "authentication_" +
+			"schema.sql"
+		layout["db/migrations/007_external_accounts.sql"] = "external_" +
+			"accounts.sql"
 	}
 
 	if m.Capabilities.OIDC {
@@ -399,6 +534,16 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	for path, name := range layout {
+		if m.Boundary.Mode == "candidate" {
+			if _, exists := files[path]; exists {
+				continue
+			}
+
+			if strings.HasSuffix(path, ".go") {
+				continue
+			}
+		}
+
 		data, err := render(name, dataFor(m, Endpoint{}))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
@@ -409,6 +554,15 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 
 	for path, data := range ToolFiles(m) {
 		files[path] = data
+	}
+
+	files["go.mod"], err = ConfigureBoundaryModules(
+		m.Boundary,
+		len(m.Agents) > 0,
+		files["go.mod"],
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	manifest, err := Encode(m)

@@ -10,6 +10,7 @@ func TestRuntimePolicies(t *testing.T) {
 		Path:        "/api/items",
 		Name:        "Create item",
 		Description: "Create an authorized item.",
+		Permission:  "items.write",
 	}
 	if err := base.Validate(false); err != nil || !base.RequiresIdempotency() {
 		t.Fatal(base, err)
@@ -28,6 +29,8 @@ func TestRuntimePolicies(t *testing.T) {
 	public := base
 
 	public.Public = true
+
+	public.Permission = ""
 	if err := public.Validate(
 		false,
 	); err != nil ||
@@ -36,10 +39,23 @@ func TestRuntimePolicies(t *testing.T) {
 	}
 
 	for _, change := range []func(*Endpoint){
-		func(e *Endpoint) { e.Collection = true },
-		func(e *Endpoint) { e.Public = true; e.Idempotency = "required" },
-		func(e *Endpoint) { e.Method = "GET"; e.Idempotency = "required" },
-		func(e *Endpoint) { e.Idempotency = "typo" },
+		func(e *Endpoint) {
+			e.Collection = true
+		},
+		func(e *Endpoint) {
+			e.Permission = ""
+		},
+		func(e *Endpoint) {
+			e.Public = true
+			e.Idempotency = "required"
+		},
+		func(e *Endpoint) {
+			e.Method = "GET"
+			e.Idempotency = "required"
+		},
+		func(e *Endpoint) {
+			e.Idempotency = "typo"
+		},
 	} {
 		invalid := base
 		change(&invalid)

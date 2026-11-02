@@ -33,7 +33,8 @@ func GitInit(ctx context.Context, root string) error {
 		return nil
 	}
 
-	// Disable templates explicitly so user template hooks cannot be installed/run.
+	// Disable templates explicitly so user template hooks cannot be
+	// installed/run.
 	_, err := git(ctx, root, "-c", "init.templateDir=", "init", "--quiet")
 
 	return err
@@ -52,7 +53,8 @@ func HookPath(ctx context.Context, root string) (string, error) {
 
 	if top != resolved {
 		return "", fmt.Errorf(
-			"hook installation refused: project is nested in %s; install an explicit repository-wide dispatcher yourself",
+			"hook installation refused: project is nested in %s; install an "+
+				"explicit repository-wide dispatcher yourself",
 			top,
 		)
 	}
@@ -96,17 +98,19 @@ func InstallHook(ctx context.Context, root string) error {
 	}
 	defer file.Close()
 
-	// Git runs hooks at the worktree root. Resolve it each time rather than bake
-	// in a path that breaks when the worktree moves.
+	// Git runs hooks at the worktree root. Resolve it each time instead of
+	// baking in a path that breaks when the worktree moves.
 	_, err = file.WriteString(
-		"#!/bin/sh\nset -eu\ncd \"$(git rev-parse --show-toplevel)\"\nexec pluto vet --staged\n",
+		"#!/bin/sh\nset -eu\ncd \"$(git rev-parse --show-toplevel)\"\nexec " +
+			"pluto vet --staged\n",
 	)
 
 	return err
 }
 
 // StagedPolicy guarantees the checked working tree matches index file contents
-// by refusing all unstaged/untracked files, not by hiding changes with git stash.
+// by refusing all unstaged/untracked files, not by hiding changes with git
+// stash.
 func StagedPolicy(ctx context.Context, root string) error {
 	command := exec.CommandContext(
 		ctx,
@@ -134,7 +138,8 @@ func StagedPolicy(ctx context.Context, root string) error {
 		if line[0] == '?' || line[0] == '!' || line[1] != ' ' ||
 			line[0] == 'U' {
 			return fmt.Errorf(
-				"staged policy requires all project files staged, including no ignored extras or conflicts: %s",
+				"staged policy requires all project files staged, including "+
+					"no ignored extras or conflicts: %s",
 				line,
 			)
 		}
@@ -184,7 +189,8 @@ func StagedPolicy(ctx context.Context, root string) error {
 
 		if hash != fields[1] {
 			return fmt.Errorf(
-				"working tree differs from staged blob: %s (also rejects clean/smudge transformations and hidden index flags)",
+				"working tree differs from staged blob: %s (also rejects "+
+					"clean/smudge transformations and hidden index flags)",
 				name,
 			)
 		}
@@ -225,7 +231,8 @@ func PreflightHook(ctx context.Context, target string) error {
 	); err == nil {
 		if top != target {
 			return fmt.Errorf(
-				"hook installation refused: target is nested in existing repository %s",
+				"hook installation refused: target is nested in existing "+
+					"repository %s",
 				top,
 			)
 		}
@@ -243,7 +250,9 @@ func PreflightHook(ctx context.Context, target string) error {
 	if filepath.IsAbs(configured) ||
 		strings.HasPrefix(filepath.Clean(configured), "..") {
 		return fmt.Errorf(
-			"hook installation refused: inherited core.hooksPath %q is outside the new project; configure a project-local path explicitly",
+			"hook installation refused: inherited core.hooksPath %q is "+
+				"outside the new project; configure a project-local path "+
+				"explicitly",
 			configured,
 		)
 	}

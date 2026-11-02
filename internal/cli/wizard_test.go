@@ -66,8 +66,18 @@ func TestWizardDispatchesSharedGenerators(t *testing.T) {
 		In:        strings.NewReader(""),
 		Out:       &output,
 		Err:       &output,
-		terminal:  func(io.Reader, io.Writer) bool { return true },
-		wizard: func(_ context.Context, _ io.Reader, _ io.Writer, m wizardModel) (wizardModel, error) {
+		terminal: func(io.Reader, io.Writer) bool {
+			return true
+		},
+		wizard: func(
+			_ context.Context,
+			_ io.Reader,
+			_ io.Writer,
+			m wizardModel,
+		) (
+			wizardModel,
+			error,
+		) {
 			calls = append(calls, m.kind)
 			values := map[string]string{}
 
@@ -88,19 +98,21 @@ func TestWizardDispatchesSharedGenerators(t *testing.T) {
 				}
 			case "endpoint":
 				values = map[string]string{
-					"group":                  "orbit",
-					"action":                 "List",
-					"method":                 "GET",
-					"description":            "List authorized orbital records.",
+					"group":  "orbit",
+					"action": "List",
+					"method": "GET",
+					"description": "List authorized orbital " +
+						"records.",
 					"permission":             "orbit:read",
 					"feature":                "orbit.list",
 					"feature-client-visible": "true",
 				}
 			case "job":
 				values = map[string]string{
-					"group":  "orbit",
-					"action": "Deliver",
-					"kind":   "orbit.deliver",
+					"group":      "orbit",
+					"action":     "Deliver",
+					"kind":       "orbit.deliver",
+					"permission": "orbit.deliver",
 				}
 			}
 
@@ -161,16 +173,68 @@ func TestWizardTerminalRouting(t *testing.T) {
 		terminal, ci          bool
 		wantWizard, wantError bool
 	}{
-		{name: "bare terminal", terminal: true, wantWizard: true, wantError: true},
-		{name: "add terminal", args: []string{"add"}, terminal: true, wantWizard: true, wantError: true},
+		{
+			name:       "bare terminal",
+			terminal:   true,
+			wantWizard: true,
+			wantError:  true,
+		},
+		{
+			name: "add terminal",
+			args: []string{
+				"add",
+			},
+			terminal:   true,
+			wantWizard: true,
+			wantError:  true,
+		},
 		{name: "pipe help"},
 		{name: "no input", args: []string{"--no-input"}, terminal: true},
 		{name: "CI help", terminal: true, ci: true},
-		{name: "explicit pipe", args: []string{"--interactive"}, wantError: true},
-		{name: "contradictory modes", args: []string{"--interactive", "--no-input"}, terminal: true, wantError: true},
-		{name: "missing endpoint in pipe", args: []string{"add", "endpoint"}, wantError: true},
-		{name: "partial raw command", args: []string{"add", "endpoint", "orbit"}, terminal: true, wantError: true},
-		{name: "flagged command stays raw", args: []string{"init", "--dry-run", "--name", "mission"}, terminal: true},
+		{
+			name: "explicit pipe",
+			args: []string{
+				"--interactive",
+			},
+			wantError: true,
+		},
+		{
+			name: "contradictory modes",
+			args: []string{
+				"--interactive",
+				"--no-input",
+			},
+			terminal:  true,
+			wantError: true,
+		},
+		{
+			name: "missing endpoint in pipe",
+			args: []string{
+				"add",
+				"endpoint",
+			},
+			wantError: true,
+		},
+		{
+			name: "partial raw command",
+			args: []string{
+				"add",
+				"endpoint",
+				"orbit",
+			},
+			terminal:  true,
+			wantError: true,
+		},
+		{
+			name: "flagged command stays raw",
+			args: []string{
+				"init",
+				"--dry-run",
+				"--name",
+				"mission",
+			},
+			terminal: true,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("CI", "")
@@ -189,8 +253,18 @@ func TestWizardTerminalRouting(t *testing.T) {
 				In:        strings.NewReader(""),
 				Out:       &output,
 				Err:       &output,
-				terminal:  func(io.Reader, io.Writer) bool { return test.terminal },
-				wizard: func(_ context.Context, _ io.Reader, _ io.Writer, m wizardModel) (wizardModel, error) {
+				terminal: func(io.Reader, io.Writer) bool {
+					return test.terminal
+				},
+				wizard: func(
+					_ context.Context,
+					_ io.Reader,
+					_ io.Writer,
+					m wizardModel,
+				) (
+					wizardModel,
+					error,
+				) {
 					called = true
 					return wizardKey(m, tea.KeyMsg{Type: tea.KeyEsc}), nil
 				},
@@ -227,8 +301,18 @@ func TestWizardPrefillsAndProtectsOptionLikeDirectory(t *testing.T) {
 		In:        strings.NewReader(""),
 		Out:       &output,
 		Err:       &output,
-		terminal:  func(io.Reader, io.Writer) bool { return true },
-		wizard: func(_ context.Context, _ io.Reader, _ io.Writer, m wizardModel) (wizardModel, error) {
+		terminal: func(io.Reader, io.Writer) bool {
+			return true
+		},
+		wizard: func(
+			_ context.Context,
+			_ io.Reader,
+			_ io.Writer,
+			m wizardModel,
+		) (
+			wizardModel,
+			error,
+		) {
 			values := m.values()
 			if values["cache"] != "memory" || values["name"] != "mission" ||
 				values["directory"] != "--no-input=false" {
@@ -335,7 +419,29 @@ func TestWizardTextChoiceAndBoundedView(t *testing.T) {
 	}
 	model.focus(0)
 
-	for _, key := range []tea.KeyMsg{{Type: tea.KeyLeft}, {Type: tea.KeyRunes, Runes: []rune("é")}, {Type: tea.KeyBackspace}, {Type: tea.KeyDelete}, {Type: tea.KeySpace}, {Type: tea.KeyRunes, Runes: []rune("界\n\x1b"), Paste: true}} {
+	for _, key := range []tea.KeyMsg{
+		{
+			Type: tea.KeyLeft,
+		},
+		{
+			Type:  tea.KeyRunes,
+			Runes: []rune("é"),
+		},
+		{
+			Type: tea.KeyBackspace,
+		},
+		{
+			Type: tea.KeyDelete,
+		},
+		{
+			Type: tea.KeySpace,
+		},
+		{
+			Type:  tea.KeyRunes,
+			Runes: []rune("界\n\x1b"),
+			Paste: true,
+		},
+	} {
 		model = wizardKey(model, key)
 	}
 
@@ -379,7 +485,19 @@ func TestWizardTextChoiceAndBoundedView(t *testing.T) {
 // silently miss a capability added to the scriptable CLI.
 func TestWizardCoversGeneratorFlags(t *testing.T) {
 	root := New(Options{})
-	for _, path := range [][]string{{"init"}, {"add", "endpoint"}, {"add", "job"}} {
+	for _, path := range [][]string{
+		{
+			"init",
+		},
+		{
+			"add",
+			"endpoint",
+		},
+		{
+			"add",
+			"job",
+		},
+	} {
 		command, _, err := root.Find(path)
 		if err != nil {
 			t.Fatal(err)
@@ -402,7 +520,7 @@ func TestWizardCoversGeneratorFlags(t *testing.T) {
 
 		command.Flags().VisitAll(func(flag *pflag.Flag) {
 			if flag.Name != "interactive" && flag.Name != "no-input" &&
-				!fields[flag.Name] {
+				!fields[flag.Name] && !directWizardFlag(flag.Name) {
 				t.Errorf(
 					"%s flag --%s has no wizard field",
 					command.CommandPath(),
@@ -430,5 +548,96 @@ func TestWizardMaintenancePlans(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(plan, test.want) {
 			t.Fatal(test.kind, plan, err)
 		}
+	}
+}
+
+func TestWizardRejectsDirectOnlyCandidateFlagsWithoutWrites(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+	}{
+		{
+			[]string{
+				"init",
+				".",
+				"--boundary-profile",
+				"candidate",
+			},
+		},
+		{
+			[]string{
+				"init",
+				".",
+				"--candidate-auth-source",
+				"/missing/auth",
+			},
+		},
+		{
+			[]string{
+				"init",
+				".",
+				"--candidate-rbac-source",
+				"/missing/rbac",
+			},
+		},
+		{
+			[]string{
+				"init",
+				".",
+				"--candidate-core-source",
+				"/missing/core",
+			},
+		},
+		{
+			[]string{
+				"init",
+				".",
+				"--candidate-jobs-source",
+				"/missing/jobs",
+			},
+		},
+		{
+			[]string{
+				"add",
+				"endpoint",
+				"widgets",
+				"Read",
+				"--resource-source",
+				"body",
+			},
+		},
+		{
+			[]string{
+				"add",
+				"job",
+				"widgets",
+				"Read",
+				"--max-attempts",
+				"3",
+			},
+		},
+		{
+			[]string{
+				"add",
+				"agent",
+				"widgets",
+				"Read",
+				"--approval",
+				"host",
+			},
+		},
+	} {
+		root := temporary(t)
+		before := snapshot(t, root)
+
+		args := append([]string{"--interactive"}, test.args...)
+		if _, err := invoke(
+			t,
+			root,
+			args...); err == nil ||
+			!strings.Contains(err.Error(), "requires --no-input") {
+			t.Fatalf("candidate choice lost in wizard %v: %v", args, err)
+		}
+
+		assertUnchanged(t, before, snapshot(t, root))
 	}
 }

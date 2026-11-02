@@ -1,16 +1,19 @@
 package app
 
 import (
- "{{.Module}}/internal/config"
- rbac "github.com/plutoframework/pluto-rbac"
- "github.com/plutoframework/pluto-core/cache"
+	"github.com/plutoframework/pluto-core/cache"
+	rbac "github.com/plutoframework/pluto-rbac"
+	"{{.Module}}/internal/access"
+	"{{.Module}}/internal/config"
 )
 
 // Dependencies is an explicit composition-root value. Add typed adapters here
 // and construct them in New when implementing real operation persistence. It is
 // never a runtime service lookup or a global registry.
 type Dependencies struct {
- Config config.Config
- Policy *rbac.Policy
- Cache cache.Store
+	Config      config.Config
+	Policy      *rbac.Policy
+	Authorizer  *rbac.Authorizer
+	Memberships access.MembershipResolver
+	Cache       cache.Store
 }

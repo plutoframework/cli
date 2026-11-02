@@ -1,0 +1,417 @@
+package app_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+
+	"example.test/candidate/internal/access"
+	agententry "example.test/candidate/internal/agents/approvals"
+	models "example.test/candidate/internal/models/documents"
+	agent "github.com/plutoframework/pluto-agent"
+	"github.com/plutoframework/pluto-agent/providers/scripted"
+	auth "github.com/plutoframework/pluto-auth"
+	authmemory "github.com/plutoframework/pluto-auth/stores/memory"
+	jobs "github.com/plutoframework/pluto-jobs"
+	jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+func TestCandidateRuntimeDeniedBeforeDataOrProvider(t *testing.T) {
+	f := candidateRuntimeSetup(t)
+	f.create(t, "denied-1")
+
+	input := models.ApproveRequest{
+		ResourceID:     "denied-1",
+		IdempotencyKey: "denied-key",
+	}
+	if _, err := f.runtime.Operations.DocumentsApprove.Execute(
+		t.Context(),
+		access.Caller{},
+		input,
+	); err == nil {
+		t.Fatal("ZERO_CALLER")
+	}
+
+	var escaped access.Caller
+	if err := f.runtime.WithSession(
+		t.Context(),
+		f.bob,
+		"north",
+		func(_ context.Context, caller access.Caller) error {
+			escaped = caller
+			return nil
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.runtime.Operations.DocumentsApprove.Execute(
+		t.Context(),
+		escaped,
+		input,
+	); err == nil {
+		t.Fatal("EXPIRED_CALLER")
+	}
+
+	wrong := f.http(
+		t,
+		"POST",
+		"/records/approve",
+		f.bob,
+		"other",
+		"wrong-tenant",
+		`{"resource_id":"denied-1"}`,
+	)
+	if wrong.Code != 403 && wrong.Code != 401 {
+		t.Fatalf("WRONG_TENANT %d", wrong.Code)
+	}
+
+	foreignStore, err := authmemory.New(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foreign, err := auth.New(foreignStore, auth.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issued, err := foreign.Start(t.Context(), "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = access.WithSession(
+		t.Context(),
+		foreign,
+		issued.Token,
+		"north",
+		func(ctx context.Context, caller access.Caller) error {
+			_, err := f.runtime.Operations.DocumentsApprove.Execute(
+				ctx,
+				caller,
+				input,
+			)
+
+			return err
+		},
+	)
+	if !errors.Is(err, auth.ErrUnauthenticated) &&
+		!errors.Is(err, rbac.ErrUnauthenticated) {
+		t.Fatalf("FOREIGN_ISSUER %v", err)
+	}
+
+	provider := &candidateRuntimeProvider{
+		inner: scripted.New(scripted.Final(`{"summary":"forged completion"}`)),
+	}
+
+	runner, err := agententry.NewApprove(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := agententry.RunApprove(
+		t.Context(),
+		runner,
+		"forged-host",
+		agententry.ApproveDependencies{},
+	); err == nil ||
+		provider.calls.Load() != 0 {
+		t.Fatal("FORGED_HOST_REACHED_PROVIDER")
+	}
+
+	err = f.runtime.WithSession(
+		t.Context(),
+		f.bob,
+		"north",
+		func(ctx context.Context, caller access.Caller) error {
+			deps, err := agententry.ApproveApprove(
+				ctx,
+				f.runtime.Operations.DocumentsApprove,
+				caller,
+				input,
+			)
+			if err != nil {
+				return err
+			}
+
+			if _, err := f.sql.pool.Exec(
+				ctx,
+				"UPDATE \"pluto_resource_memberships\" SET "+
+					"\"roles\"=ARRAY[]::text[] WHERE \"tenant_id\"='north' "+
+					"AND \"actor_id\"='bob'",
+			); err != nil {
+				return err
+			}
+
+			if _, err := agententry.RunApprove(
+				ctx,
+				runner,
+				"revoked-after-host-approval",
+				deps,
+			); !errors.Is(
+				err,
+				rbac.ErrForbidden,
+			) {
+				return fmt.Errorf("STALE_HOST_AUTHORITY %v", err)
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if provider.calls.Load() != 0 {
+		t.Fatal("REVOKED_HOST_CALLED_PROVIDER")
+	}
+
+	denied := f.http(
+		t,
+		"POST",
+		"/records/approve",
+		f.bob,
+		"north",
+		"revoked-http",
+		`{"resource_id":"denied-1"}`,
+	)
+	if denied.Code != 403 {
+		t.Fatalf("ROLE_REVOCATION_HTTP %d", denied.Code)
+	}
+
+	tenant := "north"
+
+	queuedRequest, err := jobs.NewRequest(
+		jobs.Kind("document.approve"),
+		models.ApproveRequest{
+			ResourceID:     "denied-1",
+			IdempotencyKey: "revoked-worker",
+		},
+		jobs.Options{TenantID: &tenant, MaxAttempts: 5},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	durable, err := jobspostgres.New(f.sql.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := durable.Enqueue(t.Context(), queuedRequest); err != nil {
+		t.Fatal(err)
+	}
+
+	f.worker(t)
+	candidateRuntimeWait(t, func() (bool, error) {
+		var (
+			attempts          int
+			state, diagnostic string
+		)
+		if err := f.sql.pool.QueryRow(t.Context(), "SELECT \"attempts\","+
+			"\"state\",\"diagnostic\" FROM \"pluto_jobs\" WHERE \"id\"=$1 "+
+			"AND \"max_attempts\"=5", queuedRequest.ID).
+			Scan(&attempts, &state, &diagnostic); err != nil {
+			return false, err
+		}
+
+		if state == "succeeded" {
+			return false, errors.New("REVOKED_WORKER_SUCCEEDED")
+		}
+
+		return attempts > 0 && state != "running" &&
+			diagnostic == "handler_error", nil
+	})
+
+	var changed, pending, queued int
+	if err := f.sql.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+
+		"\"records\" WHERE \"state\"<>'draft'").
+		Scan(&changed); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.sql.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+
+		"\"pluto_idempotency\" WHERE NOT completed").
+		Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.sql.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+
+		"\"pluto_jobs\" WHERE \"kind\"='document.approved'").
+		Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+
+	var approvedAudits int
+	if err := f.sql.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+
+		"\"pluto_resource_audit\" WHERE \"operation\"='documents.Approve'").
+		Scan(&approvedAudits); err != nil {
+		t.Fatal(err)
+	}
+
+	calls, _, invalid := f.sink.state()
+
+	if approvedAudits != 0 {
+		t.Fatal("DENIED_WORKER_LEFT_APPROVAL_AUDIT")
+	}
+
+	if changed != 0 || pending != 0 || queued != 0 || calls != 0 || invalid {
+		t.Fatalf(
+			"DENIAL_LEFT_DATA_OR_EFFECTS changed=%d pending=%d queued=%d "+
+				"sinks=%d",
+			changed,
+			pending,
+			queued,
+			calls,
+		)
+	}
+}
+
+func TestCandidateRuntimeModelCannotReplaceHostIntent(t *testing.T) {
+	f := candidateRuntimeSetup(t)
+	f.create(t, "host-selected")
+	f.create(t, "model-selected")
+
+	provider := &candidateRuntimeProvider{
+		inner: scripted.New(
+			scripted.Calls(
+				agent.ToolCall{
+					ID:   "retarget",
+					Name: "execute_approved_operation",
+					Arguments: "{\"resource_id\":\"model-selected\"," +
+						"\"actor_id\":\"admin\",\"tenant_id\":\"other\"," +
+						"\"idempotency_key\":\"redirected\"}",
+				},
+			),
+			scripted.Final(`{"summary":"changed resource"}`),
+		),
+	}
+
+	runner, err := agententry.NewApprove(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = f.runtime.WithSession(
+		t.Context(),
+		f.bob,
+		"north",
+		func(ctx context.Context, caller access.Caller) error {
+			deps, err := agententry.ApproveApprove(
+				ctx,
+				f.runtime.Operations.DocumentsApprove,
+				caller,
+				models.ApproveRequest{
+					ResourceID:     "host-selected",
+					IdempotencyKey: "host-selected-key",
+				},
+			)
+			if err != nil {
+				return err
+			}
+
+			_, _ = agententry.RunApprove(ctx, runner, "model-retarget", deps)
+
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var state string
+	if err := f.sql.pool.QueryRow(t.Context(), "SELECT \"state\" FROM "+
+		"\"records\" WHERE \"tenant_id\"='north' AND \"id\"='model-selected'").
+		Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+
+	if state != "draft" {
+		t.Fatal("MODEL_REPLACED_HOST_RESOURCE")
+	}
+
+	var wrongAudit int
+	if err := f.sql.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+
+		"\"pluto_resource_audit\" WHERE \"operation\"='documents.Approve' "+
+		"AND \"id\"='model-selected'").
+		Scan(&wrongAudit); err != nil {
+		t.Fatal(err)
+	}
+
+	if wrongAudit != 0 {
+		t.Fatal("MODEL_ARGUMENTS_BECAME_AUTHORITY")
+	}
+}
+
+func TestCandidateRuntimeFinalWithoutToolIsNotCompletion(t *testing.T) {
+	f := candidateRuntimeSetup(t)
+	f.create(t, "no-tool")
+
+	provider := &candidateRuntimeProvider{
+		inner: scripted.New(
+			scripted.Final(`{"summary":"completed without execution"}`),
+		),
+	}
+
+	runner, err := agententry.NewApprove(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = f.runtime.WithSession(
+		t.Context(),
+		f.bob,
+		"north",
+		func(ctx context.Context, caller access.Caller) error {
+			deps, err := agententry.ApproveApprove(
+				ctx,
+				f.runtime.Operations.DocumentsApprove,
+				caller,
+				models.ApproveRequest{
+					ResourceID:     "no-tool",
+					IdempotencyKey: "no-tool-key",
+				},
+			)
+			if err != nil {
+				return err
+			}
+
+			result, err := agententry.RunApprove(
+				ctx,
+				runner,
+				"no-tool-run",
+				deps,
+			)
+			if err == nil || result.Applied {
+				return errors.New("MODEL_FINAL_WAS_TREATED_AS_WRITE_RECEIPT")
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if provider.calls.Load() != 1 {
+		t.Fatal("FINAL_ONLY_PROVIDER_NOT_EXERCISED")
+	}
+
+	var count int
+	if err := f.sql.pool.QueryRow(t.Context(), "SELECT (SELECT count(*) "+
+		"FROM \"records\" WHERE \"state\"<>'draft')+(SELECT count(*) FROM "+
+		"\"pluto_resource_audit\" WHERE \"operation\"='documents.Approve')+(S"+
+		"ELECT count(*) FROM \"pluto_jobs\")+(SELECT count(*) FROM \"pluto_"+
+		"idempotency\" WHERE NOT completed)").
+		Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+
+	calls, _, invalid := f.sink.state()
+	if count != 0 || calls != 0 || invalid {
+		t.Fatal("MODEL_FINAL_LEFT_DATA_OR_EFFECTS")
+	}
+}
