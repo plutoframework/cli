@@ -38,37 +38,23 @@ func operationBoundaryDiagnostics(
 
 	var candidate Manifest
 
-	_ = toml.Unmarshal(manifest, &candidate)
+	if err := toml.Unmarshal(manifest, &candidate); err != nil {
+		add("ARCH201", "pluto.toml", 1,
+			"operation boundary metadata cannot be assessed: "+err.Error(),
+			"Repair declarations before selecting a managed boundary mode.")
+		return diagnostics
+	}
 	if candidate.Boundary.Mode == "candidate" {
 		return candidateIntegrity(root, candidate)
 	}
 
-	var declaration struct {
-		Project      Project      `toml:"project"`
-		Capabilities Capabilities `toml:"capabilities"`
-		Operations   []Operation  `toml:"operations"`
-		Endpoints    []Endpoint   `toml:"endpoints"`
-		Jobs         []Job        `toml:"jobs"`
-		Agents       []Agent      `toml:"agents"`
-	}
-	if err := toml.Unmarshal(manifest, &declaration); err != nil {
-		add(
-			"ARCH201",
-			"pluto.toml",
-			1,
-			"operation boundary metadata cannot be assessed: "+err.Error(),
-			"Repair declarations; authored authorization calls do not "+
-				"replace managed gates.",
-		)
-	}
-
 	m := Manifest{
-		Project:      declaration.Project,
-		Capabilities: declaration.Capabilities,
-		Operations:   declaration.Operations,
-		Endpoints:    declaration.Endpoints,
-		Jobs:         declaration.Jobs,
-		Agents:       declaration.Agents,
+		Project:      candidate.Project,
+		Capabilities: candidate.Capabilities,
+		Operations:   candidate.Operations,
+		Endpoints:    candidate.Endpoints,
+		Jobs:         candidate.Jobs,
+		Agents:       candidate.Agents,
 	}
 	gates := map[string]bool{}
 	managed := map[string]bool{}
@@ -269,267 +255,305 @@ func operationBoundaryDiagnostics(
 	}
 
 	undeclared := map[string]bool{}
-
+	sources := []operationBoundarySource{}
+	packageNames := map[string]string{}
+	directories := inspectionDirectories(root, m.Project.Module, nil)
 	walkErr := filepath.WalkDir(
 		root,
-		func(path string, entry fs.DirEntry, err error) error {
+		func(
+			path string,
+			entry fs.DirEntry,
+			err error,
+		) error {
 			if err != nil {
 				return err
 			}
-
-			relative, _ := filepath.Rel(root, path)
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
 			relative = filepath.ToSlash(relative)
-
 			if entry.IsDir() {
-				switch entry.Name() {
-				case ".git", "node_modules", "vendor", "testdata", "dist":
+				if skipInspectionDirectory(
+					relative,
+					entry.Name(),
+					directories,
+				) {
 					return filepath.SkipDir
 				}
-
 				if relative != "." {
 					if _, err := os.Stat(
-						filepath.Join(path, "go.mod"),
+						filepath.Join(
+							path,
+							"go.mod",
+						),
 					); err == nil {
 						return filepath.SkipDir
 					}
 				}
-
 				return nil
 			}
-
 			if !strings.HasSuffix(relative, ".go") ||
 				strings.HasSuffix(relative, "_test.go") ||
 				entry.Type()&os.ModeSymlink != 0 {
 				return nil
 			}
-
 			set := token.NewFileSet()
-
 			tree, err := parser.ParseFile(set, path, nil, parser.AllErrors)
 			if err != nil {
+				add(
+					"ARCH201",
+					relative,
+					1,
+					"operation source cannot be assessed: "+err.Error(),
+					"Repair Go syntax before inspecting managed boundary ownership.",
+				)
 				return nil
 			}
-
 			dir := filepath.ToSlash(filepath.Dir(relative))
-
-			inOperations := dir == "internal/operations" ||
-				strings.HasPrefix(dir, "internal/operations/")
-			if inOperations && !declared[dir] && !undeclared[dir] {
-				for _, decl := range tree.Decls {
-					if _, ok := decl.(*ast.FuncDecl); ok {
-						add(
-							"ARCH201",
-							relative,
-							1,
-							"production operation package has no declared "+
-								"managed operation boundary: "+dir,
-							"Inventory its entry operations in endpoint "+
-								"metadata and explicitly migrate them "+
-								"behind managed gates; legacy authored "+
-								"authorization calls are not proof of a "+
-								"mandatory boundary.",
-						)
-
-						undeclared[dir] = true
-
-						break
-					}
-				}
+			namespace := m.Project.Module
+			if dir != "." {
+				namespace += "/" + dir
 			}
-
-			imports := map[string]string{}
-
-			for _, spec := range tree.Imports {
-				value, _ := strconv.Unquote(spec.Path.Value)
-
-				name := filepath.Base(value)
-				if spec.Name != nil {
-					name = spec.Name.Name
-				}
-
-				imports[name] = value
-				if name == "." &&
-					strings.HasPrefix(
-						value,
-						m.Project.Module+"/internal/operations/",
-					) {
-					add(
-						"ARCH204",
-						relative,
-						set.Position(spec.Pos()).Line,
-						"dot-imported operation boundary hides its qualified "+
-							"ownership",
-						"Use a qualified managed boundary; production dot "+
-							"imports are unsupported for operation gates.",
-					)
-				}
-			}
-
-			boundaryName := func(expression ast.Expr) bool {
-				expression = unwrapBoundaryType(expression)
-
-				selector, ok := expression.(*ast.SelectorExpr)
-				if !ok {
-					return false
-				}
-
-				qualifier, ok := selector.X.(*ast.Ident)
-				if !ok {
-					return false
-				}
-
-				imported := imports[qualifier.Name]
-
-				return boundaryTypes[imported][selector.Sel.Name]
-			}
-			allowedDeclaration := token.NoPos
-
-			if inOperations && declared[dir] && !gates[relative] {
-				for _, decl := range tree.Decls {
-					function, ok := decl.(*ast.FuncDecl)
-					if !ok {
-						continue
-					}
-
-					expected := authored[relative]
-					if function.Name.Name == "execute" && expected != "" &&
-						receiverName(function.Recv) == expected {
-						allowedDeclaration = function.Name.Pos()
-						continue
-					}
-
-					if function.Recv != nil ||
-						ast.IsExported(function.Name.Name) {
-						add(
-							"ARCH204",
-							relative,
-							set.Position(function.Pos()).Line,
-							"unsupported operation entry or receiver method "+
-								"outside the managed gate: "+function.Name.Name,
-							"Expose only the generated Execute gate; keep "+
-								"private implementation and package "+
-								"helpers behind it. Additional use cases "+
-								"require declared operation boundaries.",
-						)
-					}
-				}
-			}
-
-			if inOperations && declared[dir] && !gates[relative] {
-				for _, decl := range tree.Decls {
-					group, ok := decl.(*ast.GenDecl)
-					if !ok || group.Tok != token.VAR {
-						continue
-					}
-
-					for _, spec := range group.Specs {
-						value, ok := spec.(*ast.ValueSpec)
-						if !ok {
-							continue
-						}
-
-						for _, name := range value.Names {
-							if ast.IsExported(name.Name) {
-								add(
-									"ARCH204",
-									relative,
-									set.Position(name.Pos()).Line,
-									"exported operation variable creates an "+
-										"unsupported entry or mutable "+
-										"global: "+name.Name,
-									"Keep operation entry points managed; "+
-										"inject typed dependencies "+
-										"instead of exporting callable "+
-										"or mutable globals.",
-								)
-							}
-						}
-					}
-				}
-			}
-
-			if managed[relative] {
-				return nil
-			}
-
-			ast.Inspect(tree, func(node ast.Node) bool {
-				switch n := node.(type) {
-				case *ast.Ident:
-					if inOperations && declared[dir] && n.Name == "execute" &&
-						n.Pos() != allowedDeclaration {
-						add(
-							"ARCH203",
-							relative,
-							set.Position(n.Pos()).Line,
-							"private operation implementation referenced "+
-								"outside its managed gate",
-							"Call the managed Execute method; do not capture,"+
-								" alias, recurse into or invoke the "+
-								"private implementation from helpers.",
-						)
-					}
-				case *ast.StructType:
-					for _, field := range n.Fields.List {
-						if len(field.Names) == 0 && boundaryName(field.Type) {
-							add(
-								"ARCH204",
-								relative,
-								set.Position(field.Pos()).Line,
-								"embedding an operation gate or sealed "+
-									"boundary can override its entry "+
-									"method",
-								"Inject the generated boundary as a named "+
-									"field or constructor dependency; do "+
-									"not embed it in production adapters.",
-							)
-						}
-					}
-
-				case *ast.InterfaceType:
-					for _, field := range n.Methods.List {
-						if len(field.Names) == 0 && boundaryName(field.Type) {
-							add(
-								"ARCH204",
-								relative,
-								set.Position(field.Pos()).Line,
-								"embedding a managed operation boundary into "+
-									"another interface is unsupported",
-								"Use the generated sealed contract directly; "+
-									"do not create a replacement "+
-									"interface embedding route.",
-							)
-						}
-					}
-
-				case *ast.TypeSpec:
-					if boundaryName(n.Type) {
-						add(
-							"ARCH204",
-							relative,
-							set.Position(n.Pos()).Line,
-							"aliasing or redefining an operation boundary "+
-								"outside managed code is unsupported",
-							"Use the generated sealed entry contract "+
-								"directly; aliases cannot establish "+
-								"another authorized implementation.",
-						)
-					}
-				}
-
-				return true
-			})
-
+			sources = append(
+				sources,
+				operationBoundarySource{
+					relative,
+					dir,
+					namespace,
+					set,
+					tree,
+				},
+			)
+			packageNames[namespace] = tree.Name.Name
 			return nil
 		},
 	)
 	if walkErr != nil {
-		add(
-			"ARCH201",
-			".",
-			1,
+		add("ARCH201", ".", 1,
 			fmt.Sprintf("operation boundary inventory incomplete: %v", walkErr),
-			"Restore source access and rerun the canonical inspection.",
-		)
+			"Restore source access and rerun the canonical inspection.")
+	}
+	aliases := map[string][]operationBoundaryAlias{}
+	for _, source := range sources {
+		imports := operationBoundaryImports(source.tree, packageNames)
+		for _, declaration := range source.tree.Decls {
+			group, ok := declaration.(*ast.GenDecl)
+			if !ok || group.Tok != token.TYPE {
+				continue
+			}
+			for _, item := range group.Specs {
+				spec, ok := item.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				key := source.namespace + "." + spec.Name.Name
+				aliases[key] = append(aliases[key], operationBoundaryAlias{
+					source.namespace, spec.Type, imports,
+				})
+			}
+		}
+	}
+	for _, source := range sources {
+		relative, dir := source.relative, source.dir
+		set, tree := source.set, source.tree
+		inOperations := dir == "internal/operations" ||
+			strings.HasPrefix(dir, "internal/operations/")
+		if inOperations && !declared[dir] && !undeclared[dir] {
+			for _, decl := range tree.Decls {
+				if _, ok := decl.(*ast.FuncDecl); ok {
+					add(
+						"ARCH201",
+						relative,
+						1,
+						"production operation package has no declared "+
+							"managed operation boundary: "+dir,
+						"Inventory its entry operations in endpoint "+
+							"metadata and explicitly migrate them "+
+							"behind managed gates; legacy authored "+
+							"authorization calls are not proof of a "+
+							"mandatory boundary.",
+					)
+
+					undeclared[dir] = true
+
+					break
+				}
+			}
+		}
+
+		imports := map[string]string{}
+
+		for _, spec := range tree.Imports {
+			value, _ := strconv.Unquote(spec.Path.Value)
+
+			name := filepath.Base(value)
+			if actual := packageNames[value]; actual != "" {
+				name = actual
+			}
+			if spec.Name != nil {
+				name = spec.Name.Name
+			}
+
+			imports[name] = value
+			if name == "." &&
+				strings.HasPrefix(
+					value,
+					m.Project.Module+"/internal/operations/",
+				) {
+				add(
+					"ARCH204",
+					relative,
+					set.Position(spec.Pos()).Line,
+					"dot-imported operation boundary hides its qualified "+
+						"ownership",
+					"Use a qualified managed boundary; production dot "+
+						"imports are unsupported for operation gates.",
+				)
+			}
+		}
+
+		boundaryName := func(expression ast.Expr) bool {
+			return isOperationBoundaryType(expression, source.namespace,
+				imports, boundaryTypes, aliases, map[string]bool{})
+		}
+		allowedDeclaration := token.NoPos
+
+		if inOperations && declared[dir] && !gates[relative] {
+			for _, decl := range tree.Decls {
+				function, ok := decl.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+
+				expected := authored[relative]
+				if function.Name.Name == "execute" && expected != "" &&
+					receiverName(function.Recv) == expected {
+					allowedDeclaration = function.Name.Pos()
+					continue
+				}
+
+				if function.Recv != nil ||
+					ast.IsExported(function.Name.Name) {
+					add(
+						"ARCH204",
+						relative,
+						set.Position(function.Pos()).Line,
+						"unsupported operation entry or receiver method "+
+							"outside the managed gate: "+function.Name.Name,
+						"Expose only the generated Execute gate; keep "+
+							"private implementation and package "+
+							"helpers behind it. Additional use cases "+
+							"require declared operation boundaries.",
+					)
+				}
+			}
+		}
+
+		if inOperations && declared[dir] && !gates[relative] {
+			for _, decl := range tree.Decls {
+				group, ok := decl.(*ast.GenDecl)
+				if !ok || group.Tok != token.VAR {
+					continue
+				}
+
+				for _, spec := range group.Specs {
+					value, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+
+					for _, name := range value.Names {
+						if ast.IsExported(name.Name) {
+							add(
+								"ARCH204",
+								relative,
+								set.Position(name.Pos()).Line,
+								"exported operation variable creates an "+
+									"unsupported entry or mutable "+
+									"global: "+name.Name,
+								"Keep operation entry points managed; "+
+									"inject typed dependencies "+
+									"instead of exporting callable "+
+									"or mutable globals.",
+							)
+						}
+					}
+				}
+			}
+		}
+
+		if managed[relative] {
+			continue
+		}
+
+		ast.Inspect(tree, func(node ast.Node) bool {
+			switch n := node.(type) {
+			case *ast.Ident:
+				if inOperations && declared[dir] && n.Name == "execute" &&
+					n.Pos() != allowedDeclaration {
+					add(
+						"ARCH203",
+						relative,
+						set.Position(n.Pos()).Line,
+						"private operation implementation referenced "+
+							"outside its managed gate",
+						"Call the managed Execute method; do not capture,"+
+							" alias, recurse into or invoke the "+
+							"private implementation from helpers.",
+					)
+				}
+			case *ast.StructType:
+				for _, field := range n.Fields.List {
+					if len(field.Names) == 0 && boundaryName(field.Type) {
+						add(
+							"ARCH204",
+							relative,
+							set.Position(field.Pos()).Line,
+							"embedding an operation gate or sealed "+
+								"boundary can override its entry "+
+								"method",
+							"Inject the generated boundary as a named "+
+								"field or constructor dependency; do "+
+								"not embed it in production adapters.",
+						)
+					}
+				}
+
+			case *ast.InterfaceType:
+				for _, field := range n.Methods.List {
+					if len(field.Names) == 0 && boundaryName(field.Type) {
+						add(
+							"ARCH204",
+							relative,
+							set.Position(field.Pos()).Line,
+							"embedding a managed operation boundary into "+
+								"another interface is unsupported",
+							"Use the generated sealed contract directly; "+
+								"do not create a replacement "+
+								"interface embedding route.",
+						)
+					}
+				}
+
+			case *ast.TypeSpec:
+				if boundaryName(n.Type) {
+					add(
+						"ARCH204",
+						relative,
+						set.Position(n.Pos()).Line,
+						"aliasing or redefining an operation boundary "+
+							"outside managed code is unsupported",
+						"Use the generated sealed entry contract "+
+							"directly; aliases cannot establish "+
+							"another authorized implementation.",
+					)
+				}
+			}
+
+			return true
+		})
+
 	}
 
 	return diagnostics
@@ -559,7 +583,118 @@ func unwrapBoundaryType(expression ast.Expr) ast.Expr {
 		return unwrapBoundaryType(value.X)
 	case *ast.ParenExpr:
 		return unwrapBoundaryType(value.X)
+	case *ast.IndexExpr:
+		return unwrapBoundaryType(value.X)
+	case *ast.IndexListExpr:
+		return unwrapBoundaryType(value.X)
 	}
 
 	return expression
+}
+
+type operationBoundarySource struct {
+	relative, dir, namespace string
+	set                      *token.FileSet
+	tree                     *ast.File
+}
+
+type operationBoundaryAlias struct {
+	namespace  string
+	expression ast.Expr
+	imports    map[string]string
+}
+
+func operationBoundaryImports(
+	tree *ast.File,
+	packages map[string]string,
+) map[string]string {
+	imports := map[string]string{}
+	for _, spec := range tree.Imports {
+		path, _ := strconv.Unquote(spec.Path.Value)
+		name := packages[path]
+		if name == "" {
+			name = filepath.Base(path)
+		}
+		if spec.Name != nil {
+			name = spec.Name.Name
+		}
+		imports[name] = path
+	}
+	return imports
+}
+
+func isOperationBoundaryType(expression ast.Expr, namespace string,
+	imports map[string]string, known map[string]map[string]bool,
+	aliases map[string][]operationBoundaryAlias, seen map[string]bool,
+) bool {
+	expression = unwrapBoundaryType(expression)
+	name := ""
+	switch value := expression.(type) {
+	case *ast.Ident:
+		name = value.Name
+	case *ast.SelectorExpr:
+		qualifier, ok := value.X.(*ast.Ident)
+		if !ok {
+			return false
+		}
+		namespace = imports[qualifier.Name]
+		if namespace == "" {
+			return false
+		}
+		name = value.Sel.Name
+	case *ast.InterfaceType:
+		for _, field := range value.Methods.List {
+			if len(
+				field.Names,
+			) == 0 &&
+				isOperationBoundaryType(
+					field.Type,
+					namespace,
+
+					imports,
+					known,
+					aliases,
+					seen,
+				) {
+				return true
+			}
+		}
+		return false
+	case *ast.StructType:
+		for _, field := range value.Fields.List {
+			if len(
+				field.Names,
+			) == 0 &&
+				isOperationBoundaryType(
+					field.Type,
+					namespace,
+
+					imports,
+					known,
+					aliases,
+					seen,
+				) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+	if known[namespace][name] {
+		return true
+	}
+	key := namespace + "." + name
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	defer delete(seen, key)
+	for _, alias := range aliases[key] {
+		if isOperationBoundaryType(alias.expression, alias.namespace,
+			alias.imports, known, aliases, seen) {
+			return true
+		}
+	}
+	return false
 }
