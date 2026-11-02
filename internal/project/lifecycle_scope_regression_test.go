@@ -14,8 +14,6 @@ type Phase string
 type Event string
 type Workflow = state.Machine[Phase, Event, bool]
 type Forward = Workflow
-type CycleA = CycleB
-type CycleB = CycleA
 
 type Cursor struct{}
 
@@ -55,7 +53,10 @@ func Run(domain Holder) {
 		},
 		{
 			"alias cycle terminates",
-			"var next = (*domain.CycleA).Next",
+			`type CycleA = CycleB
+type CycleB = CycleA
+
+var next = (*CycleA).Next`,
 			0,
 		},
 		{
@@ -186,8 +187,8 @@ func Run(domain Holder) {
 			`var m *domain.Workflow
 
 func Run() {
-	m := 1
-	_ = m.Next
+	m := &domain.Cursor{}
+	m.Next()
 }`,
 			0,
 		},
