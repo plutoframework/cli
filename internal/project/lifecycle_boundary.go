@@ -48,6 +48,7 @@ func inspectLifecycleBoundaries(
 	set := token.NewFileSet()
 	files := []*lifecycleFile{}
 	types := map[string]lifecycleType{}
+	directories := inspectionDirectories(root, module, nil)
 
 	// General inventory diagnostics belong to InspectArchitecture. Match its
 	// exclusions here so this pass cannot silently execute or include test
@@ -60,8 +61,10 @@ func inspectLifecycleBoundaries(
 			}
 
 			if entry.IsDir() {
-				switch entry.Name() {
-				case ".git", "node_modules", "vendor", "testdata", "dist":
+				relative, _ := filepath.Rel(root, path)
+				if skipInspectionDirectory(
+					filepath.ToSlash(relative), entry.Name(), directories,
+				) {
 					return filepath.SkipDir
 				}
 
@@ -415,6 +418,7 @@ func inspectLifecycleBoundaries(
 			for _, list := range []*ast.FieldList{
 				function.Recv,
 				function.Type.Params,
+				function.Type.Results,
 			} {
 				if list == nil {
 					continue
@@ -482,6 +486,16 @@ func inspectLifecycleBoundaries(
 				case *ast.IndexListExpr:
 					return lifecycleType{value, file, false}
 				case *ast.SelectorExpr:
+					if prefix, ok := value.X.(*ast.Ident); ok {
+						_, shadowed := variables[prefix.Name]
+						if !shadowed && file.imports[prefix.Name] != "" {
+							key := name(value, file)
+							if definition, exists := types[key]; exists {
+								return definition
+							}
+						}
+					}
+
 					owner := resolve(value.X)
 					if owner.file == nil {
 						return lifecycleType{}
@@ -510,37 +524,112 @@ func inspectLifecycleBoundaries(
 				return lifecycleType{}
 			}
 
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				if spec, ok := node.(*ast.ValueSpec); ok {
-					for index, id := range spec.Names {
-						if spec.Type != nil {
-							variables[id.Name] = lifecycleType{
-								spec.Type,
+			// Bind declarations after their initializers, and restore lexical
+			// scopes rather than leaking inner shadows into later statements.
+			type scopeFrame struct {
+				node     ast.Node
+				previous map[string]lifecycleType
+			}
+
+			frames := []scopeFrame{}
+			bindFields := func(list *ast.FieldList) {
+				if list == nil {
+					return
+				}
+
+				for _, field := range list.List {
+					for _, id := range field.Names {
+						variables[id.Name] = lifecycleType{
+							field.Type,
+							file,
+							false,
+						}
+					}
+				}
+			}
+			bindNode := func(node ast.Node) {
+				switch value := node.(type) {
+				case *ast.ValueSpec:
+					resolved := make([]lifecycleType, len(value.Names))
+					for index := range value.Names {
+						if value.Type != nil {
+							resolved[index] = lifecycleType{
+								value.Type,
 								file,
 								false,
 							}
-						} else if index < len(spec.Values) {
-							if resolved := resolve(
-								spec.Values[index],
-							); resolved.file != nil {
-								variables[id.Name] = resolved
+						} else if index < len(value.Values) {
+							resolved[index] = resolve(value.Values[index])
+						}
+					}
+
+					for index, id := range value.Names {
+						variables[id.Name] = resolved[index]
+					}
+				case *ast.AssignStmt:
+					resolved := make([]lifecycleType, len(value.Lhs))
+					for index := range value.Lhs {
+						if index < len(value.Rhs) {
+							resolved[index] = resolve(value.Rhs[index])
+						}
+					}
+
+					for index, left := range value.Lhs {
+						if id, ok := left.(*ast.Ident); ok {
+							if value.Tok == token.DEFINE ||
+								resolved[index].file != nil {
+								variables[id.Name] = resolved[index]
+							}
+						}
+					}
+				}
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				if node == nil {
+					frame := frames[len(frames)-1]
+					frames = frames[:len(frames)-1]
+
+					bindNode(frame.node)
+
+					if frame.previous != nil {
+						variables = frame.previous
+					}
+
+					return true
+				}
+
+				frame := scopeFrame{node: node}
+				switch node.(type) {
+				case *ast.BlockStmt, *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt,
+					*ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt,
+					*ast.CaseClause, *ast.CommClause, *ast.FuncLit:
+					frame.previous = variables
+
+					variables = make(map[string]lifecycleType, len(variables))
+					for id, value := range frame.previous {
+						variables[id] = value
+					}
+				}
+
+				if literal, ok := node.(*ast.FuncLit); ok {
+					bindFields(literal.Type.Params)
+					bindFields(literal.Type.Results)
+				}
+
+				if len(frames) > 0 {
+					parent := frames[len(frames)-1].node
+					if loop, ok := parent.(*ast.RangeStmt); ok &&
+						node == loop.Body &&
+						loop.Tok == token.DEFINE {
+						for _, expr := range []ast.Expr{loop.Key, loop.Value} {
+							if id, ok := expr.(*ast.Ident); ok {
+								variables[id.Name] = lifecycleType{}
 							}
 						}
 					}
 				}
 
-				if assignment, ok := node.(*ast.AssignStmt); ok &&
-					len(assignment.Lhs) == len(assignment.Rhs) {
-					for index, left := range assignment.Lhs {
-						if id, ok := left.(*ast.Ident); ok {
-							if resolved := resolve(
-								assignment.Rhs[index],
-							); resolved.file != nil {
-								variables[id.Name] = resolved
-							}
-						}
-					}
-				}
+				frames = append(frames, frame)
 
 				selector, ok := node.(*ast.SelectorExpr)
 				if !ok || selector.Sel.Name != "Next" {
