@@ -11,8 +11,10 @@ import (
 )
 
 type (
-	wizardChoice struct{ label, value string }
-	wizardField  struct {
+	wizardChoice struct {
+		label, value string
+	}
+	wizardField struct {
 		id, label, help, value string
 		choices                []wizardChoice
 		fallback               func(map[string]string) string
@@ -26,10 +28,17 @@ type wizardModel struct {
 	review, editing, confirmed, cancelled, menu bool
 	message                                     string
 	args                                        []string
-	build                                       func(map[string]string) ([]string, error)
+	build                                       func(
+		map[string]string,
+	) (
+		[]string,
+		error,
+	)
 }
 
-func (m wizardModel) Init() tea.Cmd { return nil }
+func (m wizardModel) Init() tea.Cmd {
+	return nil
+}
 
 func (m wizardModel) values() map[string]string {
 	values := map[string]string{}

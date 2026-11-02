@@ -71,7 +71,12 @@ func TestGeneratedOIDCProfile(t *testing.T) {
 				t.Fatal("OIDC choice not saved", err)
 			}
 
-			for _, file := range []string{"cmd/api/oidc.go", "internal/config/oidc.go", "internal/paths/oidc.go", "db/migrations/007_external_accounts.sql"} {
+			for _, file := range []string{
+				"cmd/api/oidc.go",
+				"internal/config/oidc.go",
+				"internal/paths/oidc.go",
+				"db/migrations/007_external_accounts.sql",
+			} {
 				if _, err := os.Stat(filepath.Join(root, file)); err != nil {
 					t.Fatal(err)
 				}

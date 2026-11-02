@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"{{.Module}}/internal/config"
+	"{{.Module}}/internal/access"
 	"{{.Module}}/internal/features"
 	"{{.Module}}/internal/paths"
 	"{{.Module}}/internal/transport"
@@ -21,15 +22,15 @@ func New(
 	logger *slog.Logger,
 	policy *rbac.Policy,
 ) http.Handler {
-    return NewWithCache(cfg, authentication, logger, policy, cache.Disabled{})
+	return NewWithCache(cfg, authentication, logger, policy, cache.Disabled{})
 }
 
 func NewWithCache(
-    cfg config.Config,
-    authentication transport.Authentication,
-    logger *slog.Logger,
-    policy *rbac.Policy,
-    dataCache cache.Store,
+	cfg config.Config,
+	authentication transport.Authentication,
+	logger *slog.Logger,
+	policy *rbac.Policy,
+	dataCache cache.Store,
 ) http.Handler {
 	evaluator := features.New(cfg.Features)
 	router := chi.NewRouter()
@@ -48,13 +49,13 @@ func NewWithCache(
 	}
 
 	reg := transport.Registrar{
-		Router:   router,
-		Auth:     authentication.Verifier,
- Sessions: authentication.HTTP,
- Idempotency: authentication.Idempotency,
-		Features: evaluator,
-		Logger:   logger,
-		Policy:   policy,
+		Router:      router,
+		Auth:        authentication.Verifier,
+		Sessions:    authentication.HTTP,
+		Idempotency: authentication.Idempotency,
+		Features:    evaluator,
+		Logger:      logger,
+		Policy:      policy,
 	}
 	reg.Handle(paths.Health, func(w http.ResponseWriter, _ *http.Request) {
 		transport.JSON(
@@ -71,30 +72,60 @@ func NewWithCache(
 		)
 	})
 	{{if .LocalCredentials}}
-    if authentication.Credentials != nil {
-        for _, endpoint := range paths.LocalCredentials() {
-            router.Method(endpoint.Method, endpoint.Path,
-                http.StripPrefix("/auth", authentication.Credentials))
-        }
-    }
-    {{end}}
-    {{if .OIDC}}
- if authentication.OIDC!=nil {
-  router.Mount("/auth/oidc",http.StripPrefix("/auth/oidc",authentication.OIDC))
- }
- router.Get(paths.OIDCProviders.Path,func(w http.ResponseWriter,r *http.Request){
-  providers:=[]string{}
-  if authentication.OIDC!=nil {providers=append(providers,"oidc")}
-  transport.JSON(w,200,map[string]any{"data":providers})
- })
- {{end}}
- transport.RegisterSessions(reg,authentication)
- RegisterGenerated(reg, Dependencies{Config: cfg, Policy: policy, Cache: dataCache})
+
+	if authentication.Credentials != nil {
+		for _, endpoint := range paths.LocalCredentials() {
+			router.Method(endpoint.Method, endpoint.Path,
+				http.StripPrefix("/auth", authentication.Credentials))
+		}
+	}
+	{{end}}
+	{{if .OIDC}}
+	if authentication.OIDC != nil {
+		router.Mount(
+			"/auth/oidc",
+			http.StripPrefix("/auth/oidc", authentication.OIDC))
+	}
+
+	router.Get(
+		paths.OIDCProviders.Path,
+		func(w http.ResponseWriter, r *http.Request) {
+			providers := []string{}
+			if authentication.OIDC != nil {
+				providers = append(providers, "oidc")
+			}
+
+			transport.JSON(w, 200, map[string]any{"data": providers})
+		})
+	{{end}}
+
+	transport.RegisterSessions(reg, authentication)
+
+	authorizer, authorizationErr := access.NewAuthorizer(
+		policy,
+		authentication.Memberships)
+	if authorizationErr != nil {
+		logger.Error("operation authorization unavailable")
+	}
+
+	RegisterGenerated(
+		reg,
+		Dependencies{
+			Config:      cfg,
+			Policy:      policy,
+			Authorizer:  authorizer,
+			Memberships: authentication.Memberships,
+			Cache:       dataCache,
+		})
 	router.NotFound(
-		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 404, "not_found") },
+		func(w http.ResponseWriter, r *http.Request) {
+			transport.Error(w, r, 404, "not_found")
+		},
 	)
 	router.MethodNotAllowed(
-		func(w http.ResponseWriter, r *http.Request) { transport.Error(w, r, 405, "method_not_allowed") },
+		func(w http.ResponseWriter, r *http.Request) {
+			transport.Error(w, r, 405, "method_not_allowed")
+		},
 	)
 
 	return router

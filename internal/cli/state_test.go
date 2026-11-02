@@ -34,7 +34,13 @@ func TestStateScaffoldConsumers(t *testing.T) {
 			mustInvoke(t, root, "add", "state", "purchases", "--dry-run")
 			assertUnchanged(t, before, snapshot(t, root))
 
-			for _, group := range []string{"../escape", "Bad", "http", "", "type"} {
+			for _, group := range []string{
+				"../escape",
+				"Bad",
+				"http",
+				"",
+				"type",
+			} {
 				if _, err := invoke(
 					t,
 					root,
@@ -69,7 +75,7 @@ func TestStateScaffoldConsumers(t *testing.T) {
 			external(t, root, "go", "test", "./internal/domain/purchases",
 				"-run=^$", "-fuzz=FuzzLifecycle", "-fuzztime=1s", "-parallel=2")
 			mustInvoke(t, root, "fmt")
-			mustInvoke(t, root, "vet")
+			mustVetPublishedCompatibility(t, root)
 		})
 	}
 }
@@ -142,8 +148,18 @@ func TestStateWizardDispatch(t *testing.T) {
 		In:        strings.NewReader(""),
 		Out:       &output,
 		Err:       &output,
-		terminal:  func(io.Reader, io.Writer) bool { return true },
-		wizard: func(_ context.Context, _ io.Reader, _ io.Writer, model wizardModel) (wizardModel, error) {
+		terminal: func(io.Reader, io.Writer) bool {
+			return true
+		},
+		wizard: func(
+			_ context.Context,
+			_ io.Reader,
+			_ io.Writer,
+			model wizardModel,
+		) (
+			wizardModel,
+			error,
+		) {
 			calls++
 
 			if model.kind != "state" {

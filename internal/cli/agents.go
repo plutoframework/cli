@@ -13,9 +13,11 @@ import (
 
 func addAgentCommand(options Options) *cobra.Command {
 	var (
-		permission string
-		provider   string
-		dry        bool
+		approval    string
+		permission  string
+		operationID string
+		provider    string
+		dry         bool
 	)
 
 	command := &cobra.Command{
@@ -34,11 +36,27 @@ func addAgentCommand(options Options) *cobra.Command {
 
 			old := m
 
+			operation, created, err := ensureEntryOperation(
+				&m,
+				operationID,
+				args[0],
+				args[1],
+				permission,
+				false,
+				false,
+				false,
+			)
+			if err != nil {
+				return err
+			}
+
 			a := project.Agent{
+				Operation:  operation.ID(),
 				Group:      args[0],
 				Action:     args[1],
 				Permission: permission,
 				Provider:   provider,
+				Approval:   approval,
 			}
 			m.SchemaVersion = project.SchemaVersion
 
@@ -50,6 +68,17 @@ func addAgentCommand(options Options) *cobra.Command {
 			files, err := project.AgentFiles(m, a)
 			if err != nil {
 				return err
+			}
+
+			if created {
+				authored, err := project.OperationFiles(m, operation)
+				if err != nil {
+					return err
+				}
+
+				for path, source := range authored {
+					files[path] = source
+				}
 			}
 
 			managed, err := project.Managed(m)
@@ -85,26 +114,35 @@ func addAgentCommand(options Options) *cobra.Command {
 
 			module := string(previous["go.mod"])
 			pin := regexp.MustCompile(
-				`(?m)^\s*(?:require\s+)?github\.com/plutoframework/pluto-agent\s+(\S+)`,
+
+				`(?m)^\s*(?:require\s+)?github\.com/` +
+					`plutoframework/pluto-agent\s+(\S+)`,
 			)
 
 			match := pin.FindStringSubmatch(module)
 			if len(match) > 0 && match[1] != project.AgentVersion {
 				return fmt.Errorf(
-					"existing agent version %s requires explicit upgrade to %s",
+					"existing agent version %s requires explicit upgrade to "+
+						"%s",
 					match[1],
 					project.AgentVersion,
 				)
 			}
 
 			if len(match) == 0 {
-				module += "\nrequire github.com/plutoframework/pluto-agent " + project.AgentVersion + "\n"
+				module += "\nrequire github.com/plutoframework/pluto-agent " +
+					project.AgentVersion + "\n"
 			}
 
 			files["go.mod"] = []byte(module)
 
 			sums := string(previous["go.sum"])
-			for _, line := range strings.Split(strings.TrimSpace(project.AgentGoSum), "\n") {
+			for _, line := range strings.Split(
+				strings.TrimSpace(
+					project.AgentGoSum,
+				),
+				"\n",
+			) {
 				if !strings.Contains(sums, line+"\n") {
 					sums += line + "\n"
 				}
@@ -123,7 +161,9 @@ func addAgentCommand(options Options) *cobra.Command {
 
 			if !dry {
 				cmd.Println(
-					"Agent added. Run go mod tidy; inject verified dependencies and resource operations before enabling a route.",
+					"Agent added. Run go mod tidy; inject verified " +
+						"dependencies and resource operations before " +
+						"enabling a route.",
 				)
 			}
 
@@ -131,10 +171,35 @@ func addAgentCommand(options Options) *cobra.Command {
 		},
 	}
 	command.Flags().
-		StringVar(&permission, "permission", "", "Required explicit RBAC capability")
+		StringVar(
+			&approval,
+			"approval",
+			"",
+			"Candidate write tool approval: host",
+		)
 	command.Flags().
-		StringVar(&provider, "provider", "scripted", "Provider skeleton: scripted or openai (runtime opt-in required)")
-	command.Flags().BoolVar(&dry, "dry-run", false, "Preflight without writing")
+		StringVar(
+			&operationID,
+			"operation",
+			"",
+			"Declared protected read operation to invoke",
+		)
+	command.Flags().
+		StringVar(
+			&permission,
+			"permission",
+			"",
+			"Required explicit RBAC capability",
+		)
+	command.Flags().
+		StringVar(
+			&provider,
+			"provider",
+			"scripted",
+			"Provider skeleton: scripted or openai (runtime opt-in required)",
+		)
+	command.Flags().BoolVar(&dry, "dry-run", false, "Preflight without "+
+		"writing")
 
 	return command
 }

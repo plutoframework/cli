@@ -22,8 +22,18 @@ func TestFrontendWizardReusesRawCommands(t *testing.T) {
 		In:        strings.NewReader(""),
 		Out:       &output,
 		Err:       &output,
-		terminal:  func(io.Reader, io.Writer) bool { return true },
-		wizard: func(_ context.Context, _ io.Reader, _ io.Writer, m wizardModel) (wizardModel, error) {
+		terminal: func(io.Reader, io.Writer) bool {
+			return true
+		},
+		wizard: func(
+			_ context.Context,
+			_ io.Reader,
+			_ io.Writer,
+			m wizardModel,
+		) (
+			wizardModel,
+			error,
+		) {
 			values := map[string]string{"no-install": "true"}
 
 			switch m.kind {
@@ -75,8 +85,18 @@ func TestFrontendWizardPreservesRegistry(t *testing.T) {
 		In:        strings.NewReader(""),
 		Out:       &output,
 		Err:       &output,
-		terminal:  func(io.Reader, io.Writer) bool { return true },
-		wizard: func(_ context.Context, _ io.Reader, _ io.Writer, model wizardModel) (wizardModel, error) {
+		terminal: func(io.Reader, io.Writer) bool {
+			return true
+		},
+		wizard: func(
+			_ context.Context,
+			_ io.Reader,
+			_ io.Writer,
+			model wizardModel,
+		) (
+			wizardModel,
+			error,
+		) {
 			return acceptWizard(
 				t,
 				model,

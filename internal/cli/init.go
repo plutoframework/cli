@@ -13,6 +13,7 @@ import (
 
 func initCommand(options Options) *cobra.Command {
 	var (
+		profile                                    project.BoundaryProfile
 		name, module, prefix                       string
 		localCredentials, oidc                     bool
 		cacheBackend                               string
@@ -20,11 +21,15 @@ func initCommand(options Options) *cobra.Command {
 	)
 
 	command := &cobra.Command{
-		Use:     "init [directory]",
-		Short:   "Create a runnable API without overwriting existing files",
-		Long:    "Create a runnable API with Docker, mise and fnox development files by default.\nUse --no-docker, --no-mise or --no-fnox to omit each preset independently.",
-		Example: "  pluto init my-api --module example.com/my-api\n  pluto init . --name my-api --env-prefix MY_API_ --multi-tenant\n  pluto init minimal-api --no-docker --no-mise --no-fnox",
-		Args:    cobra.MaximumNArgs(1),
+		Use:   "init [directory]",
+		Short: "Create a runnable API without overwriting existing files",
+		Long: "Create a runnable API with Docker, mise and fnox " +
+			"development files by default.\nUse --no-docker, --no-mise " +
+			"or --no-fnox to omit each preset independently.",
+		Example: "  pluto init my-api --module example.com/my-api\n  pluto " +
+			"init . --name my-api --env-prefix MY_API_ --multi-tenant\n  " +
+			"pluto init minimal-api --no-docker --no-mise --no-fnox",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := options.Directory
 			if len(args) > 0 {
@@ -59,6 +64,7 @@ func initCommand(options Options) *cobra.Command {
 			}
 
 			m := project.Manifest{
+				Boundary:      profile,
 				SchemaVersion: project.SchemaVersion,
 				Project: project.Project{
 					Name:      name,
@@ -134,7 +140,9 @@ func initCommand(options Options) *cobra.Command {
 				"./cmd/openapi",
 			); err != nil {
 				return fmt.Errorf(
-					"project files written; OpenAPI generation failed: %w; run pluto openapi after repairing the environment",
+					"project files written; OpenAPI generation failed: %w; "+
+						"run pluto openapi after repairing the "+
+						"environment",
 					err,
 				)
 			}
@@ -155,12 +163,15 @@ func initCommand(options Options) *cobra.Command {
 				tenancy,
 			)
 			cmd.Println(
-				"Next: go run ./cmd/openapi; pluto fmt; pluto vet; go run ./cmd/api",
+				"Next: go run ./cmd/openapi; pluto fmt; pluto vet; go run ./" +
+					"cmd/api",
 			)
 
 			return nil
 		},
 	}
+	addBoundaryProfileFlags(command, &profile)
+
 	flags := command.Flags()
 	flags.StringVar(
 		&cacheBackend,
@@ -190,13 +201,15 @@ func initCommand(options Options) *cobra.Command {
 		&oidc,
 		"oidc",
 		false,
-		"Include optional OIDC sign-in; requires --local-credentials and explicit runtime secrets",
+		"Include optional OIDC sign-in; requires --local-credentials and "+
+			"explicit runtime secrets",
 	)
 	flags.BoolVar(
 		&localCredentials,
 		"local-credentials",
 		false,
-		"Scaffold password lifecycle with required delivery/limit/ingress seams (saved in TOML)",
+		"Scaffold password lifecycle with required delivery/limit/ingress "+
+			"seams (saved in TOML)",
 	)
 	flags.BoolVar(
 		&multi,

@@ -14,9 +14,10 @@ func frontendThemeCommand(options Options) *cobra.Command {
 	var check bool
 
 	command := &cobra.Command{
-		Use:   "theme",
-		Short: "Compile pluto.toml theme settings without modifying authored CSS",
-		Args:  cobra.NoArgs,
+		Use: "theme",
+		Short: "Compile pluto.toml theme settings without modifying authored " +
+			"CSS",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root, m, err := project.Discover(options.Directory)
 			if err != nil {
@@ -41,7 +42,12 @@ func frontendThemeCommand(options Options) *cobra.Command {
 		},
 	}
 	command.Flags().
-		BoolVar(&check, "check", false, "Check generated theme freshness without writes")
+		BoolVar(
+			&check,
+			"check",
+			false,
+			"Check generated theme freshness without writes",
+		)
 
 	return command
 }

@@ -32,13 +32,16 @@ func addStateCommand(options Options) *cobra.Command {
 			}
 
 			// Read-only module resolution supports newer Core releases too. It
-			// cannot silently update the application's module or checksum files.
+			// cannot silently update the application's module or checksum
+			// files.
 			if err := project.Run(cmd.Context(), root, io.Discard,
 				cmd.ErrOrStderr(), "go", "list", "-mod=readonly",
 				"github.com/plutoframework/pluto-core/state",
 			); err != nil {
 				return fmt.Errorf(
-					"state requires Pluto Core v0.4.0 or newer; upgrade with go get github.com/plutoframework/pluto-core@%s: %w",
+					"state requires Pluto Core v0.4.0 or newer; upgrade with "+
+						"go get github.com/plutoframework/pluto-core@%s: "+
+						"%w",
 					project.CoreVersion,
 					err,
 				)
@@ -55,7 +58,10 @@ func addStateCommand(options Options) *cobra.Command {
 
 			if !dry {
 				cmd.Println(
-					"Added authored lifecycle rules. Inject into operations; retain authorization, tenant scope and transactional version checks. Run pluto fmt and pluto vet.",
+					"Added authored lifecycle rules. Inject into operations; " +
+						"retain authorization, tenant scope and " +
+						"transactional version checks. Run pluto fmt and " +
+						"pluto vet.",
 				)
 			}
 

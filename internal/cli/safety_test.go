@@ -15,7 +15,17 @@ func TestInitPreflight(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"bad-name", []string{"--name", "../bad", "--module", "example.com/demo", "--env-prefix", "DEMO_"}},
+		{
+			"bad-name",
+			[]string{
+				"--name",
+				"../bad",
+				"--module",
+				"example.com/demo",
+				"--env-prefix",
+				"DEMO_",
+			},
+		},
 		{"bad-module", []string{"--module", "x;evil"}},
 		{"bad-prefix", []string{"--env-prefix", "mixed_"}},
 		{"double-prefix", []string{"--env-prefix", "BAD__"}},

@@ -22,10 +22,12 @@ func addCommand(options Options) *cobra.Command {
 	)
 
 	command := &cobra.Command{
-		Use:     "endpoint GROUP ACTION",
-		Short:   "Add an endpoint, models, operation, HTTP adapter and tests",
-		Example: "  pluto add endpoint widgets Create --method POST --path /api/widgets --name 'Create widget' --description 'Create an authorized widget.'",
-		Args:    cobra.ExactArgs(2),
+		Use:   "endpoint GROUP ACTION",
+		Short: "Add an endpoint, models, operation, HTTP adapter and tests",
+		Example: "  pluto add endpoint widgets Create --method POST --path /" +
+			"api/widgets --name 'Create widget' --description 'Create an " +
+			"authorized widget.'",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, m, err := project.Discover(options.Directory)
 			if err != nil {
@@ -51,6 +53,27 @@ func addCommand(options Options) *cobra.Command {
 					endpoint.Action == "List"
 			}
 
+			operation, created, err := ensureEntryOperation(
+				&m,
+				endpoint.Operation,
+				endpoint.Group,
+				endpoint.Action,
+				endpoint.Permission,
+				endpoint.Method != "GET" && endpoint.Method != "HEAD" &&
+					endpoint.Method != "OPTIONS",
+				endpoint.Public,
+				endpoint.Collection,
+				endpoint.Idempotency,
+			)
+			if err != nil {
+				return err
+			}
+
+			endpoint.Operation = operation.ID()
+			endpoint.Permission = operation.Permission
+			endpoint.Public = operation.Public
+			endpoint.Collection = operation.Collection
+
 			m.Endpoints = append(
 				append([]project.Endpoint(nil), m.Endpoints...),
 				endpoint,
@@ -71,6 +94,17 @@ func addCommand(options Options) *cobra.Command {
 
 			for path, data := range authored {
 				files[path] = data
+			}
+
+			if created {
+				operationFiles, err := project.OperationFiles(m, operation)
+				if err != nil {
+					return err
+				}
+
+				for path, source := range operationFiles {
+					files[path] = source
+				}
 			}
 
 			previous, err := project.Managed(old)
@@ -113,13 +147,15 @@ func addCommand(options Options) *cobra.Command {
 				"./cmd/openapi",
 			); err != nil {
 				return fmt.Errorf(
-					"endpoint written; OpenAPI regeneration failed: %w; repair and run pluto openapi",
+					"endpoint written; OpenAPI regeneration failed: %w; "+
+						"repair and run pluto openapi",
 					err,
 				)
 			}
 
 			cmd.Printf(
-				"Added %s.%s; operation intentionally returns not implemented. Run pluto fmt and pluto vet.\n",
+				"Added %s.%s; operation intentionally returns not "+
+					"implemented. Run pluto fmt and pluto vet.\n",
 				endpoint.Group,
 				endpoint.Action,
 			)
@@ -128,17 +164,26 @@ func addCommand(options Options) *cobra.Command {
 		},
 	}
 	flags := command.Flags()
+	flags.StringVar(
+		&endpoint.ResourceSource,
+		"resource-source",
+		"",
+		"Candidate resource binding: body, path:name, query:name or "+
+			"collection",
+	)
 	flags.BoolVar(
 		&endpoint.Collection,
 		"collection",
 		false,
-		"Paginated collection (defaults on for GET List; use --collection=false for details)",
+		"Paginated collection (defaults on for GET List; use "+
+			"--collection=false for details)",
 	)
 	flags.StringVar(
 		&endpoint.Idempotency,
 		"idempotency",
 		"auto",
-		"auto requires keys on authenticated business writes; exempt for sensitive/streaming routes",
+		"auto requires keys on authenticated business writes; exempt for "+
+			"sensitive/streaming routes",
 	)
 	flags.StringVar(
 		&endpoint.Method,
@@ -171,6 +216,12 @@ func addCommand(options Options) *cobra.Command {
 		"Explicitly allow unauthenticated calls (single tenancy only)",
 	)
 	flags.StringVar(
+		&endpoint.Operation,
+		"operation",
+		"",
+		"Reference a declared operation instead of creating one",
+	)
+	flags.StringVar(
 		&endpoint.Permission,
 		"permission",
 		"",
@@ -195,6 +246,8 @@ func addCommand(options Options) *cobra.Command {
 		"Preflight and list files without writing",
 	)
 	add.AddCommand(command)
+	add.AddCommand(addOperationCommand(options))
+	add.AddCommand(addBlueprintCommand(options))
 	add.AddCommand(addJobCommand(options))
 	add.AddCommand(addAgentCommand(options))
 	add.AddCommand(addStateCommand(options))

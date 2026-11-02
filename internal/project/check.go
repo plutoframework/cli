@@ -39,7 +39,12 @@ func Run(
 func linter(ctx context.Context) (string, error) {
 	path, err := exec.LookPath("golangci-lint")
 	if err == nil {
-		data, versionErr := exec.CommandContext(ctx, path, "version", "--short").
+		data, versionErr := exec.CommandContext(
+			ctx,
+			path,
+			"version",
+			"--short",
+		).
 			Output()
 		if versionErr == nil && strings.TrimSpace(string(data)) == LintVersion {
 			return path, nil
@@ -47,7 +52,9 @@ func linter(ctx context.Context) (string, error) {
 	}
 
 	return "", fmt.Errorf(
-		"golangci-lint %s is required on PATH; install from https://github.com/golangci/golangci-lint/releases/tag/v%s or use mise exec golangci-lint@%s -- pluto fmt/vet",
+		"golangci-lint %s is required on PATH; install from https://"+
+			"github.com/golangci/golangci-lint/releases/tag/v%s or use "+
+			"mise exec golangci-lint@%s -- pluto fmt/vet",
 		LintVersion,
 		LintVersion,
 		LintVersion,
@@ -62,7 +69,14 @@ func Format(ctx context.Context, root string, out, errOut io.Writer) error {
 
 	for _, args := range [][]string{
 		{"fmt", "./cmd/...", "./internal/..."},
-		{"run", "--enable-only", "wsl_v5", "--fix", "./cmd/...", "./internal/..."},
+		{
+			"run",
+			"--enable-only",
+			"wsl_v5",
+			"--fix",
+			"./cmd/...",
+			"./internal/...",
+		},
 		{"fmt", "./cmd/...", "./internal/..."},
 	} {
 		if err := Run(ctx, root, out, errOut, tool, args...); err != nil {
@@ -81,6 +95,19 @@ func Vet(
 ) error {
 	if err := Contracts(root, m); err != nil {
 		return err
+	}
+
+	for _, diagnostic := range InspectArchitecture(root).Diagnostics {
+		if diagnostic.ID == "ARCH401" {
+			return fmt.Errorf(
+				"architecture: %s:%d: %s: %s; %s",
+				diagnostic.File,
+				diagnostic.Line,
+				diagnostic.ID,
+				diagnostic.Message,
+				diagnostic.Repair,
+			)
+		}
 	}
 
 	tool, err := linter(ctx)
@@ -173,7 +200,8 @@ func Contracts(root string, m Manifest) error {
 
 		if !Equivalent(current, managed[path]) {
 			return fmt.Errorf(
-				"generated contract differs: %s; restore generated content or intentionally migrate metadata",
+				"generated contract differs: %s; restore generated content "+
+					"or intentionally migrate metadata",
 				path,
 			)
 		}
@@ -297,9 +325,15 @@ func Contracts(root string, m Manifest) error {
 		kind := ""
 
 		switch {
-		case relative == "internal/operations" || strings.HasPrefix(relative, "internal/operations/"):
+		case relative == "internal/operations" || strings.HasPrefix(
+			relative,
+			"internal/operations/",
+		):
 			kind = "operations"
-		case relative == "internal/handlers" || strings.HasPrefix(relative, "internal/handlers/"):
+		case relative == "internal/handlers" || strings.HasPrefix(
+			relative,
+			"internal/handlers/",
+		):
 			kind = "handlers"
 		case relative == "internal/paths":
 			kind = "paths"
@@ -337,9 +371,13 @@ func Contracts(root string, m Manifest) error {
 				if kind == "operations" && (database || http) ||
 					kind == "handlers" && database ||
 					kind == "paths" &&
-						(http || database || strings.HasPrefix(local, "internal/operations")) {
+						(http || database || strings.HasPrefix(
+							local,
+							"internal/operations",
+						)) {
 					return fmt.Errorf(
-						"architecture: %s reaches forbidden import %s through %s",
+						"architecture: %s reaches forbidden import %s "+
+							"through %s",
 						start,
 						dependency,
 						current,
@@ -357,6 +395,32 @@ func Contracts(root string, m Manifest) error {
 		}
 		if err := visit(start); err != nil {
 			return err
+		}
+	}
+
+	// Dependency rules are shared with the standalone read-only inspector.
+	// Manifest and classification migration diagnostics remain inspection-only.
+	for _, diagnostic := range InspectArchitecture(root).Diagnostics {
+		if diagnostic.ID == "ARCH101" ||
+			strings.HasPrefix(diagnostic.ID, "ARCH2") ||
+			strings.HasPrefix(
+				diagnostic.ID,
+				"ARCH30",
+			) || strings.HasPrefix(
+			diagnostic.ID,
+			"ARCH50",
+		) || strings.HasPrefix(
+			diagnostic.ID,
+			"ARCH6",
+		) {
+			return fmt.Errorf(
+				"architecture: %s:%d: %s: %s; %s",
+				diagnostic.File,
+				diagnostic.Line,
+				diagnostic.ID,
+				diagnostic.Message,
+				diagnostic.Repair,
+			)
 		}
 	}
 

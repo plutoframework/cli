@@ -146,7 +146,8 @@ func registryEntries(
 
 				entry.source[file.Source] = contents
 
-				// Delimited digest input includes metadata, paths and complete source bytes.
+				// Delimited digest input includes metadata, paths and complete
+				// source bytes.
 				_, _ = fmt.Fprintf(
 					hash,
 					"\n%d:%s:%d:",
@@ -221,7 +222,8 @@ func registryRender(source []byte, data any) ([]byte, error) {
 	}
 
 	if out.Len() > 256*1024 || bytes.Count(out.Bytes(), []byte("\n")) > 1000 {
-		return nil, fmt.Errorf("rendered registry file exceeds size/line limit")
+		return nil, fmt.Errorf("rendered registry file exceeds size/line " +
+			"limit")
 	}
 
 	return out.Bytes(), nil
@@ -233,7 +235,8 @@ func AddRegistry(
 	name, reference string,
 ) (Plan, error) {
 	if !project.FrontendName(name) {
-		return Plan{}, fmt.Errorf("component name must be lowercase kebab-case")
+		return Plan{}, fmt.Errorf("component name must be lowercase " +
+			"kebab-case")
 	}
 
 	if err := Contracts(root, m); err != nil {
@@ -385,7 +388,8 @@ func AddRegistry(
 		return Plan{}, err
 	}
 
-	// Reject conflicts with both framework pins and opposite dependency sections.
+	// Reject conflicts with both framework pins and opposite dependency
+	// sections.
 	baseline := p.Manifest
 	baselineFrontend := *baseline.Frontend
 
@@ -401,13 +405,17 @@ func AddRegistry(
 	defaults := dependencies(baseline)
 
 	for _, c := range f.Components {
-		for section, values := range map[string]map[string]string{"dependencies": c.Packages, "devDependencies": c.DevPackages} {
+		for section, values := range map[string]map[string]string{
+			"dependencies":    c.Packages,
+			"devDependencies": c.DevPackages,
+		} {
 			for pkg, pin := range values {
 				for other, pins := range defaults {
 					if existing, exists := pins[pkg]; exists &&
 						(existing != pin || section != other) {
 						return Plan{}, fmt.Errorf(
-							"registry dependency conflicts with existing pin: %s",
+							"registry dependency conflicts with existing "+
+								"pin: %s",
 							pkg,
 						)
 					}

@@ -15,7 +15,14 @@ rbac "github.com/plutoframework/pluto-rbac"
 
 func TestDefaultDenyAndLiveness(t *testing.T) {
 	cfg, err := config.LoadFrom(
-		func(key string) (string, bool) { {{if .LocalCredentials}}return "postgres://localhost/test",key==config.Prefix+"DATABASE_URL"{{else}}return "",false{{end}} },
+		func(key string) (string, bool) {
+{{if .LocalCredentials}}
+			return "postgres://localhost/test",
+			key == config.Prefix+"DATABASE_URL"
+{{else}}
+return "", false
+{{end}}
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -23,9 +30,9 @@ func TestDefaultDenyAndLiveness(t *testing.T) {
 
 	router := New(
 		cfg,
-		transport.Authentication{Verifier:transport.DenyAll{}},
+		transport.Authentication{Verifier: transport.DenyAll{}},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
- testPolicy(t),
+		testPolicy(t),
 	)
 
 	for _, test := range []struct {
@@ -62,7 +69,14 @@ func TestDefaultDenyAndLiveness(t *testing.T) {
 
 func TestSecurityHeadersOnPanic(t *testing.T) {
 	cfg, err := config.LoadFrom(
-		func(key string) (string, bool) { {{if .LocalCredentials}}return "postgres://localhost/test",key==config.Prefix+"DATABASE_URL"{{else}}return "",false{{end}} },
+		func(key string) (string, bool) {
+{{if .LocalCredentials}}
+			return "postgres://localhost/test",
+			key == config.Prefix+"DATABASE_URL"
+{{else}}
+return "", false
+{{end}}
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -72,10 +86,11 @@ func TestSecurityHeadersOnPanic(t *testing.T) {
 		cfg,
 		transport.Authentication{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
- testPolicy(t),
+		testPolicy(t),
 	)
 	request := httptest.NewRequest("GET", "/api/features", nil)
 	request.Header.Set("Authorization", "Bearer triggers-nil-auth-panic")
+
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
@@ -88,8 +103,12 @@ func TestSecurityHeadersOnPanic(t *testing.T) {
 }
 
 func testPolicy(t testing.TB) *rbac.Policy {
-    t.Helper()
-    policy, err := access.NewPolicy()
-    if err != nil { t.Fatal(err) }
-    return policy
+	t.Helper()
+
+	policy, err := access.NewPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return policy
 }

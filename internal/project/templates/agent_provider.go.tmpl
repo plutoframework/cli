@@ -1,0 +1,39 @@
+package app
+
+import (
+	agent "github.com/plutoframework/pluto-agent"
+
+{{if eq .AgentProvider "openai"}}
+
+	"github.com/plutoframework/pluto-agent/providers/openai"
+{{else}}
+"github.com/plutoframework/pluto-agent/providers/scripted"
+{{end}}
+)
+
+// New{{.Symbol}}Provider is explicit authored provider composition, never a
+// tool
+// business implementation. Credentials are configuration, never model input.
+func New{{.Symbol}}Provider(
+	lookup func(string) (string, bool),
+) (agent.Provider, error) {
+
+{{if eq .AgentProvider "openai"}}
+	key, _ := lookup("{{.Prefix}}AGENT_OPENAI_API_KEY")
+	model, _ := lookup("{{.Prefix}}AGENT_MODEL")
+
+	return openai.New(openai.Config{APIKey: key, Model: model})
+
+{{else}}
+_ = lookup
+
+	return scripted.New(
+		scripted.Calls(
+			agent.ToolCall{
+				ID:        "selected",
+				Name:      "read_selected_resource",
+				Arguments: `{}`,
+			}),
+		scripted.Final(`{"value":"Scripted result."}`)), nil
+{{end}}
+}

@@ -72,8 +72,10 @@ func Equivalent(a, b []byte) bool {
 }
 
 // Apply checks all known conflicts before writing. Replacement is allowed only
-// for files whose old generated contract still matches. On ordinary write errors
-// it restores replaced files and removes created files; no user hook is executed.
+// for files whose old generated contract still matches. On ordinary write
+// errors
+// it restores replaced files and removes created files; no user hook is
+// executed.
 func Apply(
 	root string,
 	files, previous map[string][]byte,
@@ -91,7 +93,8 @@ func Apply(
 	for _, name := range names {
 		if strings.Count(string(files[name]), "\n") > 1000 {
 			return nil, fmt.Errorf(
-				"generated file %s exceeds 1000-line ceiling; split this group before adding endpoints",
+				"generated file %s exceeds 1000-line ceiling; split this "+
+					"group before adding endpoints",
 				name,
 			)
 		}
@@ -106,7 +109,13 @@ func Apply(
 			old, owned := previous[name]
 			if !owned ||
 				!bytes.Equal(data, old) &&
-					(!strings.HasSuffix(name, ".go") || !Equivalent(data, old)) {
+					(!strings.HasSuffix(
+						name,
+						".go",
+					) || !Equivalent(
+						data,
+						old,
+					)) {
 				return nil, fmt.Errorf(
 					"refusing to overwrite %s (existing or modified)",
 					path,

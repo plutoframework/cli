@@ -7,9 +7,12 @@ import (
 )
 
 var (
-	ErrNotImplemented = errors.New("operation not implemented")
+	ErrInvalidInput    = errors.New("invalid operation input")
+	ErrConflict        = errors.New("operation conflict")
+	ErrExportLimit     = errors.New("export bound exceeded")
+	ErrNotImplemented  = errors.New("operation not implemented")
 	ErrUnauthenticated = rbac.ErrUnauthenticated
-	ErrForbidden = rbac.ErrForbidden
+	ErrForbidden       = rbac.ErrForbidden
 )
 
 // Principal comes only from the injected trusted authenticator. Roles must be
@@ -17,7 +20,9 @@ var (
 // Never copy identity, tenant or role claims from unverified request input.
 type Principal struct {
 	ActorID string
- {{if .Multi}}TenantID string{{end}}
+	{{if .Multi}}
+
+	TenantID string{{end}}
 
 	Roles []rbac.RoleID
 }

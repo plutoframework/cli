@@ -16,6 +16,7 @@ func TestLifecycle(t *testing.T) {
 	}
 
 	owner := lifecycle.Facts{ActorID: "owner", OwnerID: "owner"}
+
 	next, err := machine.Next(lifecycle.Draft, lifecycle.Submit, owner)
 	if err != nil || next != lifecycle.Submitted {
 		t.Fatalf("owner submit: %s %v", next, err)
@@ -27,7 +28,8 @@ func TestLifecycle(t *testing.T) {
 		{ActorID: "owner"},
 	} {
 		next, err := machine.Next(lifecycle.Draft, lifecycle.Submit, facts)
-		if next != lifecycle.Draft || !errors.Is(err, lifecycle.ErrOwnerRequired) ||
+		if next != lifecycle.Draft ||
+			!errors.Is(err, lifecycle.ErrOwnerRequired) ||
 			!errors.Is(err, state.ErrGuard) {
 			t.Fatalf("invalid ownership advanced: %s %v", next, err)
 		}
@@ -53,6 +55,7 @@ func FuzzLifecycle(f *testing.F) {
 			lifecycle.Event(event),
 			lifecycle.Facts{ActorID: actor, OwnerID: owner},
 		)
+
 		allowed := current == "draft" && event == "submit" &&
 			actor != "" && actor == owner
 		if allowed {

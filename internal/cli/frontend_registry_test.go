@@ -138,7 +138,17 @@ func TestFrontendRegistry(t *testing.T) {
 }
 
 func TestFrontendRegistryPreflight(t *testing.T) {
-	for _, scenario := range []string{"source-traversal", "target-traversal", "symlink", "profile", "cycle", "package-pin", "framework-pin", "hook", "late-conflict"} {
+	for _, scenario := range []string{
+		"source-traversal",
+		"target-traversal",
+		"symlink",
+		"profile",
+		"cycle",
+		"package-pin",
+		"framework-pin",
+		"hook",
+		"late-conflict",
+	} {
 		t.Run(scenario, func(t *testing.T) {
 			root := registryApp(t)
 			file := filepath.Join(root, ".pluto/components/registry.toml")

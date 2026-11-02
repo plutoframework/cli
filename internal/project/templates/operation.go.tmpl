@@ -5,33 +5,20 @@ import (
 
 	"{{.Module}}/internal/domain"
 	"{{.Module}}/internal/models/{{.Group}}"
-{{if .Permission}}	"{{.Module}}/internal/access"
-{{end}}
-	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-type {{.Action}} struct {
-	policy *rbac.Policy
-}
+// {{.Action}}Dependencies holds consumer-owned ports. Construct concrete
+// adapters
+// in composition and inject them with New{{.Action}}WithDependencies.
+type {{.Action}}Dependencies struct{}
 
-func New{{.Action}}(policy *rbac.Policy) *{{.Action}} {
-	return &{{.Action}}{policy: policy}
-}
-
-// Execute must enforce resource authorization and tenant-scoped repositories.
-// A route permission is a capability check, not resource authorization.
-func (operation *{{.Action}}) Execute(
+// execute is authored business orchestration behind the managed Execute gate.
+// Keep resource authorization and scoped persistence here. It is never an entry
+// point: production callers must use Execute, including workers and tools.
+func (operation *{{.Action}}) execute(
 	_ context.Context,
-	principal domain.Principal,
+	_ domain.Principal,
 	_ {{.Group}}.{{.Action}}Request,
 ) ({{.Group}}.{{.Action}}Data, error) {
-{{if not .Public}}	if !principal.Verified() {
-		return {{.Group}}.{{.Action}}Data{}, domain.ErrUnauthenticated
-	}
-{{end}}
-{{if .Permission}}	if !principal.Can(operation.policy, access.{{.Symbol}}Permission) {
-		return {{.Group}}.{{.Action}}Data{}, domain.ErrForbidden
-	}
-{{end}}
 	return {{.Group}}.{{.Action}}Data{}, domain.ErrNotImplemented
 }

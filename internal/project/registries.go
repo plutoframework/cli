@@ -19,7 +19,9 @@ var (
 	registryDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 )
 
-func FrontendName(value string) bool { return appName.MatchString(value) }
+func FrontendName(value string) bool {
+	return appName.MatchString(value)
+}
 
 func RegistryPath(value string) bool {
 	return value != "" && !strings.ContainsAny(value, "\\\x00\r\n") &&
@@ -39,7 +41,8 @@ func (f Frontend) ValidateRegistries() error {
 		if !FrontendName(name) || name == "pluto" ||
 			!RegistryPath(registry.Path) {
 			return fmt.Errorf(
-				"registry requires a kebab-case namespace and a clean project-relative path",
+				"registry requires a kebab-case namespace and a clean " +
+					"project-relative path",
 			)
 		}
 	}
@@ -63,11 +66,19 @@ func (f Frontend) ValidateRegistries() error {
 				c.Kind != "registry" {
 				return fmt.Errorf("invalid registry component provenance")
 			}
-		} else if c.Kind == "registry" || c.Digest != "" || len(c.Packages)+len(c.DevPackages) > 0 {
-			return fmt.Errorf("custom dependencies require registry provenance")
+		} else if c.Kind == "registry" || c.Digest != "" || len(
+			c.Packages,
+		)+len(
+			c.DevPackages,
+		) > 0 {
+			return fmt.Errorf("custom dependencies require registry " +
+				"provenance")
 		}
 
-		for section, values := range map[string]map[string]string{"dependencies": c.Packages, "devDependencies": c.DevPackages} {
+		for section, values := range map[string]map[string]string{
+			"dependencies":    c.Packages,
+			"devDependencies": c.DevPackages,
+		} {
 			for name, pin := range values {
 				if !PackageDependency(name, pin) {
 					return fmt.Errorf(

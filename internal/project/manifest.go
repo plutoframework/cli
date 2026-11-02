@@ -13,18 +13,24 @@ import (
 	rbac "github.com/plutoframework/pluto-rbac"
 )
 
-const SchemaVersion = 8
+const SchemaVersion = 10
 
 type Manifest struct {
-	Agents        []Agent      `toml:"agents,omitempty"`
-	SchemaVersion int          `toml:"schema_version"`
-	Project       Project      `toml:"project"`
-	Capabilities  Capabilities `toml:"capabilities"`
-	Database      Database     `toml:"database"`
-	Development   Development  `toml:"development"`
-	Endpoints     []Endpoint   `toml:"endpoints,omitempty"`
-	Jobs          []Job        `toml:"jobs,omitempty"`
-	Frontend      *Frontend    `toml:"frontend,omitempty"`
+	Boundary           BoundaryProfile     `toml:"boundary"`
+	Resources          []ResourceContract  `toml:"resources,omitempty"`
+	OperationContracts []OperationContract `toml:"operation_contracts,omitempty"`
+	Effects            []EffectContract    `toml:"effects,omitempty"`
+	Roles              []RoleContract      `toml:"roles,omitempty"`
+	Operations         []Operation         `toml:"operations,omitempty"`
+	Agents             []Agent             `toml:"agents,omitempty"`
+	SchemaVersion      int                 `toml:"schema_version"`
+	Project            Project             `toml:"project"`
+	Capabilities       Capabilities        `toml:"capabilities"`
+	Database           Database            `toml:"database"`
+	Development        Development         `toml:"development"`
+	Endpoints          []Endpoint          `toml:"endpoints,omitempty"`
+	Jobs               []Job               `toml:"jobs,omitempty"`
+	Frontend           *Frontend           `toml:"frontend,omitempty"`
 }
 
 type Project struct {
@@ -49,18 +55,20 @@ type Development struct {
 	Docker bool `toml:"docker"`
 }
 type Endpoint struct {
-	Collection    bool   `toml:"collection"`
-	Idempotency   string `toml:"idempotency"`
-	Group         string `toml:"group"`
-	Action        string `toml:"action"`
-	Name          string `toml:"name"`
-	Description   string `toml:"description"`
-	Method        string `toml:"method"`
-	Path          string `toml:"path"`
-	Public        bool   `toml:"public"`
-	Permission    string `toml:"permission,omitempty"`
-	Feature       string `toml:"feature,omitempty"`
-	ClientVisible bool   `toml:"feature_client_visible"`
+	ResourceSource string `toml:"resource_source,omitempty"`
+	Operation      string `toml:"operation"`
+	Collection     bool   `toml:"collection"`
+	Idempotency    string `toml:"idempotency"`
+	Group          string `toml:"group"`
+	Action         string `toml:"action"`
+	Name           string `toml:"name"`
+	Description    string `toml:"description"`
+	Method         string `toml:"method"`
+	Path           string `toml:"path"`
+	Public         bool   `toml:"public"`
+	Permission     string `toml:"permission,omitempty"`
+	Feature        string `toml:"feature,omitempty"`
+	ClientVisible  bool   `toml:"feature_client_visible"`
 }
 
 var (
@@ -78,14 +86,21 @@ var (
 )
 
 func (m Manifest) Validate() error {
+	if err := ValidateBoundaryProfile(
+		m.Boundary,
+		m.Capabilities.Tenancy,
+	); err != nil {
+		return err
+	}
+
 	if m.Capabilities.OIDC && !m.Capabilities.LocalCredentials {
 		return fmt.Errorf(
-			"OIDC requires --local-credentials for the shared account/session profile",
+			"OIDC requires --local-credentials for the shared account/" +
+				"session profile",
 		)
 	}
 
-	if m.SchemaVersion != SchemaVersion &&
-		(m.SchemaVersion != 7 || len(m.Agents) != 0) {
+	if m.SchemaVersion != SchemaVersion {
 		return fmt.Errorf(
 			"unsupported schema_version %d (need %d); no implicit migration",
 			m.SchemaVersion,
@@ -106,7 +121,8 @@ func (m Manifest) Validate() error {
 
 	if !prefixName.MatchString(m.Project.EnvPrefix) {
 		return fmt.Errorf(
-			"env_prefix must be uppercase with one trailing underscore (MY_API_)",
+			"env_prefix must be uppercase with one trailing underscore (MY_" +
+				"API_)",
 		)
 	}
 
@@ -122,6 +138,14 @@ func (m Manifest) Validate() error {
 
 	if m.Database.Engine != "postgres" || m.Database.Queries != "sqlc" {
 		return fmt.Errorf("database requires engine=postgres and queries=sqlc")
+	}
+
+	if err := ValidateManifestContracts(m); err != nil {
+		return err
+	}
+
+	if err := validateOperations(m); err != nil {
+		return err
 	}
 
 	if err := ValidateAgents(m.Agents); err != nil {
@@ -141,7 +165,12 @@ func (m Manifest) Validate() error {
 	routeNames := map[string]string{}
 	envKeys := map[string]string{}
 
-	for _, e := range m.Endpoints {
+	for _, entry := range m.Endpoints {
+		e, err := m.OperationEndpoint(entry)
+		if err != nil {
+			return err
+		}
+
 		if err := e.Validate(m.Capabilities.Tenancy == "multi"); err != nil {
 			return err
 		}
@@ -150,7 +179,10 @@ func (m Manifest) Validate() error {
 
 		route := e.Method + " " + canonicalRoute(e.Path)
 		if seenID[id] || seenRoute[route] || e.Path == "/api/features" ||
-			e.Path == "/healthz" || e.Path == "/auth" || strings.HasPrefix(e.Path, "/auth/") {
+			e.Path == "/healthz" || e.Path == "/auth" || strings.HasPrefix(
+			e.Path,
+			"/auth/",
+		) {
 			return fmt.Errorf("duplicate/reserved endpoint %s (%s)", id, route)
 		}
 
@@ -221,11 +253,17 @@ func (e Endpoint) Validate(multi bool) error {
 	if e.Idempotency == "required" &&
 		(e.Public || !e.isWrite()) {
 		return fmt.Errorf(
-			"required idempotency needs an authenticated business write; public writes require explicit app policy",
+			"required idempotency needs an authenticated business write; " +
+				"public writes require explicit app policy",
 		)
 	}
 
-	reserved := " break default func interface select case defer go map struct chan else goto package switch const fallthrough if range type continue for import return var init main internal paths app operations models features config domain transport context http strings testing io slog chi errors time fmt bytes json reflect "
+	reserved := " break default func interface select case defer go map " +
+		"struct chan else goto package switch const fallthrough if range " +
+		"type continue for import return var init main internal paths " +
+		"app operations models features config domain transport context " +
+		"http strings testing io slog chi errors time fmt bytes json " +
+		"reflect "
 	if !packageName.MatchString(e.Group) ||
 		strings.Contains(reserved, " "+e.Group+" ") {
 		return fmt.Errorf(
@@ -240,7 +278,8 @@ func (e Endpoint) Validate(multi bool) error {
 	if e.Name == "" || e.Description == "" || len(e.Name) > 200 ||
 		len(e.Description) > 2000 {
 		return fmt.Errorf(
-			"endpoint requires name (<=200 bytes) and description (<=2000 bytes)",
+			"endpoint requires name (<=200 bytes) and description (<=2000 " +
+				"bytes)",
 		)
 	}
 
@@ -277,8 +316,14 @@ func (e Endpoint) Validate(multi bool) error {
 
 	if e.Public && (e.Permission != "" || multi) {
 		return fmt.Errorf(
-			"public endpoints cannot require permissions or multi-tenant scope",
+			"public endpoints cannot require permissions or multi-tenant " +
+				"scope",
 		)
+	}
+
+	if !e.Public && e.isWrite() && e.Permission == "" {
+		return fmt.Errorf("authenticated writes require an explicit " +
+			"permission")
 	}
 
 	if e.Permission != "" {
@@ -367,7 +412,22 @@ func Decode(data []byte) (Manifest, error) {
 		return m, fmt.Errorf("pluto.toml: %w", err)
 	}
 
-	return m, m.Validate()
+	if err := m.Validate(); err != nil {
+		return m, err
+	}
+
+	for i, entry := range m.Endpoints {
+		resolved, err := m.OperationEndpoint(entry)
+		if err != nil {
+			return m, err
+		}
+
+		m.Endpoints[i] = resolved
+	}
+
+	return m, nil
 }
 
-func Encode(m Manifest) ([]byte, error) { return toml.Marshal(m) }
+func Encode(m Manifest) ([]byte, error) {
+	return toml.Marshal(m)
+}

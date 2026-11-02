@@ -39,7 +39,8 @@ func (m Manifest) ValidateFrontend() error {
 
 	if !appName.MatchString(f.Directory) {
 		return fmt.Errorf(
-			"frontend directory must be a single lowercase kebab-case directory",
+			"frontend directory must be a single lowercase kebab-case " +
+				"directory",
 		)
 	}
 
@@ -63,7 +64,9 @@ func (m Manifest) ValidateFrontend() error {
 
 	if f.Auth && !m.Capabilities.LocalCredentials {
 		return fmt.Errorf(
-			"frontend auth requires a backend initialized with --local-credentials; frontend generation never enables credential issuance",
+			"frontend auth requires a backend initialized with " +
+				"--local-credentials; frontend generation never enables " +
+				"credential issuance",
 		)
 	}
 

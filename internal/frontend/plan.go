@@ -80,7 +80,8 @@ func Init(
 ) (Plan, error) {
 	if m.Frontend != nil {
 		return Plan{}, fmt.Errorf(
-			"frontend already initialized; changing UI requires explicit migration",
+			"frontend already initialized; changing UI requires explicit " +
+				"migration",
 		)
 	}
 
@@ -154,7 +155,8 @@ func Add(root string, m project.Manifest, name, kind string) (Plan, error) {
 	if kind == "auth" {
 		if f.Auth {
 			return Plan{}, fmt.Errorf(
-				"frontend auth already installed; authored files are never overwritten",
+				"frontend auth already installed; authored files are never " +
+					"overwritten",
 			)
 		}
 
@@ -191,17 +193,34 @@ func Add(root string, m project.Manifest, name, kind string) (Plan, error) {
 			return Plan{}, err
 		}
 
-		p.Files[filepath.Join(f.Directory, "src/features", name, "components", data.Symbol+".tsx")] = source
+		p.Files[filepath.Join(
+			f.Directory,
+			"src/features",
+			name,
+			"components",
+			data.Symbol+".tsx",
+		)] = source
 		if kind == "form" {
 			test, err := render("component.test.tsx.tmpl", data)
 			if err != nil {
 				return Plan{}, err
 			}
 
-			p.Files[filepath.Join(f.Directory, "src/features", name, "components", data.Symbol+".test.tsx")] = test
+			p.Files[filepath.Join(
+				f.Directory,
+				"src/features",
+				name,
+				"components",
+				data.Symbol+".test.tsx",
+			)] = test
 		}
 
-		p.Files[filepath.Join(f.Directory, "src/features", name, "public.ts")] = []byte(
+		p.Files[filepath.Join(
+			f.Directory,
+			"src/features",
+			name,
+			"public.ts",
+		)] = []byte(
 			fmt.Sprintf(
 				"export { %s } from \"./components/%s\";\n",
 				data.Symbol,
@@ -252,7 +271,13 @@ func (p *Plan) addTemplate(name string) error {
 		return err
 	}
 
-	p.Files[filepath.Join(p.Manifest.Frontend.Directory, strings.TrimSuffix(name, ".tmpl"))] = data
+	p.Files[filepath.Join(
+		p.Manifest.Frontend.Directory,
+		strings.TrimSuffix(
+			name,
+			".tmpl",
+		),
+	)] = data
 
 	return nil
 }

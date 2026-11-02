@@ -19,7 +19,7 @@ func TestAgentWizardUsesValidatedCommand(t *testing.T) {
 	}
 
 	args, err := model.build(values)
-	if err != nil || len(args) != 7 || args[1] != "agent" {
+	if err != nil || len(args) != 8 || args[1] != "agent" {
 		t.Fatalf("bad wizard command: %v %v", args, err)
 	}
 
