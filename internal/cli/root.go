@@ -105,6 +105,7 @@ func New(options Options) *cobra.Command {
 	)
 	root.AddCommand(architectureCommand(options))
 	root.AddCommand(initCommand(options))
+	root.AddCommand(factoryCommand(options))
 	root.AddCommand(addCommand(options))
 	root.AddCommand(
 		projectCommand(
