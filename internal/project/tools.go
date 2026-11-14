@@ -147,10 +147,15 @@ fnox.local.toml
 		m.Project.EnvPrefix,
 	))...)
 	if m.Capabilities.LocalCredentials {
+		seam := "cmd/api/credentials.go"
+		if m.Boundary.Mode == "candidate" {
+			seam = CandidateCredentialSeam
+		}
+
 		files[".env.example"] = append(files[".env.example"], []byte(
 			`# Local credentials require DATABASE_URL and `+
 				`explicit app-owned Sender,
-# shared AttemptLimiter and trusted-client Ingress in cmd/api/credentials.go.
+# shared AttemptLimiter and trusted-client Ingress in `+seam+`.
 # No credential defaults or delivery secrets are included.
 `,
 		)...)

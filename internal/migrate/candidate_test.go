@@ -223,12 +223,10 @@ func TestPublishedToCandidateBlockers(t *testing.T) {
 	credentials := publishedManifest("multi")
 	credentials.Capabilities.LocalCredentials = true
 	credentials.Capabilities.OIDC = true
-	assertBlocked(
+	assertIngressAccepted(
 		t,
 		publishedFixture(t, credentials),
 		Options{Sources: sources},
-		"pluto.toml:",
-		"rejects this identity ingress",
 	)
 
 	operations := publishedManifest("multi")
@@ -315,5 +313,22 @@ func assertBlocked(t *testing.T, root string, options Options, want ...string) {
 	if _, err := os.Stat(filepath.Join(root, "db/migrations/"+
 		"099_memberships.sql")); err == nil {
 		t.Fatal("blocked plan created candidate files")
+	}
+}
+
+// Candidate ingress now accepts local credentials and OIDC, so the step must
+// not report identity ingress as a blocker for them.
+func assertIngressAccepted(t *testing.T, root string, options Options) {
+	t.Helper()
+
+	plan, err := Build(root, ProfileCandidate, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, item := range plan.Manual {
+		if strings.Contains(item.String(), "identity ingress") {
+			t.Fatalf("identity ingress still blocks: %s", item)
+		}
 	}
 }

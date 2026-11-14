@@ -1,0 +1,28 @@
+package credentials
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/plutoframework/pluto-auth/methods/password"
+)
+
+// Integrations are the application-owned delivery and abuse controls required
+// by the managed local-credential lifecycle. They never issue sessions,
+// identities, memberships or roles; the managed runtime owns those contracts.
+// Sender must honor context deadlines and deliver only to fixed trusted
+// destinations. Ingress must bound trusted clients, concurrency and queueing
+// before decode/KDF work. Limiter must be shared across replicas.
+type Integrations struct {
+	Sender        password.Sender
+	Limiter       password.AttemptLimiter
+	Ingress       func(http.Handler) http.Handler
+	Policy        password.PasswordPolicy
+	DeliveryError func(context.Context, error)
+}
+
+// Shared lists managed capabilities an authored integration may compose. The
+// limiter is a replica-shared PostgreSQL window over hashed attempt keys.
+type Shared struct {
+	Limiter password.AttemptLimiter
+}

@@ -158,20 +158,6 @@ func TestManifestContractsRejectIndependentAuthorityDrift(t *testing.T) {
 				m.OperationContracts = m.OperationContracts[1:]
 			},
 		},
-		{
-			"unsupported credential ingress",
-			"session-only identity ingress",
-			func(m *Manifest) {
-				m.Capabilities.LocalCredentials = true
-			},
-		},
-		{
-			"unsupported OIDC ingress",
-			"session-only identity ingress",
-			func(m *Manifest) {
-				m.Capabilities.OIDC = true
-			},
-		},
 		{"orphan contract", "undeclared operation", func(m *Manifest) {
 			copy := m.OperationContracts[0]
 			copy.ID = "sales.Orphan"
@@ -399,6 +385,21 @@ func TestManifestContractsRejectIndependentAuthorityDrift(t *testing.T) {
 				t.Fatalf("expected %s rejection: %v", test.want, err)
 			}
 		})
+	}
+}
+
+// Local credentials and OIDC are managed candidate ingress: sessions come only
+// from the runtime's fenced manager, never from caller-supplied subjects.
+func TestManifestContractsAcceptManagedCredentialIngress(t *testing.T) {
+	for _, oidc := range []bool{false, true} {
+		m := manifestContractFixture(t)
+		m.Capabilities.LocalCredentials = true
+		m.Capabilities.OIDC = oidc
+
+		if err := ValidateManifestContracts(m); err != nil {
+			t.Fatalf("managed credential ingress rejected (oidc=%v): %v",
+				oidc, err)
+		}
 	}
 }
 

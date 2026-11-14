@@ -2,8 +2,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -295,7 +297,112 @@ func Document() ([]byte, error) {
 			},
 		},
 	}
-	data, err := json.MarshalIndent(document, "", "  ")
 
-	return append(data, '\n'), err
+	return encodeDocument(document)
+}
+
+// encodeDocument indents nested JSON but keeps objects and arrays that fit in
+// 80 columns on one line, so the reviewed artifact stays within file limits.
+// Keys are sorted, so output is deterministic and freshness checks stay exact.
+func encodeDocument(document any) ([]byte, error) {
+	data, err := json.Marshal(document)
+	if err != nil {
+		return nil, err
+	}
+
+	var tree any
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+
+	if err := decoder.Decode(&tree); err != nil {
+		return nil, err
+	}
+
+	var output bytes.Buffer
+	if err := writeJSON(&output, tree, 0, 0); err != nil {
+		return nil, err
+	}
+
+	output.WriteByte('\n')
+
+	return output.Bytes(), nil
+}
+
+func writeJSON(output *bytes.Buffer, value any, depth, prefix int) error {
+	inline, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	object, isObject := value.(map[string]any)
+	array, isArray := value.([]any)
+
+	if !isObject && !isArray || depth*2+prefix+len(inline)+1 <= 80 {
+		output.Write(inline)
+
+		return nil
+	}
+
+	indent := strings.Repeat("  ", depth+1)
+
+	if isArray {
+		output.WriteString("[\n")
+
+		for index, item := range array {
+			output.WriteString(indent)
+
+			if err := writeJSON(output, item, depth+1, 0); err != nil {
+				return err
+			}
+
+			if index < len(array)-1 {
+				output.WriteByte(',')
+			}
+
+			output.WriteByte('\n')
+		}
+
+		output.WriteString(strings.Repeat("  ", depth) + "]")
+
+		return nil
+	}
+
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+	output.WriteString("{\n")
+
+	for index, key := range keys {
+		name, err := json.Marshal(key)
+		if err != nil {
+			return err
+		}
+
+		output.WriteString(indent)
+		output.Write(name)
+		output.WriteString(": ")
+
+		if err := writeJSON(
+			output,
+			object[key],
+			depth+1,
+			len(name)+2,
+		); err != nil {
+			return err
+		}
+
+		if index < len(keys)-1 {
+			output.WriteByte(',')
+		}
+
+		output.WriteByte('\n')
+	}
+
+	output.WriteString(strings.Repeat("  ", depth) + "}")
+
+	return nil
 }
