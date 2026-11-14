@@ -13,8 +13,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
 	"github.com/plutoframework/cli/internal/project"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 const (
@@ -164,6 +165,7 @@ func (w *Workspace) Write(name string, data []byte) error {
 	}
 
 	delete(w.plan.Deletes, name)
+
 	w.plan.Writes[name] = data
 
 	return nil
@@ -177,6 +179,7 @@ func (w *Workspace) Delete(name string) error {
 	}
 
 	delete(w.plan.Writes, name)
+
 	w.plan.Deletes[name] = true
 
 	return nil

@@ -186,8 +186,10 @@ func TestBuildChainsStepsAndBlockedPlansWriteNothing(t *testing.T) {
 
 	steps[1].Plan = func(w *Workspace) error {
 		w.Block(Item{Path: "pluto.toml", Line: 1, Reason: "r", Action: "a"})
+
 		return w.Write("keep.txt", []byte("blocked\n"))
 	}
+
 	writeTree(t, root, map[string]string{"gone.txt": "gone\n"})
 
 	plan, err = build(steps, root, "3", Options{})

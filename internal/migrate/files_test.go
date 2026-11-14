@@ -13,7 +13,10 @@ func TestSameSourceIgnoresFormattingButNotMeaningOrComments(t *testing.T) {
 		"package a\n\n// Run runs.   \nfunc Run(a, b string) {}\n",
 	} {
 		if !sameSource("a.go", []byte(base), []byte(formatted)) {
-			t.Fatalf("formatter-only change counted as authored:\n%s", formatted)
+			t.Fatalf(
+				"formatter-only change counted as authored:\n%s",
+				formatted,
+			)
 		}
 	}
 

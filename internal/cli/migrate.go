@@ -72,7 +72,12 @@ func migrateCommand(options Options) *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			if len(plan.Steps) == 0 {
-				fmt.Fprintf(out, "Already at %s; nothing to migrate.\n", plan.To)
+				fmt.Fprintf(
+					out,
+					"Already at %s; nothing to migrate.\n",
+					plan.To,
+				)
+
 				return nil
 			}
 
@@ -200,6 +205,7 @@ func verifyMigration(
 	report := func(name string, err error) bool {
 		if err != nil {
 			fmt.Fprintf(out, "  %s: FAILED: %v\n", name, err)
+
 			failures = append(failures, fmt.Errorf("%s: %w", name, err))
 
 			return false

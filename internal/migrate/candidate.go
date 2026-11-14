@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
 	"github.com/plutoframework/cli/internal/project"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // publishedToCandidate adopts the candidate boundary profile at the current
@@ -43,6 +44,7 @@ type candidateJobBudget struct {
 
 func planCandidate(w *Workspace) error {
 	old := w.Manifest
+
 	raw, _, err := w.Read("pluto.toml")
 	if err != nil {
 		return err
@@ -133,6 +135,7 @@ func candidateManifest(
 	next := old
 	next.Boundary = options.Sources
 	next.Boundary.Mode = ProfileCandidate
+
 	next.Endpoints = append([]project.Endpoint(nil), old.Endpoints...)
 	next.Jobs = append([]project.Job(nil), old.Jobs...)
 
@@ -275,8 +278,8 @@ func identityIngress(next project.Manifest, raw []byte) []Item {
 
 	return []Item{
 		{
-			Path:   "pluto.toml",
-			Line:   tomlLine(raw, "local_credentials", 0),
+			Path: "pluto.toml",
+			Line: tomlLine(raw, "local_credentials", 0),
 			Reason: "candidate profile rejects this identity ingress: " +
 				err.Error(),
 			Action: "wait for candidate credential/OIDC support or disable " +

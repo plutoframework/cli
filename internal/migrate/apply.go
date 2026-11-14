@@ -100,6 +100,7 @@ func Write(plan *Plan) error {
 
 		if err != nil {
 			restore()
+
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}

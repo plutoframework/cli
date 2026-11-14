@@ -46,6 +46,7 @@ func fakeCandidateSources(t *testing.T) []string {
 
 		for _, suffix := range modules {
 			directory := filepath.Join(root, filepath.FromSlash(suffix))
+
 			module := "github.com/plutoframework/pluto-" + name
 			if suffix != "" {
 				module += "/" + suffix

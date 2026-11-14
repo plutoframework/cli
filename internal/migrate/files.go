@@ -70,8 +70,8 @@ func reconcile(
 		case inNext && sameSource(name, current, want):
 		case isSQLMigration(name):
 			w.Manual(Item{
-				Path:   name,
-				Line:   line,
+				Path: name,
+				Line: line,
 				Reason: "existing SQL migration differs from the " + profile +
 					" profile; applied migrations are never rewritten",
 				Action: "add a new numbered migration that reaches the " +
@@ -92,8 +92,8 @@ func reconcile(
 			})
 		case inNext:
 			w.Manual(Item{
-				Path:   name,
-				Line:   line,
+				Path: name,
+				Line: line,
 				Reason: "modified since scaffold; the " + profile +
 					" profile generates this path",
 				Action: "move your changes out of this file (or port them " +
@@ -115,8 +115,8 @@ func reconcile(
 			})
 		default:
 			w.Manual(Item{
-				Path:   name,
-				Line:   line,
+				Path: name,
+				Line: line,
 				Reason: "modified published scaffold file has no " +
 					profile + " counterpart",
 				Action: "port the changes to the " + profile + " seams, " +
@@ -170,7 +170,9 @@ func goTokens(source []byte) (string, bool) {
 	lexer.Init(
 		files.AddFile("", files.Base(), len(source)),
 		source,
-		func(token.Position, string) { failed = true },
+		func(token.Position, string) {
+			failed = true
+		},
 		scanner.ScanComments,
 	)
 

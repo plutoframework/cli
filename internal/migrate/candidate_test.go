@@ -153,8 +153,8 @@ func TestPublishedToCandidatePreservesEditsAndReportsThem(t *testing.T) {
 	edited := readTree(t, root, "internal/app/app.go") +
 		"\nfunc Custom() { RegisterGenerated(nil, nil) }\n"
 	writeTree(t, root, map[string]string{
-		"internal/app/app.go":           edited,
-		"db/migrations/005_jobs.sql":    "-- tuned\n",
+		"internal/app/app.go":        edited,
+		"db/migrations/005_jobs.sql": "-- tuned\n",
 		"internal/transport/http_test.go": readTree(
 			t,
 			root,
@@ -312,7 +312,7 @@ func assertBlocked(t *testing.T, root string, options Options, want ...string) {
 		t.Fatal("blocked plan changed pluto.toml")
 	}
 
-	if _, err := os.Stat(filepath.Join(root, "db/migrations/" +
+	if _, err := os.Stat(filepath.Join(root, "db/migrations/"+
 		"099_memberships.sql")); err == nil {
 		t.Fatal("blocked plan created candidate files")
 	}
