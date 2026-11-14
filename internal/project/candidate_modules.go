@@ -43,6 +43,7 @@ func inspectCandidateModules(
 		if configureErr == nil && scanErr != nil {
 			configureErr = scanErr
 		}
+
 		if configureErr == nil && bytes.Equal(expected, current) {
 			return nil
 		}

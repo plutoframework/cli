@@ -103,6 +103,7 @@ func goModuleCommand(
 ) ([]byte, error) {
 	command := exec.CommandContext(ctx, "go", args...)
 	command.Dir = directory
+
 	command.Env = append(
 		os.Environ(),
 		"GOWORK=off",

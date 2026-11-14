@@ -247,6 +247,41 @@ mutations = [
         "}); false {",
         "TestGeneratedApplications/single",
     ),
+    (
+        "candidate pinned module replacement",
+        "internal/project/boundary_modules.go",
+        "if _, pinned := pins[replacement.module]; pinned {",
+        "if _, pinned := pins[replacement.module]; pinned && false {",
+        "./internal/project#TestCandidatePinsRejectReplacementsAndDrift",
+    ),
+    (
+        "candidate pinned requirement drift",
+        "internal/project/boundary_modules.go",
+        'if requires[module] != "" && requires[module] != pins[module] {',
+        'if false && requires[module] != pins[module] {',
+        "./internal/project#TestCandidatePinsRejectReplacementsAndDrift",
+    ),
+    (
+        "candidate pin pruning requires no import",
+        "internal/project/candidate_modules.go",
+        "if !imported[module] && module != boundaryIdentityModule {",
+        "if module != boundaryIdentityModule {",
+        "./internal/project#TestCandidatePinsAllowOnlyUnimportedPruning",
+    ),
+    (
+        "candidate pin API probe",
+        "internal/project/candidate_pin_verify.go",
+        'goModuleCommand(ctx, directory, "build", "./...")',
+        'goModuleCommand(ctx, directory, "mod", "download")',
+        "./internal/project#TestVerifyCandidatePinsAgainstModuleProxy",
+    ),
+    (
+        "candidate pin selection consistency",
+        "internal/project/candidate_pin_verify.go",
+        "if pins[info.Path] != info.Version {",
+        "if false {",
+        "./internal/project#TestVerifyCandidatePinsAgainstModuleProxy",
+    ),
 ]
 
 if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":

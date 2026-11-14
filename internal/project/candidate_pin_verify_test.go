@@ -157,7 +157,11 @@ func writeCandidateProxy(t *testing.T) {
 				`","Time":"2026-11-01T00:00:00Z"}`,
 			".mod": mod,
 		} {
-			if err := os.WriteFile(prefix+name, []byte(content), 0o644); err != nil {
+			if err := os.WriteFile(
+				prefix+name,
+				[]byte(content),
+				0o644,
+			); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -219,6 +223,7 @@ func writeCandidateProxy(t *testing.T) {
 	t.Setenv("GOMODCACHE", cache)
 	t.Cleanup(func() {
 		command := exec.Command("go", "clean", "-modcache")
+
 		command.Env = append(os.Environ(), "GOMODCACHE="+cache)
 		_ = command.Run()
 	})
@@ -247,7 +252,12 @@ func TestVerifyCandidatePinsAgainstModuleProxy(t *testing.T) {
 	for module := range profile.Pins {
 		for _, suffix := range []string{" v0.9.0 h1:", " v0.9.0/go.mod h1:"} {
 			if !strings.Contains(string(sums), module+suffix) {
-				t.Fatalf("missing verified checksum %s%s:\n%s", module, suffix, sums)
+				t.Fatalf(
+					"missing verified checksum %s%s:\n%s",
+					module,
+					suffix,
+					sums,
+				)
 			}
 		}
 	}

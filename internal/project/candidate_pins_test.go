@@ -20,18 +20,20 @@ const (
 )
 
 func pinnedProfileFixture() BoundaryProfile {
+	const pluto = "github.com/plutoframework/"
+
 	return BoundaryProfile{
 		Mode: "candidate",
 		Pins: map[string]string{
-			"github.com/plutoframework/pluto-auth":                  pinAuth,
-			"github.com/plutoframework/pluto-auth/stores/postgres":  pinAuthPG,
-			"github.com/plutoframework/pluto-auth/methods/password": pinAuth,
-			"github.com/plutoframework/pluto-rbac":                  pinRBAC,
-			boundaryIdentityModule:                                  pinIdentity,
-			"github.com/plutoframework/pluto-core":                  pinCore,
-			"github.com/plutoframework/pluto-core/stores/postgres":  pinCorePG,
-			"github.com/plutoframework/pluto-jobs":                  pinJobs,
-			"github.com/plutoframework/pluto-jobs/stores/postgres":  pinJobsPG,
+			pluto + "pluto-auth":                  pinAuth,
+			pluto + "pluto-auth/stores/postgres":  pinAuthPG,
+			pluto + "pluto-auth/methods/password": pinAuth,
+			pluto + "pluto-rbac":                  pinRBAC,
+			boundaryIdentityModule:                pinIdentity,
+			pluto + "pluto-core":                  pinCore,
+			pluto + "pluto-core/stores/postgres":  pinCorePG,
+			pluto + "pluto-jobs":                  pinJobs,
+			pluto + "pluto-jobs/stores/postgres":  pinJobsPG,
 		},
 	}
 }
@@ -62,7 +64,11 @@ func TestCandidatePinsValidateOffline(t *testing.T) {
 	source := boundaryProfileFixture(t)
 	mixed.AuthSource = source.AuthSource
 
-	for _, suffix := range []string{"", "/stores/postgres", "/methods/password"} {
+	for _, suffix := range []string{
+		"",
+		"/stores/postgres",
+		"/methods/password",
+	} {
 		delete(mixed.Pins, "github.com/plutoframework/pluto-auth"+suffix)
 	}
 
@@ -72,7 +78,10 @@ func TestCandidatePinsValidateOffline(t *testing.T) {
 
 	for name, mutate := range map[string]func(*BoundaryProfile){
 		"missing module": func(p *BoundaryProfile) {
-			delete(p.Pins, "github.com/plutoframework/pluto-core/stores/postgres")
+			delete(
+				p.Pins,
+				"github.com/plutoframework/pluto-core/stores/postgres",
+			)
 		},
 		"branch name": func(p *BoundaryProfile) {
 			p.Pins["github.com/plutoframework/pluto-core"] = "main"
@@ -87,8 +96,7 @@ func TestCandidatePinsValidateOffline(t *testing.T) {
 			p.Pins["github.com/plutoframework/pluto-core"] = "v0.4.0+dirty"
 		},
 		"mixed commits": func(p *BoundaryProfile) {
-			p.Pins["github.com/plutoframework/pluto-jobs/stores/postgres"] =
-				"v0.1.1-0.20261102064703-000000000000"
+			p.Pins["github.com/plutoframework/pluto-jobs/stores/postgres"] = "v0.1.1-0.20261102064703-000000000000"
 		},
 		"unknown module": func(p *BoundaryProfile) {
 			p.Pins["github.com/plutoframework/pluto-agent"] = "v0.1.3"
@@ -152,12 +160,20 @@ func TestCandidatePinsAdoptPublishedModule(t *testing.T) {
 
 	for module, version := range profile.Pins {
 		if requires[module] != version {
-			t.Fatalf("%s requires %q, want %s", module, requires[module], version)
+			t.Fatalf(
+				"%s requires %q, want %s",
+				module,
+				requires[module],
+				version,
+			)
 		}
 	}
 
 	if requires["github.com/jackc/pgx/v5"] == "" ||
-		!bytes.Contains(adopted, []byte("golang.org/x/crypto v0.55.0 // indirect")) {
+		!bytes.Contains(
+			adopted,
+			[]byte("golang.org/x/crypto v0.55.0 // indirect"),
+		) {
 		t.Fatal("unrelated requirements were not preserved")
 	}
 
@@ -247,7 +263,11 @@ func TestCandidatePinsRejectReplacementsAndDrift(t *testing.T) {
 	if err := strictDecode(metadata, &decoded); err != nil ||
 		len(decoded.Boundary.Pins) != len(profile.Pins) ||
 		!bytes.Contains(metadata, []byte("[boundary.pins]")) {
-		t.Fatalf("pins do not round-trip through pluto.toml: %v\n%s", err, metadata)
+		t.Fatalf(
+			"pins do not round-trip through pluto.toml: %v\n%s",
+			err,
+			metadata,
+		)
 	}
 }
 
@@ -282,7 +302,12 @@ func TestCandidatePinsAllowOnlyUnimportedPruning(t *testing.T) {
 
 	const store = "github.com/plutoframework/pluto-core/stores/postgres"
 
-	pruned := strings.Replace(string(full), "\t"+store+" "+pinCorePG+"\n", "", 1)
+	pruned := strings.Replace(
+		string(full),
+		"\t"+store+" "+pinCorePG+"\n",
+		"",
+		1,
+	)
 	if pruned == string(full) {
 		t.Fatal("fixture did not prune the store requirement")
 	}

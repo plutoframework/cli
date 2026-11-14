@@ -174,7 +174,12 @@ func configureBoundaryModules(
 
 	if candidate && len(pins) > 0 && requires[boundaryIdentityModule] == "" &&
 		pins[boundaryIdentityModule] == "" {
-		fmt.Fprintf(&pinned, "\t%s %s\n", boundaryIdentityModule, identityVersion)
+		fmt.Fprintf(
+			&pinned,
+			"\t%s %s\n",
+			boundaryIdentityModule,
+			identityVersion,
+		)
 	}
 
 	for _, module := range candidatePinnedModules(pins) {
