@@ -60,6 +60,10 @@ func Contracts(root string, m project.Manifest) error {
 		return err
 	}
 
+	if err := project.CheckBackendDrift(root, m); err != nil {
+		return err
+	}
+
 	if m.Frontend == nil {
 		return nil
 	}

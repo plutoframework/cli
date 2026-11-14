@@ -74,6 +74,25 @@ func wizardForm(
 		return initForm(model, options, cmd, args), nil
 	}
 
+	if strings.HasPrefix(kind, "frontend-") {
+		_, manifest, err := project.DiscoverAny(options.Directory)
+		if err != nil && kind != "frontend-init" {
+			return model, err
+		}
+
+		// Without a manifest, frontend init can only start a separate
+		// frontend repository in the current directory.
+		model.context = "separate frontend repository"
+		if err == nil {
+			model.context = manifest.Project.Name
+		}
+
+		model = frontendForm(model, manifest, err == nil, cmd, args)
+		model.focus(0)
+
+		return model, nil
+	}
+
 	_, manifest, err := project.Discover(options.Directory)
 	if err != nil {
 		return model, err
@@ -87,8 +106,6 @@ func wizardForm(
 	)
 
 	switch kind {
-	case "frontend-init", "frontend-component", "frontend-auth":
-		model = frontendForm(model, manifest, cmd, args)
 	case "endpoint":
 		model = endpointForm(model, manifest, cmd, args)
 	case "state":

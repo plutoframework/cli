@@ -17,7 +17,18 @@ mise exec -- npm run check
 mise exec -- npm run dev
 ```
 
-Start the Go API separately on http://127.0.0.1:8080. Open
+<%if .Standalone%>This is a frontend-only repository. Its pluto.toml (`kind = "frontend"`)
+holds the UI profile, theme and `[frontend.api]`, the backend contract it builds
+against. The backend never references this repository.
+
+- `openapi`: relative path to the backend's openapi.json (for example a
+  sibling checkout) or an HTTPS URL. `npm run api:generate` reads it.
+- `env_prefix`, `local_credentials`, `oidc`: copied from the backend at init.
+  When `openapi` is a local path, `pluto vet` fails if they drift.
+- `dev_target`: optional Vite proxy target; `<%.Prefix%>WEB_API_TARGET`
+  overrides it.
+
+<%end%>Start the Go API separately on http://127.0.0.1:8080. Open
 https://127.0.0.1:5173 and accept its local self-signed certificate warning.
 OpenSSL generates a 30-day certificate; .cert/ is ignored and its key is 0600.
 No OS trust changes are made. Never reuse this certificate in production.
@@ -35,7 +46,7 @@ Verification/recovery responses stay generic. Tokens are pasted into a POST form
 never consumed from a URL. Auth fields and mutation values are transient memory,
 not a secure-erasure guarantee.
 
-## Add features from the project root
+## Add features from the <%if .Standalone%>repository<%else%>project<%end%> root
 
 ```sh
 pluto frontend add component purchase-form --kind form
@@ -62,7 +73,7 @@ Changing ui in pluto.toml alone is refused; library migration is deliberate.
 - app/: providers, routes, composition and generated feature catalog.
 - features/: feature-owned forms/components, queries/mutations and public.ts.
 - shared/ui/: application-owned shadcn source when selected; HeroUI imports its package.
-- api/: the single typed transport, generated from local Go OpenAPI.
+- api/: the single typed transport, generated from <%if .Standalone%>the configured backend OpenAPI<%else%>local Go OpenAPI<%end%>.
 
 `npm run check` checks OpenAPI freshness, lint/format, import boundaries, types,
 behavior tests and production build. The static architecture checker is a
@@ -76,7 +87,7 @@ proxy/certificate setup is for local development, not a production auth deployme
 
 ## Theme ownership
 
-Edit `[frontend.theme]` in the parent pluto.toml for mode (system/light/dark),
+Edit `[frontend.theme]` in <%if .Standalone%>this repository's<%else%>the parent<%end%> pluto.toml for mode (system/light/dark),
 radius, font_family, overrides path and optional light/dark token tables. Tokens
 use #RRGGBB or #RRGGBBAA: accent, accent_foreground, background, foreground,
 surface, surface_foreground, muted (text), border, success, warning and danger.

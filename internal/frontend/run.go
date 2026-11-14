@@ -54,16 +54,19 @@ func Install(
 		return err
 	}
 
-	if err := project.Run(
-		ctx,
-		root,
-		out,
-		errOut,
-		"go",
-		"run",
-		"./cmd/openapi",
-	); err != nil {
-		return err
+	// A separate frontend repository reads [frontend.api].openapi instead.
+	if !m.Standalone() {
+		if err := project.Run(
+			ctx,
+			root,
+			out,
+			errOut,
+			"go",
+			"run",
+			"./cmd/openapi",
+		); err != nil {
+			return err
+		}
 	}
 
 	directory := filepath.Join(root, m.Frontend.Directory)

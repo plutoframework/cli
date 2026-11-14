@@ -15,7 +15,7 @@ func frontendComponentsCommand(options Options) *cobra.Command {
 	command.AddCommand(&cobra.Command{
 		Use: "list", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			root, manifest, err := project.Discover(options.Directory)
+			root, manifest, err := project.DiscoverAny(options.Directory)
 			if err != nil {
 				return err
 			}

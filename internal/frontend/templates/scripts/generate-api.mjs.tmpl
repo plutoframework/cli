@@ -2,10 +2,25 @@ import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import openapiTS, { astToString } from "openapi-typescript";
 import ts from "typescript";
 
-// Read the Go application's local contract without network schema resolution.
-// Split declarations by operation group to keep generated files readable.
-const base = new URL("../../openapi/", import.meta.url);
-const main = JSON.parse(await readFile(new URL("openapi.json", base), "utf8"));
+import path from "node:path";
+import { frontendApi, webRoot } from "./manifest.mjs";
+
+// Embedded frontends read the Go application's local contract. Frontend-only
+// repositories read [frontend.api].openapi: a relative path or an HTTPS URL.
+// External $refs are refused either way. Declarations are split by operation
+// group to keep generated files readable.
+async function loadContract() {
+  const source = frontendApi()?.openapi;
+  if (!source)
+    return readFile(path.join(webRoot, "../openapi/openapi.json"), "utf8");
+  if (!source.includes("://"))
+    return readFile(path.resolve(webRoot, source), "utf8");
+  const response = await fetch(source, { redirect: "error" });
+  if (!response.ok)
+    throw new Error(`OpenAPI fetch failed (${response.status}): ${source}`);
+  return response.text();
+}
+const main = JSON.parse(await loadContract());
 function assertLocal(value) {
   if (Array.isArray(value)) {
     value.forEach(assertLocal);

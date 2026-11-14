@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/plutoframework/cli/internal/frontend"
@@ -21,39 +22,49 @@ func projectCommand(
 		Short: description,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			root, m, err := project.Discover(options.Directory)
+			root, m, err := project.DiscoverAny(options.Directory)
 			if err != nil {
 				return err
 			}
 
-			if staged {
-				if err := project.StagedPolicy(
-					cmd.Context(),
-					root,
-				); err != nil {
+			if m.Standalone() && staged {
+				return fmt.Errorf(
+					"--staged applies to Go applications; run pluto vet here",
+				)
+			}
+
+			// A frontend-only repository has no Go checks; it runs the
+			// frontend contracts and npm tasks below.
+			if !m.Standalone() {
+				if staged {
+					if err := project.StagedPolicy(
+						cmd.Context(),
+						root,
+					); err != nil {
+						return err
+					}
+				}
+
+				if vet {
+					err = project.Vet(
+						cmd.Context(),
+						root,
+						m,
+						cmd.OutOrStdout(),
+						cmd.ErrOrStderr(),
+					)
+				} else {
+					err = project.Format(
+						cmd.Context(),
+						root,
+						cmd.OutOrStdout(),
+						cmd.ErrOrStderr(),
+					)
+				}
+
+				if err != nil {
 					return err
 				}
-			}
-
-			if vet {
-				err = project.Vet(
-					cmd.Context(),
-					root,
-					m,
-					cmd.OutOrStdout(),
-					cmd.ErrOrStderr(),
-				)
-			} else {
-				err = project.Format(
-					cmd.Context(),
-					root,
-					cmd.OutOrStdout(),
-					cmd.ErrOrStderr(),
-				)
-			}
-
-			if err != nil {
-				return err
 			}
 
 			if m.Frontend != nil {

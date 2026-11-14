@@ -26,7 +26,7 @@ type Plan struct {
 }
 
 type templateData struct {
-	OIDC                        bool
+	OIDC, Standalone            bool
 	Name, Prefix, UI, Directory string
 	Component, Symbol, Kind     string
 }
@@ -68,7 +68,7 @@ func dataFor(m project.Manifest) templateData {
 	return templateData{
 		Name: m.Project.Name, Prefix: m.Project.EnvPrefix,
 		UI: m.Frontend.UI, Directory: m.Frontend.Directory,
-		OIDC: m.Capabilities.OIDC,
+		OIDC: m.Capabilities.OIDC, Standalone: m.Standalone(),
 	}
 }
 
@@ -85,6 +85,42 @@ func Init(
 		)
 	}
 
+	return initPlan(root, m, ui, directory, auth, nil)
+}
+
+// InitStandalone plans a frontend in its own repository rooted at root. The
+// frontend reads the backend contract from api; the backend is not modified.
+func InitStandalone(
+	root, name string,
+	api project.FrontendAPI,
+	ui string,
+	auth bool,
+) (Plan, error) {
+	if _, err := os.Stat(filepath.Join(root, "pluto.toml")); err == nil {
+		return Plan{}, fmt.Errorf(
+			"%s already has a pluto.toml; a separate frontend needs its own "+
+				"repository directory",
+			root,
+		)
+	}
+
+	return initPlan(
+		root,
+		project.NewStandaloneFrontend(name, api),
+		ui,
+		".",
+		auth,
+		&api,
+	)
+}
+
+func initPlan(
+	root string,
+	m project.Manifest,
+	ui, directory string,
+	auth bool,
+	api *project.FrontendAPI,
+) (Plan, error) {
 	next := m
 
 	next.Frontend = &project.Frontend{
@@ -93,10 +129,12 @@ func Init(
 		UI:        ui,
 		Version:   1,
 		Auth:      auth,
-		Theme: &project.Theme{
-			Mode:      "system",
-			Overrides: directory + "/src/styles/overrides.css",
-		},
+		API:       api,
+	}
+
+	next.Frontend.Theme = &project.Theme{
+		Mode:      "system",
+		Overrides: next.Frontend.Path("src/styles/overrides.css"),
 	}
 	if err := next.Validate(); err != nil {
 		return Plan{}, err
@@ -289,7 +327,9 @@ func (p *Plan) metadata(root string) error {
 	}
 
 	previous, err := os.ReadFile(path)
-	if err != nil {
+	if err == nil {
+		p.Previous["pluto.toml"] = previous
+	} else if !os.IsNotExist(err) || !p.Manifest.Standalone() {
 		return err
 	}
 
@@ -298,7 +338,6 @@ func (p *Plan) metadata(root string) error {
 		return err
 	}
 
-	p.Previous["pluto.toml"] = previous
 	p.Files["pluto.toml"] = data
 
 	return nil
@@ -345,6 +384,8 @@ var initialTemplates = []string{
 	"scripts/format.mjs.tmpl",
 	"scripts/format.test.mjs.tmpl",
 	"scripts/readability.mjs.tmpl",
+	"scripts/manifest.mjs.tmpl",
+	"scripts/manifest.d.mts.tmpl",
 	"scripts/theme.mjs.tmpl",
 	"scripts/theme-vite.mjs.tmpl",
 	"scripts/theme-vite.d.mts.tmpl",

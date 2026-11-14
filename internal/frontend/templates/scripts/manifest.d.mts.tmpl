@@ -1,0 +1,12 @@
+export const webRoot: string;
+export function manifestRoot(directory?: string): string;
+export function readManifest(directory?: string): Record<string, unknown>;
+export function frontendApi(directory?: string):
+  | {
+      openapi: string;
+      env_prefix: string;
+      local_credentials: boolean;
+      oidc?: boolean;
+      dev_target?: string;
+    }
+  | undefined;
