@@ -196,6 +196,7 @@ func (r *CandidateRuntime) WithSession(
 }
 `,
 	)
+
 	if local {
 		source.WriteString(
 			`// NewCandidateRuntime owns the only credential session issuer. Its
@@ -450,8 +451,10 @@ func NewCandidateRuntime(
 	)
 
 	if local {
-		source.WriteString(`	registerCandidateCredentials(router, authentication)
-`)
+		source.WriteString(
+			`	registerCandidateCredentials(router, authentication)
+`,
+		)
 	}
 
 	source.WriteString(

@@ -56,6 +56,7 @@ func TestCandidateFoundationOwnsInitialProductionPaths(t *testing.T) {
 					strings.HasPrefix(path, "db/migrations/") &&
 						strings.HasSuffix(path, ".sql")
 			}
+
 			// Published credential composition in package main is replaced by
 			// the candidate runtime's single fenced session issuer.
 			replaced := map[string]bool{
@@ -86,7 +87,10 @@ func TestCandidateFoundationOwnsInitialProductionPaths(t *testing.T) {
 					"db/migrations/008_credential_attempts.sql",
 				} {
 					if _, owned := candidate[path]; !owned {
-						t.Errorf("candidate credential contract absent: %s", path)
+						t.Errorf(
+							"candidate credential contract absent: %s",
+							path,
+						)
 					}
 				}
 

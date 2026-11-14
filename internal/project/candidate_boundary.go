@@ -281,6 +281,7 @@ func inspectCandidateBoundaries(
 			filepath.Dir(CandidateCredentialSeam),
 		)
 	}
+
 	managedDirectories := map[string]bool{}
 
 	for path := range owned {

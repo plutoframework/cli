@@ -262,7 +262,12 @@ func (f *candidateLocalFixture) request(
 	}
 
 	if cookie != "" {
-		request.AddCookie(&http.Cookie{Name: httpauth.CookieName, Value: cookie})
+		request.AddCookie(
+			&http.Cookie{
+				Name:  httpauth.CookieName,
+				Value: cookie,
+			},
+		)
 	}
 
 	if bearer != "" {
@@ -460,7 +465,11 @@ func TestCandidateLocalCredentialLifecycle(t *testing.T) {
 func TestCandidateLocalSharedAttemptLimiter(t *testing.T) {
 	f := candidateLocalSetup(t)
 
-	if _, err := identity.NewAttemptLimiter(f.pool, 0, time.Minute); err == nil {
+	if _, err := identity.NewAttemptLimiter(
+		f.pool,
+		0,
+		time.Minute,
+	); err == nil {
 		t.Fatal("invalid limiter accepted")
 	}
 

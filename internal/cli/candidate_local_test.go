@@ -110,6 +110,7 @@ func TestCandidateLocalCredentialConsumer(t *testing.T) {
 
 func runCandidateLocalCredentialConsumer(t *testing.T, oidc bool) {
 	root := temporary(t)
+
 	args := []string{
 		"--no-input",
 		"init",
@@ -152,7 +153,10 @@ func runCandidateLocalCredentialConsumer(t *testing.T, oidc bool) {
 	}
 
 	seam, err := os.ReadFile(
-		filepath.Join(root, filepath.FromSlash(project.CandidateCredentialSeam)),
+		filepath.Join(
+			root,
+			filepath.FromSlash(project.CandidateCredentialSeam),
+		),
 	)
 	if err != nil || bytes.Contains(seam, []byte("DO NOT EDIT")) {
 		t.Fatal("authored credential seam missing or marked managed", err)
@@ -195,7 +199,9 @@ func runCandidateLocalCredentialConsumer(t *testing.T, oidc bool) {
 	var fixture bytes.Buffer
 	if err := tmpl.Execute(
 		&fixture,
-		struct{ OIDC bool }{oidc},
+		struct {
+			OIDC bool
+		}{oidc},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -256,6 +262,7 @@ func assertCandidateSeamRestricted(t *testing.T, root string, seam []byte) {
 	report := project.InspectArchitecture(root)
 
 	rejected := false
+
 	for _, diagnostic := range report.Diagnostics {
 		if diagnostic.ID == "ARCH609" {
 			rejected = true
