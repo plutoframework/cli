@@ -568,7 +568,7 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		files[path] = data
 	}
 
-	files["go.mod"], err = ConfigureBoundaryModules(
+	files["go.mod"], err = AdoptBoundaryModules(
 		m.Boundary,
 		len(m.Agents) > 0,
 		files["go.mod"],

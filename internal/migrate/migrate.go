@@ -56,6 +56,10 @@ func Steps() []Step {
 type Options struct {
 	Sources   project.BoundaryProfile
 	Contracts []byte
+
+	// Sums are go.sum lines of pinned candidate modules, returned by
+	// project.VerifyCandidatePins for exactly Sources.Pins.
+	Sums []byte
 }
 
 // Item is a manual action or advisory note anchored to a file position.

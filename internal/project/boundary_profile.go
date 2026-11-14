@@ -11,12 +11,69 @@ import (
 
 // BoundaryProfile makes unpublished dependency adoption explicit. Empty mode
 // retains published compatibility; it never silently enables candidate APIs.
+//
+// Each candidate library is selected either by a local checkout (Source,
+// written as a go.mod replacement) or by exact fetchable module versions
+// (Pins, written as plain requirements). Revisions are transient CLI inputs:
+// they are resolved and verified into Pins before anything is written.
 type BoundaryProfile struct {
-	Mode       string `toml:"mode"`
-	AuthSource string `toml:"auth_source"`
-	RBACSource string `toml:"rbac_source"`
-	CoreSource string `toml:"core_source"`
-	JobsSource string `toml:"jobs_source"`
+	Mode       string            `toml:"mode"`
+	AuthSource string            `toml:"auth_source,omitempty"`
+	RBACSource string            `toml:"rbac_source,omitempty"`
+	CoreSource string            `toml:"core_source,omitempty"`
+	JobsSource string            `toml:"jobs_source,omitempty"`
+	Pins       map[string]string `toml:"pins,omitempty"`
+
+	AuthRevision string `toml:"-"`
+	RBACRevision string `toml:"-"`
+	CoreRevision string `toml:"-"`
+	JobsRevision string `toml:"-"`
+}
+
+// candidateLibrary is one framework repository and the modules the candidate
+// profile binds from it.
+type candidateLibrary struct {
+	name             string
+	source, revision string
+	modules          []string
+}
+
+func candidateLibraries(profile BoundaryProfile) []candidateLibrary {
+	return []candidateLibrary{
+		{
+			"pluto-auth",
+			profile.AuthSource,
+			profile.AuthRevision,
+			[]string{"", "stores/postgres", "methods/password"},
+		},
+		{
+			"pluto-rbac",
+			profile.RBACSource,
+			profile.RBACRevision,
+			[]string{"", "identity"},
+		},
+		{
+			"pluto-core",
+			profile.CoreSource,
+			profile.CoreRevision,
+			[]string{"", "stores/postgres"},
+		},
+		{
+			"pluto-jobs",
+			profile.JobsSource,
+			profile.JobsRevision,
+			[]string{"", "stores/postgres"},
+		},
+	}
+}
+
+func (library candidateLibrary) modulePath(suffix string) string {
+	path := "github.com/plutoframework/" + library.name
+	if suffix != "" {
+		path += "/" + suffix
+	}
+
+	return path
 }
 
 func ValidateBoundaryProfile(profile BoundaryProfile, tenancy string) error {
@@ -26,13 +83,19 @@ func ValidateBoundaryProfile(profile BoundaryProfile, tenancy string) error {
 		)
 	}
 
-	_, err := CandidateReplacements(profile)
+	if _, err := CandidateReplacements(profile); err != nil {
+		return err
+	}
+
+	_, err := CandidatePins(profile)
 
 	return err
 }
 
 // CandidateReplacements inspects local metadata only: no network access,
 // application scripts, module commands or dependency downloads are performed.
+// Libraries selected by pins have no replacement; pins are checked by
+// CandidatePins.
 func CandidateReplacements(profile BoundaryProfile) (map[string]string, error) {
 	result := map[string]string{}
 
@@ -45,6 +108,14 @@ func CandidateReplacements(profile BoundaryProfile) (map[string]string, error) {
 			)
 		}
 
+		if len(profile.Pins) > 0 || profile.AuthRevision != "" ||
+			profile.RBACRevision != "" || profile.CoreRevision != "" ||
+			profile.JobsRevision != "" {
+			return nil, fmt.Errorf(
+				"published boundary profile forbids candidate module pins",
+			)
+		}
+
 		return result, nil
 	}
 
@@ -54,26 +125,17 @@ func CandidateReplacements(profile BoundaryProfile) (map[string]string, error) {
 		)
 	}
 
-	for _, repository := range []struct {
-		name, source string
-		modules      []string
-	}{
-		{
-			"pluto-auth",
-			profile.AuthSource,
-			[]string{
-				"",
-				"stores/postgres",
-				"methods/password",
-			},
-		},
-		{"pluto-rbac", profile.RBACSource, []string{"", "identity"}},
-		{"pluto-core", profile.CoreSource, []string{"", "stores/postgres"}},
-		{"pluto-jobs", profile.JobsSource, []string{"", "stores/postgres"}},
-	} {
+	for _, repository := range candidateLibraries(profile) {
+		if repository.source == "" &&
+			(repository.revision != "" ||
+				candidateLibraryPinned(profile, repository)) {
+			continue
+		}
+
 		if !filepath.IsAbs(repository.source) {
 			return nil, fmt.Errorf(
-				"candidate %s source must be an explicit absolute directory",
+				"candidate %s source must be an explicit absolute "+
+					"directory, or pin exact module versions",
 				repository.name,
 			)
 		}
@@ -131,10 +193,7 @@ func CandidateReplacements(profile BoundaryProfile) (map[string]string, error) {
 
 			module, err := boundaryModulePath(data)
 
-			expected := "github.com/plutoframework/" + repository.name
-			if suffix != "" {
-				expected += "/" + suffix
-			}
+			expected := repository.modulePath(suffix)
 
 			if err != nil || module != expected {
 				return nil, fmt.Errorf(

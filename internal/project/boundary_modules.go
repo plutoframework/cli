@@ -26,7 +26,24 @@ func ConfigureBoundaryModules(
 	withAgents bool,
 	current []byte,
 ) ([]byte, error) {
+	return configureBoundaryModules(profile, withAgents, current, nil)
+}
+
+// configureBoundaryModules may leave out the requirement of a prunable pinned
+// module: one no application package imports, which go mod tidy removes. A
+// present requirement must still equal its pin exactly.
+func configureBoundaryModules(
+	profile BoundaryProfile,
+	withAgents bool,
+	current []byte,
+	prunable map[string]bool,
+) ([]byte, error) {
 	replacements, err := CandidateReplacements(profile)
+	if err != nil {
+		return nil, err
+	}
+
+	pins, err := CandidatePins(profile)
 	if err != nil {
 		return nil, err
 	}
@@ -44,12 +61,29 @@ func ConfigureBoundaryModules(
 		)
 	}
 
+	identityVersion := boundaryIdentityVersion
+	if pinned, ok := pins[boundaryIdentityModule]; ok {
+		identityVersion = pinned
+	}
+
 	if candidate && requires[boundaryIdentityModule] != "" &&
-		requires[boundaryIdentityModule] != boundaryIdentityVersion {
+		requires[boundaryIdentityModule] != identityVersion {
 		return nil, fmt.Errorf(
 			"identity requirement %s requires explicit candidate adoption",
 			requires[boundaryIdentityModule],
 		)
+	}
+
+	for _, module := range candidatePinnedModules(pins) {
+		if requires[module] != "" && requires[module] != pins[module] {
+			return nil, fmt.Errorf(
+				"requirement %s %s conflicts with candidate pin %s; adopt "+
+					"pins explicitly with pluto migrate",
+				module,
+				requires[module],
+				pins[module],
+			)
+		}
 	}
 
 	const agentModule = "github.com/plutoframework/pluto-agent"
@@ -78,6 +112,13 @@ func ConfigureBoundaryModules(
 			return nil, fmt.Errorf(
 				"published boundary profile cannot retain local framework "+
 					"replacement %s",
+				replacement.module,
+			)
+		}
+
+		if _, pinned := pins[replacement.module]; pinned {
+			return nil, fmt.Errorf(
+				"pinned candidate module %s cannot be replaced",
 				replacement.module,
 			)
 		}
@@ -118,13 +159,32 @@ func ConfigureBoundaryModules(
 		fmt.Fprintf(&additions, "\nrequire %s %s\n", agentModule, AgentVersion)
 	}
 
-	if candidate && requires[boundaryIdentityModule] == "" {
+	if candidate && len(pins) == 0 && requires[boundaryIdentityModule] == "" {
 		fmt.Fprintf(
 			&additions,
 			"\nrequire %s %s\n",
 			boundaryIdentityModule,
-			boundaryIdentityVersion,
+			identityVersion,
 		)
+	}
+
+	// Pinned modules, including a pinned identity module, are plain
+	// requirements grouped in one block; they carry no replacement.
+	var pinned strings.Builder
+
+	if candidate && len(pins) > 0 && requires[boundaryIdentityModule] == "" &&
+		pins[boundaryIdentityModule] == "" {
+		fmt.Fprintf(&pinned, "\t%s %s\n", boundaryIdentityModule, identityVersion)
+	}
+
+	for _, module := range candidatePinnedModules(pins) {
+		if requires[module] == "" && !prunable[module] {
+			fmt.Fprintf(&pinned, "\t%s %s\n", module, pins[module])
+		}
+	}
+
+	if pinned.Len() > 0 {
+		fmt.Fprintf(&additions, "\nrequire (\n%s)\n", pinned.String())
 	}
 
 	modules := make([]string, 0, len(replacements))
