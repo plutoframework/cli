@@ -127,7 +127,7 @@ func TestWizardDispatchesSharedGenerators(t *testing.T) {
 			t.Fatal(err, output.String())
 		}
 	}
-	invokeOptions()
+	invokeOptions("--interactive")
 
 	app := filepath.Join(root, "mission")
 	options.Directory = app
@@ -173,8 +173,17 @@ func TestWizardTerminalRouting(t *testing.T) {
 		terminal, ci          bool
 		wantWizard, wantError bool
 	}{
+		{name: "bare terminal shows help", terminal: true},
 		{
-			name:       "bare terminal",
+			name:       "interactive terminal",
+			args:       []string{"--interactive"},
+			terminal:   true,
+			wantWizard: true,
+			wantError:  true,
+		},
+		{
+			name:       "init terminal",
+			args:       []string{"init"},
 			terminal:   true,
 			wantWizard: true,
 			wantError:  true,
