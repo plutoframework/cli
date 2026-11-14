@@ -178,6 +178,7 @@ func runCandidateLocalCredentialConsumer(t *testing.T, oidc bool) {
 	mustInvoke(t, root, "fmt")
 	mustInvoke(t, root, "openapi")
 	mustInvoke(t, root, "vet")
+	lintCandidateManaged(t, root)
 
 	assertCandidateSeamRestricted(t, root, seam)
 
