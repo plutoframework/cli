@@ -249,9 +249,9 @@ func candidateManifest(
 }
 
 // identityIngress is the hook for local credentials and OIDC. The candidate
-// validator currently rejects both; once it accepts them, their foundation
-// files are reconciled like every other scaffold file and any credential-
-// specific manifest or code transforms belong here.
+// validator accepts both as managed ingress; their foundation files are
+// reconciled like every other scaffold file. Any combination the validator
+// rejects is reported here, and credential-specific transforms belong here.
 func identityIngress(next project.Manifest, raw []byte) []Item {
 	if !next.Capabilities.LocalCredentials && !next.Capabilities.OIDC {
 		return nil

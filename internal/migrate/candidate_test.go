@@ -220,16 +220,26 @@ func TestPublishedToCandidateBlockers(t *testing.T) {
 	assertBlocked(t, multi, Options{}, "pluto.toml:3:",
 		"must be an explicit absolute directory")
 
+	// The candidate profile accepts managed local credentials and OIDC, so
+	// identity ingress alone no longer blocks adoption.
 	credentials := publishedManifest("multi")
 	credentials.Capabilities.LocalCredentials = true
 	credentials.Capabilities.OIDC = true
-	assertBlocked(
-		t,
+
+	accepted, err := Build(
 		publishedFixture(t, credentials),
+		ProfileCandidate,
 		Options{Sources: sources},
-		"pluto.toml:",
-		"rejects this identity ingress",
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, item := range accepted.Manual {
+		if strings.Contains(item.Reason, "identity ingress") {
+			t.Fatalf("supported identity ingress blocked: %s", item)
+		}
+	}
 
 	operations := publishedManifest("multi")
 	operations.Operations = []project.Operation{
