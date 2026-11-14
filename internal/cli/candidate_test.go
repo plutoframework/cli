@@ -378,38 +378,7 @@ func runCandidateGeneratedConsumer(
 		mustInvoke(t, root, "openapi")
 		mustInvoke(t, root, "vet")
 
-		lintConfig, err := os.ReadFile(filepath.Join(root, ".golangci.yml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// Linters must inspect managed output, not merely trust its banner.
-		lintConfig = []byte(
-			strings.Replace(
-				string(lintConfig),
-				"generated: strict",
-				"generated: disable",
-				1,
-			),
-		)
-
-		lintPath := filepath.Join(t.TempDir(), "candidate-lint.yml")
-		if err := os.WriteFile(lintPath, lintConfig, 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		external(
-			t,
-			root,
-			"golangci-lint",
-			"run",
-			"--config",
-			lintPath,
-			"--enable-only",
-			"govet,ineffassign,staticcheck,unused,wsl_v5",
-			"./cmd/...",
-			"./internal/...",
-		)
+		lintCandidateManaged(t, root)
 	}
 
 	external(t, root, "go", "test", "./...")
@@ -493,6 +462,17 @@ func assertCandidateCases(t *testing.T, output string, runtime bool) {
 		)
 	}
 
+	assertCandidateCaseNames(t, output, expected...)
+}
+
+// Required named cases must run and pass; a skip or missing case is a failure.
+func assertCandidateCaseNames(
+	t *testing.T,
+	output string,
+	expected ...string,
+) {
+	t.Helper()
+
 	passed := map[string]bool{}
 	decoder := json.NewDecoder(strings.NewReader(output))
 
@@ -532,5 +512,42 @@ func assertCandidateCases(t *testing.T, output string, runtime bool) {
 	t.Logf(
 		"verified %d required candidate SQL/runtime cases without skips",
 		len(expected),
+	)
+}
+
+// Linters must inspect managed output, not merely trust its banner.
+func lintCandidateManaged(t *testing.T, root string) {
+	t.Helper()
+
+	lintConfig, err := os.ReadFile(filepath.Join(root, ".golangci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lintConfig = []byte(
+		strings.Replace(
+			string(lintConfig),
+			"generated: strict",
+			"generated: disable",
+			1,
+		),
+	)
+
+	lintPath := filepath.Join(t.TempDir(), "candidate-lint.yml")
+	if err := os.WriteFile(lintPath, lintConfig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	external(
+		t,
+		root,
+		"golangci-lint",
+		"run",
+		"--config",
+		lintPath,
+		"--enable-only",
+		"govet,ineffassign,staticcheck,unused,wsl_v5",
+		"./cmd/...",
+		"./internal/...",
 	)
 }

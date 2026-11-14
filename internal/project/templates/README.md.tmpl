@@ -49,6 +49,23 @@ metadata,
 model prompts, queue payload authority fields or source code. HTTP bearer/cookie
 verification preserves the configured Origin and ambiguous-credential rules.
 
+{{if .LocalCredentials}}
+Local credentials are managed candidate ingress. Signup, verification, sign-in,
+recovery, reset and logout use the published password lifecycle over the fenced
+`postgres.NewLocal` account/session store.{{if .OIDC}} Optional OIDC sign-in
+(disabled until `{{.Prefix}}OIDC_ENABLED=true` and configured) issues sessions
+through the same manager.{{end}} That manager is the only session issuer and
+the only source of opaque operation identities; no endpoint, worker or tool
+accepts a subject string. Sign-in never grants a tenant membership or role.
+
+Implement `New` in internal/auth/credentials/integrations.go. Pluto creates it
+once and never overwrites it. Return a real Sender, trusted-client/concurrency
+Ingress and the replica-shared Limiter supplied as `shared.Limiter` (or your
+own shared limiter); PasswordPolicy is optional. Startup fails until it does.
+Canonical checks (ARCH609) restrict that package to the standard library,
+third-party delivery clients and pluto-auth/methods/password; it cannot import
+application packages, Pluto authority modules, stores or database clients.
+{{end}}
 ```sh
 go run ./cmd/api
 go run ./cmd/worker

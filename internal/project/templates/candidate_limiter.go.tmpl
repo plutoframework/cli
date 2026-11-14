@@ -1,0 +1,79 @@
+package identity
+
+import (
+	"context"
+	"crypto/sha256"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/plutoframework/pluto-auth/methods/password"
+)
+
+// AttemptLimiter is a replica-shared fixed window over hashed attempt keys.
+// Storage failures fail closed. Expired windows are pruned in small batches.
+type AttemptLimiter struct {
+	pool     *pgxpool.Pool
+	attempts int
+	window   time.Duration
+}
+
+func NewAttemptLimiter(
+	pool *pgxpool.Pool,
+	attempts int,
+	window time.Duration,
+) (*AttemptLimiter, error) {
+	if pool == nil || attempts < 1 || attempts > 10000 ||
+		window < time.Second || window > 24*time.Hour {
+		return nil, errors.New("invalid credential attempt limiter")
+	}
+
+	return &AttemptLimiter{pool: pool, attempts: attempts, window: window}, nil
+}
+
+func (l *AttemptLimiter) Allow(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if l == nil || l.pool == nil || key == "" || len(key) > 256 {
+		return password.ErrLimited
+	}
+
+	if _, err := l.pool.Exec(
+		ctx,
+		"DELETE FROM \"pluto_credential_attempts\" WHERE \"key_digest\" "+
+			"IN (SELECT \"key_digest\" FROM \"pluto_credential_attempts\" "+
+			"WHERE \"expires_at\" <= clock_timestamp() LIMIT 16)",
+	); err != nil {
+		return password.ErrLimited
+	}
+
+	digest := sha256.Sum256([]byte(key))
+
+	var count int
+	if err := l.pool.QueryRow(
+		ctx,
+		"INSERT INTO \"pluto_credential_attempts\" AS current "+
+			"(\"key_digest\",\"attempts\",\"expires_at\") VALUES "+
+			"($1,1,clock_timestamp()+$2*interval '1 millisecond') "+
+			"ON CONFLICT (\"key_digest\") DO UPDATE SET "+
+			"\"attempts\"=CASE WHEN current.\"expires_at\"<=clock_timestamp() "+
+			"THEN 1 ELSE LEAST(current.\"attempts\"+1,$3) END,"+
+			"\"expires_at\"=CASE WHEN current.\"expires_at\"<="+
+			"clock_timestamp() THEN clock_timestamp()+$2*interval "+
+			"'1 millisecond' ELSE current.\"expires_at\" END "+
+			"RETURNING \"attempts\"",
+		digest[:],
+		l.window.Milliseconds(),
+		l.attempts+1,
+	).Scan(&count); err != nil {
+		return password.ErrLimited
+	}
+
+	if count > l.attempts {
+		return password.ErrLimited
+	}
+
+	return nil
+}

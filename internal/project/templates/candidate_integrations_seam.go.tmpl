@@ -1,0 +1,26 @@
+package credentials
+
+import (
+	"context"
+	"errors"
+)
+
+// New is the authored local-credential integration seam. Pluto creates this
+// file once and never overwrites it. Return a real Sender and trusted-client
+// Ingress; shared.Limiter is the managed replica-shared limiter. Startup fails
+// until this returns complete integrations; there is no no-op sender, demo
+// password or memory fallback.
+//
+// Canonical checks restrict this package: it may import the standard library,
+// third-party delivery clients and pluto-auth/methods/password only. It cannot
+// import application packages, Pluto authority modules, stores or database
+// clients, so it can never issue sessions, identities or memberships.
+func New(_ context.Context, shared Shared) (Integrations, error) {
+	_ = shared
+
+	return Integrations{}, errors.New(
+		"local credentials require an application Sender and " +
+			"trusted-client Ingress in " +
+			"internal/auth/credentials/integrations.go",
+	)
+}

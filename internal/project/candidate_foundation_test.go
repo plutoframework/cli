@@ -56,9 +56,52 @@ func TestCandidateFoundationOwnsInitialProductionPaths(t *testing.T) {
 					strings.HasPrefix(path, "db/migrations/") &&
 						strings.HasSuffix(path, ".sql")
 			}
+
+			// Published credential composition in package main is replaced by
+			// the candidate runtime's single fenced session issuer.
+			replaced := map[string]bool{
+				"cmd/api/credentials.go": true,
+				"cmd/api/oidc.go":        true,
+			}
+
+			candidate, err := Managed(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for path := range replaced {
+				if _, owned := foundation[path]; owned {
+					t.Errorf("published credential composition kept: %s", path)
+				}
+
+				if _, owned := candidate[path]; owned {
+					t.Errorf("published credential composition kept: %s", path)
+				}
+			}
+
+			if manifest.Capabilities.LocalCredentials {
+				for _, path := range []string{
+					"internal/app/candidate_credentials_gen.go",
+					"internal/auth/credentials/contract_gen.go",
+					"internal/storage/identity/attempts_gen.go",
+					"db/migrations/008_credential_attempts.sql",
+				} {
+					if _, owned := candidate[path]; !owned {
+						t.Errorf(
+							"candidate credential contract absent: %s",
+							path,
+						)
+					}
+				}
+
+				if _, owned := candidate[CandidateCredentialSeam]; owned {
+					t.Error("authored credential seam became managed")
+				}
+			}
+
 			for path := range initial {
 				if _, alreadyManaged := managed[path]; alreadyManaged ||
-					!production(path) {
+					!production(path) || replaced[path] {
 					continue
 				}
 

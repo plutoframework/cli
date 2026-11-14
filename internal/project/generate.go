@@ -552,6 +552,18 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		files[path] = data
 	}
 
+	if m.Boundary.Mode == "candidate" && m.Capabilities.LocalCredentials {
+		seam, err := render(
+			"candidate_integrations_seam.go",
+			dataFor(m, Endpoint{}),
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		files[CandidateCredentialSeam] = seam
+	}
+
 	for path, data := range ToolFiles(m) {
 		files[path] = data
 	}

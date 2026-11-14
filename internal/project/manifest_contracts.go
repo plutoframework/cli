@@ -149,14 +149,6 @@ func ValidateManifestContracts(m Manifest) error {
 		return nil
 	}
 
-	if m.Capabilities.LocalCredentials || m.Capabilities.OIDC {
-		return fmt.Errorf(
-			"candidate profile currently requires session-only identity " +
-				"ingress; local credentials and OIDC need managed " +
-				"credential and delivery contracts before adoption",
-		)
-	}
-
 	if _, err := CompileRoleContracts(m.Roles, permissions); err != nil {
 		return err
 	}

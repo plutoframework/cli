@@ -1,0 +1,518 @@
+package app_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"example.test/credentials/internal/app"
+	"example.test/credentials/internal/auth/credentials"
+	"example.test/credentials/internal/config"
+	"example.test/credentials/internal/storage/identity"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	auth "github.com/plutoframework/pluto-auth"
+	"github.com/plutoframework/pluto-auth/httpauth"
+	"github.com/plutoframework/pluto-auth/methods/password"
+	authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+	"github.com/plutoframework/pluto-core/cache"
+	jobs "github.com/plutoframework/pluto-jobs"
+)
+
+// Strictly bounded recorder, used only by this test; no network delivery.
+type candidateLocalSender struct {
+	mutex sync.Mutex
+	items []password.Notification
+}
+
+func (s *candidateLocalSender) Send(
+	ctx context.Context,
+	notification password.Notification,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if len(s.items) >= 20 {
+		return errors.New("private provider failure")
+	}
+
+	s.items = append(s.items, notification)
+
+	return nil
+}
+
+func (s *candidateLocalSender) token(
+	t *testing.T,
+	purpose password.Purpose,
+) string {
+	t.Helper()
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for index := len(s.items) - 1; index >= 0; index-- {
+		if s.items[index].Purpose == purpose {
+			return s.items[index].Token
+		}
+	}
+
+	t.Fatal("missing delivery")
+
+	return ""
+}
+
+type candidateLocalFixture struct {
+	pool    *pgxpool.Pool
+	runtime *app.CandidateRuntime
+	sender  *candidateLocalSender
+}
+
+const candidateLocalOrigin = "http://127.0.0.1:8080"
+
+func candidateLocalSetup(t *testing.T) *candidateLocalFixture {
+	t.Helper()
+
+	url := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
+	if url == "" {
+		t.Fatal("required credential fixture needs PLUTO_CLI_TEST_DATABASE_URL")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+
+	admin, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(admin.Close)
+
+	schema := "candidate_local_" + jobs.NewID()
+
+	identifier := pgx.Identifier{schema}.Sanitize()
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+identifier); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(
+			context.Background(),
+			5*time.Second,
+		)
+		defer cancel()
+
+		if _, err := admin.Exec(
+			cleanup,
+			"DROP SCHEMA "+identifier+" CASCADE",
+		); err != nil {
+			t.Error(err)
+		}
+	})
+
+	settings, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings.ConnConfig.RuntimeParams["search_path"] = schema
+
+	pool, err := pgxpool.NewWithConfig(ctx, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(pool.Close)
+
+	migrations, err := filepath.Glob(
+		filepath.Join("..", "..", "db", "migrations", "*.sql"),
+	)
+	if err != nil || len(migrations) == 0 {
+		t.Fatal("missing generated migrations", err)
+	}
+
+	sort.Strings(migrations)
+
+	for _, path := range migrations {
+		migration, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := pool.Exec(ctx, string(migration)); err != nil {
+			t.Fatal(path, err)
+		}
+	}
+
+	cfg, err := config.LoadFrom(
+		func(key string) (string, bool) {
+			return url, key == config.Prefix+"DATABASE_URL"
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	if _, err := credentials.New(
+		ctx,
+		credentials.Shared{},
+	); err == nil {
+		t.Fatal("unimplemented authored seam supplied integrations")
+	}
+
+	if _, err := app.NewCandidateRuntime(
+		ctx,
+		cfg,
+		pool,
+		logger,
+		cache.Disabled{},
+		"test",
+		map[string]string{},
+		credentials.Integrations{},
+	); err == nil {
+		t.Fatal("candidate runtime accepted missing credential integrations")
+	}
+
+	limiter, err := identity.NewAttemptLimiter(pool, 40, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The test ingress admits one request at a time with no queue and a
+	// timeout. Production must additionally bound trusted client identity.
+	var active sync.Mutex
+
+	ingress := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !active.TryLock() {
+				w.WriteHeader(429)
+
+				return
+			}
+
+			defer active.Unlock()
+
+			bounded, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+
+			next.ServeHTTP(w, r.WithContext(bounded))
+		})
+	}
+
+	sender := &candidateLocalSender{}
+
+	runtime, err := app.NewCandidateRuntime(
+		ctx,
+		cfg,
+		pool,
+		logger,
+		cache.Disabled{},
+		"test",
+		map[string]string{},
+		credentials.Integrations{
+			Sender:  sender,
+			Limiter: limiter,
+			Ingress: ingress,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &candidateLocalFixture{pool: pool, runtime: runtime, sender: sender}
+}
+
+func (f *candidateLocalFixture) request(
+	t *testing.T,
+	method, path, cookie, bearer, tenant, body string,
+	want int,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Origin", candidateLocalOrigin)
+
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+
+	if tenant != "" {
+		request.Header.Set("X-Tenant-ID", tenant)
+	}
+
+	if method == http.MethodPost && strings.HasPrefix(path, "/tickets") {
+		request.Header.Set("Idempotency-Key", "create-"+tenant)
+	}
+
+	if cookie != "" {
+		request.AddCookie(
+			&http.Cookie{
+				Name:  httpauth.CookieName,
+				Value: cookie,
+			},
+		)
+	}
+
+	if bearer != "" {
+		request.Header.Set("Authorization", "Bearer "+bearer)
+	}
+
+	response := httptest.NewRecorder()
+	f.runtime.Handler().ServeHTTP(response, request)
+
+	// Zero means denied: the gate reports a missing membership as 401/403.
+	denied := want == 0 && (response.Code == 401 || response.Code == 403)
+	if response.Code != want && !denied {
+		t.Fatalf(
+			"%s %s status=%d want=%d body=%s",
+			method,
+			path,
+			response.Code,
+			want,
+			response.Body.String(),
+		)
+	}
+
+	return response
+}
+
+func (f *candidateLocalFixture) signin(t *testing.T, input string) string {
+	t.Helper()
+
+	response := f.request(t, "POST", "/auth/signin", "", "", "", input, 200)
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == httpauth.CookieName && cookie.Value != "" {
+			if !cookie.Secure || !cookie.HttpOnly ||
+				strings.Contains(response.Body.String(), cookie.Value) {
+				t.Fatal("cookie contract")
+			}
+
+			return cookie.Value
+		}
+	}
+
+	t.Fatal("signin issued no session")
+
+	return ""
+}
+
+func (f *candidateLocalFixture) grant(
+	t *testing.T,
+	subject, tenant string,
+) {
+	t.Helper()
+
+	if _, err := f.pool.Exec(
+		t.Context(),
+		"INSERT INTO \"pluto_resource_memberships\" (\"tenant_id\","+
+			"\"actor_id\",\"roles\") VALUES ($1,$2,ARRAY['agent'])",
+		tenant,
+		subject,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Password sign-in issues the session; the same manager then issues the opaque
+// identity the operation gate requires. Membership stays a separate check.
+func TestCandidateLocalCredentialLifecycle(t *testing.T) {
+	f := candidateLocalSetup(t)
+
+	const input = "{\"email\":\"synthetic@example.test\"," +
+		"\"password\":\"synthetic long passphrase\"}"
+
+	f.request(t, "POST", "/auth/enroll", "", "", "", input, 202)
+	f.request(t, "POST", "/auth/signin", "", "", "", input, 401)
+	f.request(
+		t,
+		"POST",
+		"/auth/verification",
+		"",
+		"",
+		"",
+		`{"email":"synthetic@example.test"}`,
+		202,
+	)
+
+	verification, _ := json.Marshal(
+		map[string]string{
+			"token": f.sender.token(t, password.VerifyEmail),
+		},
+	)
+	f.request(t, "POST", "/auth/verify", "", "", "", string(verification), 200)
+
+	session := f.signin(t, input)
+	ticket := `{"resource_id":"ticket-1","value":"  printer  "}`
+
+	f.request(t, "POST", "/tickets", "", "", "north", ticket, 401)
+	f.request(t, "GET", "/auth/session", session, "", "", "", 200)
+
+	// A verified session alone grants nothing: membership is separate.
+	f.request(t, "POST", "/tickets", session, "", "north", ticket, 0)
+
+	store, err := authpostgres.NewLocal(f.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	account, err := store.LookupAccount(t.Context(), "synthetic@example.test")
+	if err != nil || account.ID == "" {
+		t.Fatal("missing enrolled account", err)
+	}
+
+	// Explicit trusted test binding; enrollment never grants membership.
+	f.grant(t, account.ID, "north")
+
+	created := f.request(
+		t,
+		"POST",
+		"/tickets",
+		session,
+		"",
+		"north",
+		ticket,
+		200,
+	)
+	if !strings.Contains(created.Body.String(), `"printer"`) {
+		t.Fatalf("unexpected create response: %s", created.Body.String())
+	}
+
+	f.request(t, "GET", "/tickets/ticket-1", session, "", "north", "", 200)
+	f.request(t, "GET", "/tickets/ticket-1", session, "", "south", "", 0)
+
+	// A session minted by another issuer for the same subject is not accepted:
+	// only the configured fenced manager issues operation identities.
+	plain, err := authpostgres.New(f.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issuer, err := auth.New(plain, auth.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	forged, err := issuer.Start(t.Context(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.request(t, "GET", "/tickets/ticket-1", "", forged.Token, "north", "", 401)
+
+	if _, err := f.pool.Exec(
+		t.Context(),
+		"DELETE FROM \"pluto_resource_memberships\" WHERE \"actor_id\"=$1",
+		account.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.request(t, "GET", "/tickets/ticket-1", session, "", "north", "", 0)
+	f.grant(t, account.ID, "north")
+
+	f.request(t, "POST", "/auth/recovery", "", "", "",
+		`{"email":"synthetic@example.test"}`, 202)
+
+	reset, _ := json.Marshal(
+		map[string]string{
+			"token":    f.sender.token(t, password.RecoverPassword),
+			"password": "new synthetic passphrase",
+		},
+	)
+	f.request(t, "POST", "/auth/reset", "", "", "", string(reset), 200)
+
+	// Reset revokes existing sessions before any further operation.
+	f.request(t, "GET", "/tickets/ticket-1", session, "", "north", "", 401)
+
+	fresh := f.signin(
+		t,
+		"{\"email\":\"synthetic@example.test\","+
+			"\"password\":\"new synthetic passphrase\"}",
+	)
+	f.request(t, "GET", "/tickets/ticket-1", fresh, "", "north", "", 200)
+	f.request(t, "POST", "/auth/logout", fresh, "", "", "", 200)
+	f.request(t, "GET", "/tickets/ticket-1", fresh, "", "north", "", 401)
+{{- if .OIDC}}
+
+	// OIDC is managed but disabled until explicitly configured.
+	providers := f.request(t, "GET", "/auth/providers", "", "", "", "", 200)
+	if strings.TrimSpace(providers.Body.String()) != `{"data":[]}` {
+		t.Fatalf("disabled OIDC advertised: %s", providers.Body.String())
+	}
+
+	f.request(t, "POST", "/auth/oidc/begin", "", "", "", "", 404)
+{{- end}}
+}
+
+// The managed limiter is shared by every replica using the same database.
+func TestCandidateLocalSharedAttemptLimiter(t *testing.T) {
+	f := candidateLocalSetup(t)
+
+	if _, err := identity.NewAttemptLimiter(
+		f.pool,
+		0,
+		time.Minute,
+	); err == nil {
+		t.Fatal("invalid limiter accepted")
+	}
+
+	first, err := identity.NewAttemptLimiter(f.pool, 2, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := identity.NewAttemptLimiter(f.pool, 2, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, limiter := range []*identity.AttemptLimiter{first, second} {
+		if err := limiter.Allow(t.Context(), "replica-key"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := first.Allow(
+		t.Context(),
+		"replica-key",
+	); !errors.Is(err, password.ErrLimited) {
+		t.Fatal("shared attempt window not enforced across replicas", err)
+	}
+
+	if err := second.Allow(t.Context(), "other-key"); err != nil {
+		t.Fatal("independent key limited", err)
+	}
+
+	if err := first.Allow(t.Context(), ""); !errors.Is(
+		err,
+		password.ErrLimited,
+	) {
+		t.Fatal("empty key accepted")
+	}
+
+	var plaintext bool
+	if err := f.pool.QueryRow(
+		t.Context(),
+		"SELECT EXISTS (SELECT 1 FROM \"pluto_credential_attempts\" WHERE "+
+			"position('replica-key'::bytea in \"key_digest\") > 0)",
+	).Scan(&plaintext); err != nil || plaintext {
+		t.Fatal("attempt keys stored in plaintext", err)
+	}
+}
