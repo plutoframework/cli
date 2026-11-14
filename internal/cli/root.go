@@ -125,6 +125,7 @@ func New(options Options) *cobra.Command {
 		),
 	)
 	root.AddCommand(openapiCommand(options))
+	root.AddCommand(migrateCommand(options))
 	root.AddCommand(frontendCommand(options))
 
 	hook := &cobra.Command{

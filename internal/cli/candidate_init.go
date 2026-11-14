@@ -25,6 +25,14 @@ func addBoundaryProfileFlags(
 			"Boundary dependencies: published compatibility or explicit "+
 				"local candidate",
 		)
+	addCandidateSourceFlags(command, profile)
+}
+
+// addCandidateSourceFlags declares explicit candidate checkout inputs.
+func addCandidateSourceFlags(
+	command *cobra.Command,
+	profile *project.BoundaryProfile,
+) {
 	command.Flags().
 		StringVar(
 			&profile.AuthSource,

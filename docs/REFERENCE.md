@@ -64,8 +64,8 @@ pluto vet
 A blueprint adds `resources`, `operations`, `operation_contracts`, `effects`,
 `roles`, `endpoints`, `jobs` and `agents` atomically. Unknown fields, conflicting
 filenames, missing authority or behavior obligations and unsupported combinations
-fail before writes. Existing authored files require explicit migration; generation
-never silently replaces them. Adding metadata never assigns an actor to a role.
+fail before writes. Existing authored files require explicit migration (see
+`pluto migrate` below); generation never silently replaces them. Adding metadata never assigns an actor to a role.
 
 `resources` declare `group`, exported `name`, safe SQL `table`, cache `namespace`
 and positive `version`, `visibility` (`owner` or `tenant`), `initial_state`,
@@ -109,6 +109,61 @@ checks, all three write entries and bounded delivery. It does not prove arbitrar
 business policy, remote provider idempotency or external dependency internals.
 Effects use stable downstream idempotency keys and finite retries; external
 exactly-once delivery is not claimed.
+
+## Migrating existing applications
+
+`pluto migrate` moves an application between manifest states (schema version and
+boundary profile) through ordered, versioned steps. Each step is deterministic and
+idempotent; a chain is planned completely before any write, and an application
+already at the target is a no-op.
+
+```sh
+pluto --no-input migrate --to candidate --dry-run \
+  --candidate-auth-source /absolute/path/pluto-auth \
+  --candidate-rbac-source /absolute/path/pluto-rbac \
+  --candidate-core-source /absolute/path/pluto-core \
+  --candidate-jobs-source /absolute/path/pluto-jobs
+pluto --no-input migrate --to candidate --contracts contracts.toml \
+  --candidate-auth-source ...   # same sources; applies the plan
+```
+
+`--to` takes a profile (`published`, `candidate`) or a schema version; the default
+is the latest schema in the current profile. `--dry-run` prints the step list,
+every changed path, the full unified diff and all manual items without writing.
+Applying requires a Git work tree with no uncommitted or untracked changes, so the
+result is reviewable and reversible with Git; no hooks run.
+
+A step may change only:
+
+- `pluto.toml`, through a typed manifest transform;
+- `go.mod`, keeping application requirements and adding profile requirements;
+- scaffold files that are still pristine. A file is pristine when it matches the
+  previous profile's render token for token, comments included; formatter-only
+  differences (layout, trailing commas) do not count as edits.
+
+Everything else becomes a manual item with `file:line`, the reason and the action:
+edited scaffold files at paths the target profile generates, edited scaffold files
+with no target counterpart, and authored Go code that uses package-level names the
+target removes (found by parsing with `go/ast`). Existing SQL migrations are never
+rewritten or removed; differences are reported. Edited README, AGENTS and `docs/`
+files are kept and listed as notes. The command exits nonzero while any manual item
+remains; a blocked step (an unmet precondition) writes nothing.
+
+After writing, migrate runs `go mod tidy` (when modules changed), OpenAPI
+generation, `pluto fmt`, `pluto architecture check` and `pluto vet`, and reports
+each result. A failed check fails the command; nothing is skipped or waived.
+
+Steps:
+
+- `010-published-to-candidate` (schema 10): requires explicit candidate sources
+  and multi tenancy; switching tenancy is not mechanical. Every declared operation
+  needs a typed behavior contract, which endpoint metadata cannot define, so supply
+  `--contracts`: a TOML file with `[[resources]]`, `[[operation_contracts]]`,
+  `[[effects]]`, `[[roles]]` (as in a blueprint) and `[[jobs]]` entries of `kind`
+  and `max_attempts`. Route-only feature flags block. Local credentials and OIDC
+  block while the candidate profile rejects them; the step re-checks them with the
+  candidate validator, so they become migratable when that support lands. Scaffold
+  tests specific to the published composition are removed while pristine.
 
 ## Interactive terminal wizard
 

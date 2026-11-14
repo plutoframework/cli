@@ -151,6 +151,13 @@ The library foundation adds account policy, method evidence and freshness guards
 Native social sign-in, TOTP enrollment and their frontend flows remain next work;
 no factor policy is enabled automatically by this upgrade.
 
+## Upgrade an existing application
+
+`pluto migrate --to <profile|schema> --dry-run` plans ordered, versioned
+migrations: manifest transforms, regenerated scaffold files and a precise list of
+manual items for anything edited. Apply from a clean Git tree; see the
+[reference](docs/REFERENCE.md#migrating-existing-applications).
+
 ## Read further
 
 - [API and integration reference](docs/REFERENCE.md)
