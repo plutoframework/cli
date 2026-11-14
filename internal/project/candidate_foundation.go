@@ -55,7 +55,6 @@ func candidateFoundation(m Manifest) (map[string][]byte, error) {
 	if m.Capabilities.LocalCredentials {
 		layout["internal/transport/credentials.go"] = "credentials.go"
 		layout["internal/paths/credentials.go"] = "credentials_paths.go"
-		layout["cmd/api/credentials.go"] = "credentials_main.go"
 		layout["db/migrations/004_local_credentials.sql"] = "credentials_" +
 			"schema.sql"
 		layout["db/migrations/006_authentication.sql"] = "authentication_" +
@@ -65,7 +64,6 @@ func candidateFoundation(m Manifest) (map[string][]byte, error) {
 	}
 
 	if m.Capabilities.OIDC {
-		layout["cmd/api/oidc.go"] = "oidc_main.go"
 		layout["internal/config/oidc.go"] = "oidc_config.go"
 		layout["internal/paths/oidc.go"] = "oidc_paths.go"
 	}

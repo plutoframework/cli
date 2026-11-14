@@ -25,7 +25,6 @@ import (
 "github.com/go-chi/chi/v5"
 "github.com/jackc/pgx/v5/pgxpool"
 auth "github.com/plutoframework/pluto-auth"
-authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
 "github.com/plutoframework/pluto-core/cache"
 identitygate "github.com/plutoframework/pluto-rbac/identity"
 jobs "github.com/plutoframework/pluto-jobs"
@@ -33,14 +32,27 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 `,
 	)
 
-	for _, name := range []string{
+	local := m.Capabilities.LocalCredentials
+	internalImports := []string{
 		"access",
 		"config",
 		"transport",
 		"features",
 		"storage/identity",
 		"paths",
-	} {
+	}
+
+	if local {
+		internalImports = append(internalImports, "auth/credentials")
+	} else {
+		fmt.Fprintf(
+			&source,
+			`authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+`,
+		)
+	}
+
+	for _, name := range internalImports {
 		fmt.Fprintf(&source, `	%s
 `, q(m.Project.Module+"/internal/"+name))
 	}
@@ -184,8 +196,25 @@ func (r *CandidateRuntime) WithSession(
 }
 `,
 	)
-	source.WriteString(
-		`func NewCandidateRuntime(
+	if local {
+		source.WriteString(
+			`// NewCandidateRuntime owns the only credential session issuer. Its
+// password/OIDC manager also issues every opaque operation identity.
+func NewCandidateRuntime(
+	ctx context.Context,
+	cfg config.Config,
+	pool *pgxpool.Pool,
+	logger *slog.Logger,
+	store cache.Store,
+	environment string,
+	destinations map[string]string,
+	integrations credentials.Integrations,
+) (*CandidateRuntime, error) {
+`,
+		)
+	} else {
+		source.WriteString(
+			`func NewCandidateRuntime(
 	cfg config.Config,
 	pool *pgxpool.Pool,
 	logger *slog.Logger,
@@ -193,6 +222,12 @@ func (r *CandidateRuntime) WithSession(
 	environment string,
 	destinations map[string]string,
 ) (*CandidateRuntime, error) {
+`,
+		)
+	}
+
+	source.WriteString(
+		`
 	if pool == nil || logger == nil || environment == "" {
 		return nil, errors.New("invalid candidate runtime")
 	}
@@ -207,7 +242,27 @@ func (r *CandidateRuntime) WithSession(
 	}
 
 	memberships := identity.NewMemberships(pool)
+`,
+	)
 
+	if local {
+		source.WriteString(
+			`
+	authentication, err := newCandidateAuthentication(
+		ctx,
+		cfg,
+		pool,
+		memberships,
+		integrations,
+	)
+	if err != nil {
+		return nil, err
+	}
+`,
+		)
+	} else {
+		source.WriteString(
+			`
 	sessions, err := authpostgres.New(pool)
 	if err != nil {
 		return nil, err
@@ -221,7 +276,12 @@ func (r *CandidateRuntime) WithSession(
 	if err != nil {
 		return nil, err
 	}
+`,
+		)
+	}
 
+	source.WriteString(
+		`
 	authorizer, err := access.NewAuthorizer(policy, memberships)
 	if err != nil {
 		return nil, err
@@ -386,7 +446,16 @@ func (r *CandidateRuntime) WithSession(
 	)
 	source.WriteString(
 		`	transport.RegisterSessions(reg, authentication)
-	reg.Handle(
+`,
+	)
+
+	if local {
+		source.WriteString(`	registerCandidateCredentials(router, authentication)
+`)
+	}
+
+	source.WriteString(
+		`	reg.Handle(
 		paths.Health,
 		func(w http.ResponseWriter, r *http.Request) {
 			transport.JSON(w, 200, paths.HealthResponse{Data: "ok"})

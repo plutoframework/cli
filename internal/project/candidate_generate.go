@@ -240,6 +240,17 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 	}
 
 	files["internal/app/candidate_operations_gen.go"] = runtime
+
+	if m.Capabilities.LocalCredentials {
+		for path, name := range candidateCredentialLayout() {
+			source, err := render(name, dataFor(m, Endpoint{}))
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+
+			files[path] = source
+		}
+	}
 	files["internal/app/routes_gen.go"] = []byte("package app\n")
 	files["internal/app/app.go"] = []byte("package app\n")
 	files["internal/app/worker.go"] = []byte("package app\n")
@@ -309,4 +320,22 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 	}
 
 	return files, nil
+}
+
+// CandidateCredentialSeam is the single authored local-credential integration
+// file. It is created once and never regenerated; canonical checks restrict
+// what its package may import instead of trusting its content.
+const CandidateCredentialSeam = "internal/auth/credentials/" +
+	"integrations.go"
+
+func candidateCredentialLayout() map[string]string {
+	return map[string]string{
+		"internal/app/candidate_credentials_gen.go": "candidate_" +
+			"credentials.go",
+		"internal/auth/credentials/contract_gen.go": "candidate_" +
+			"integrations.go",
+		"internal/storage/identity/attempts_gen.go": "candidate_limiter.go",
+		"db/migrations/008_credential_attempts.sql": "candidate_attempts_" +
+			"schema.sql",
+	}
 }

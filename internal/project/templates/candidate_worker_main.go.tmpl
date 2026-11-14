@@ -15,6 +15,10 @@ import (
 	"{{.Module}}/internal/app"
 	"{{.Module}}/internal/caching"
 	"{{.Module}}/internal/config"
+{{- if .LocalCredentials}}
+	"{{.Module}}/internal/auth/credentials"
+	"{{.Module}}/internal/storage/identity"
+{{- end}}
 	"{{.Module}}/internal/storage/postgres"
 )
 
@@ -116,13 +120,34 @@ func run() error {
 			config.Prefix + "EFFECT_" + key + "_URL")
 	}
 
+{{- if .LocalCredentials}}
+
+	// The authored seam supplies delivery and ingress only. The managed
+	// runtime owns session issuance, identity and membership checks.
+	limiter, err := identity.NewAttemptLimiter(pool, 10, 15*time.Minute)
+	if err != nil {
+		return errors.New("credential attempt limiter configuration failed")
+	}
+
+	integrations, err := credentials.New(
+		startup,
+		credentials.Shared{Limiter: limiter})
+	if err != nil {
+		return err
+	}
+{{- end}}
+
 	runtime, err := app.NewCandidateRuntime(
+{{- if .LocalCredentials}}
+		startup,
+{{- end}}
 		cfg,
 		pool,
 		logger,
 		dataCache,
 		cfg.Cache.Environment,
-		destinations)
+		destinations{{if .LocalCredentials}},
+		integrations{{end}})
 	if err != nil {
 		return errors.New(
 			"candidate worker configuration failed; verify declared policy," +

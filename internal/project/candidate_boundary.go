@@ -272,6 +272,15 @@ func inspectCandidateBoundaries(
 	}
 
 	rules.managed = owned
+
+	// The authored credential seam is a declared framework extension. Its
+	// files are not trusted by content; their capabilities are restricted.
+	credentialSeam := ""
+	if canonical.Capabilities.LocalCredentials {
+		credentialSeam = filepath.ToSlash(
+			filepath.Dir(CandidateCredentialSeam),
+		)
+	}
 	managedDirectories := map[string]bool{}
 
 	for path := range owned {
@@ -565,6 +574,13 @@ func inspectCandidateBoundaries(
 		})
 
 		if rules.managed[file.path] {
+			continue
+		}
+
+		if credentialSeam != "" && file.directory == credentialSeam {
+			inspectCandidateCredentialSeam(file, module, emit)
+			inspectCandidateFile(file, rules, types, functions, emit)
+
 			continue
 		}
 
