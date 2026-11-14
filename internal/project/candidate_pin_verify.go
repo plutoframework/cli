@@ -13,7 +13,8 @@ import (
 )
 
 // candidateAPIProbe references candidate-only APIs the managed candidate
-// runtime depends on, one or more per pinned module. It is type-checked
+// runtime and declared resource contracts depend on, one or more per pinned
+// module. It is type-checked
 // against the exact pinned versions; a pin that only carries the published API
 // fails to compile instead of being trusted by its version string.
 const candidateAPIProbe = `package probe
@@ -22,7 +23,9 @@ import (
 	auth "github.com/plutoframework/pluto-auth"
 	"github.com/plutoframework/pluto-auth/methods/password"
 	authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+	"github.com/plutoframework/pluto-core/cache"
 	"github.com/plutoframework/pluto-core/idempotency"
+	"github.com/plutoframework/pluto-core/pagination"
 	"github.com/plutoframework/pluto-core/state"
 	corepostgres "github.com/plutoframework/pluto-core/stores/postgres"
 	jobs "github.com/plutoframework/pluto-jobs"
@@ -47,6 +50,11 @@ var (
 	_ = (*identity.Gate).Use
 	_ = idempotency.NewClaim
 	_ = state.New[string, string, struct{}]
+	_ = (*state.Machine[string, string, struct{}]).Evaluate
+	_ state.Evaluated[string, string]
+	_ state.Binding[string]
+	_ = pagination.Finish[struct{}]
+	_ = cache.NewLoader[struct{}]
 	_ = corepostgres.New
 	_ = jobs.NewDefinition[struct{}]
 	_ = (*jobs.Definition[struct{}]).Bind

@@ -31,11 +31,26 @@ func candidateProxyModules() []fakeCandidateModule {
 		"type ResourcePolicyFunc func()\n"}
 
 	core := map[string]string{
+		"cache/cache.go": "package cache\n\nfunc NewLoader[T any]() {}\n",
 		"idempotency/idempotency.go": "package idempotency\n\n" +
 			"func NewClaim() {}\n",
+		"pagination/pagination.go": "package pagination\n\n" +
+			"func Finish[T any]() {}\n",
 		"state/state.go": "package state\n\n" +
+			"type Machine[S ~string, E ~string, F any] struct{}\n\n" +
 			"func New[S ~string, E ~string, F any]() {}\n",
 	}
+
+	// Published Core lacks evaluated transitions; candidate Core adds them.
+	publishedCore := map[string]string{}
+	for name, content := range core {
+		publishedCore[name] = content
+	}
+
+	core["state/evaluated.go"] = "package state\n\n" +
+		"func (*Machine[S, E, F]) Evaluate() {}\n\n" +
+		"type Evaluated[S ~string, E ~string] struct{}\n\n" +
+		"type Binding[S ~string] struct{}\n"
 
 	return []fakeCandidateModule{
 		{path: base + "pluto-auth", version: "v0.9.0", files: map[string]string{
@@ -67,6 +82,7 @@ func candidateProxyModules() []fakeCandidateModule {
 		},
 		{path: base + "pluto-core", version: "v0.9.0", files: core},
 		{path: base + "pluto-core", version: "v0.9.1", files: core},
+		{path: base + "pluto-core", version: "v0.8.0", files: publishedCore},
 		{
 			path:    base + "pluto-core/stores/postgres",
 			version: "v0.9.0",
@@ -247,6 +263,11 @@ func TestVerifyCandidatePinsAgainstModuleProxy(t *testing.T) {
 			"github.com/plutoframework/pluto-rbac",
 			"v0.8.0",
 			"candidate APIs",
+		},
+		"published core state": {
+			"github.com/plutoframework/pluto-core",
+			"v0.8.0",
+			"Evaluate",
 		},
 		"impostor module path": {
 			"github.com/plutoframework/pluto-core/stores/postgres",

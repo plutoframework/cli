@@ -23,8 +23,8 @@ func pinnedProfileFixture() BoundaryProfile {
 	return BoundaryProfile{
 		Mode: "candidate",
 		Pins: map[string]string{
-			"github.com/plutoframework/pluto-auth":                 pinAuth,
-			"github.com/plutoframework/pluto-auth/stores/postgres": pinAuthPG,
+			"github.com/plutoframework/pluto-auth":                  pinAuth,
+			"github.com/plutoframework/pluto-auth/stores/postgres":  pinAuthPG,
 			"github.com/plutoframework/pluto-auth/methods/password": pinAuth,
 			"github.com/plutoframework/pluto-rbac":                  pinRBAC,
 			boundaryIdentityModule:                                  pinIdentity,

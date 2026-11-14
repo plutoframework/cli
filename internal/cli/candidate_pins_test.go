@@ -139,6 +139,36 @@ func TestCandidatePinnedConsumer(t *testing.T) {
 	mustInvoke(t, root, "fmt")
 	mustInvoke(t, root, "vet")
 	assertPinnedModule(t, root)
+
+	// Tidy prunes pins nothing imports yet; a blueprint whose storage
+	// imports them restores the exact pins before tidy runs again.
+	external(t, root, "go", "mod", "tidy")
+	mustInvoke(t, root, "vet")
+
+	path := filepath.Join(root, "ticket-blueprint.toml")
+	if err := os.WriteFile(
+		path,
+		[]byte(candidateLocalBlueprint),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	mustInvoke(t, root, "--no-input", "add", "blueprint", "--file", path)
+	external(t, root, "go", "mod", "tidy")
+	mustInvoke(t, root, "fmt")
+	mustInvoke(t, root, "openapi")
+	mustInvoke(t, root, "vet")
+	assertPinnedModule(t, root)
+
+	module, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil || !strings.Contains(
+		string(module),
+		"github.com/plutoframework/pluto-core/stores/postgres v0.1.1-0.",
+	) {
+		t.Fatalf("blueprint storage does not use the pinned store: %v\n%s",
+			err, module)
+	}
 }
 
 // pluto migrate adopts the same pins for an existing published app and its
