@@ -48,6 +48,15 @@ must invoke the same sealed operation. Provider URLs are deployment
 configuration;
 external delivery remains at-least-once and requires stable-key deduplication.
 
+{{if .LocalCredentials}}
+Local credentials{{if .OIDC}} and OIDC{{end}} are managed: sign-in creates a
+live session through the runtime's single fenced manager, which also issues the
+opaque operation identity. The only authored production file is
+internal/auth/credentials/integrations.go (Sender, Ingress, Limiter, Policy).
+Keep it to delivery and abuse controls; ARCH609 rejects imports of application
+packages, Pluto authority modules, stores, database clients, reflect or unsafe.
+Never log notifications, tokens or passwords.
+{{end}}
 Apply explicit database migrations before startup. No constructor creates
 schemas,
 users, role assignments or fixture credentials. Candidate dependencies are

@@ -27,6 +27,15 @@ mutations = [
         "./internal/project#TestCandidateBoundaryCapabilitiesAndForgery",
     ),
     (
+        "candidate credential seam import restriction",
+        "internal/project/candidate_credential_seam.go",
+        "case path == module || strings.HasPrefix(path, module+\"/\"):\n"
+        "\t\treturn false",
+        "case path == module || strings.HasPrefix(path, module+\"/\"):\n"
+        "\t\treturn true",
+        "./internal/project#TestCandidateCredentialSeamRejectsAuthorityImports",
+    ),
+    (
         "candidate private authority fields",
         "internal/project/candidate_boundary.go",
         "owners != nil &&",
@@ -256,6 +265,13 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "TestCandidateGeneratedConsumer",
             ),
             (
+                "candidate shared credential attempt window",
+                "internal/project/templates/candidate_limiter.go.tmpl",
+                "if count > l.attempts {",
+                "if count > l.attempts+1 {",
+                "TestCandidateLocalCredentialConsumer",
+            ),
+            (
                 "candidate downstream stable delivery key",
                 "internal/project/templates/candidate_effect.go.tmpl",
                 'request.Header.Set("Idempotency-Key", command.Key())',
@@ -270,6 +286,12 @@ required_assertions = {
         "managed sibling altered opaque caller field"
     ),
     "candidate closed production ownership": "unowned initializer accepted",
+    "candidate credential seam import restriction": (
+        "restricted seam import accepted"
+    ),
+    "candidate shared credential attempt window": (
+        "shared attempt window not enforced across replicas"
+    ),
     "candidate authoritative transition guard": "FORGED_ACTOR_FACTS_COMMITTED",
     "candidate downstream stable delivery key": (
         "TYPED_DELIVERY_SINK_REJECTED_PAYLOAD"

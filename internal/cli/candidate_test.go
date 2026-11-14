@@ -493,6 +493,17 @@ func assertCandidateCases(t *testing.T, output string, runtime bool) {
 		)
 	}
 
+	assertCandidateCaseNames(t, output, expected...)
+}
+
+// Required named cases must run and pass; a skip or missing case is a failure.
+func assertCandidateCaseNames(
+	t *testing.T,
+	output string,
+	expected ...string,
+) {
+	t.Helper()
+
 	passed := map[string]bool{}
 	decoder := json.NewDecoder(strings.NewReader(output))
 
