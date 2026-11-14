@@ -1,0 +1,30 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { parse } from "smol-toml";
+
+export const webRoot = path.resolve(
+  fileURLToPath(new URL("../", import.meta.url)),
+);
+
+// A frontend-only repository keeps its own pluto.toml (kind = "frontend")
+// beside package.json. Otherwise the frontend is embedded and the Go
+// application's pluto.toml sits one directory up.
+export function manifestRoot(directory = webRoot) {
+  const resolved = path.resolve(directory);
+  const local = path.join(resolved, "pluto.toml");
+  if (existsSync(local) && parse(readFileSync(local, "utf8")).kind === "frontend")
+    return resolved;
+  return path.dirname(resolved);
+}
+
+export function readManifest(directory = webRoot) {
+  const root = manifestRoot(directory);
+  return parse(readFileSync(path.join(root, "pluto.toml"), "utf8"));
+}
+
+// Backend contract for a frontend-only repository; undefined when embedded.
+export function frontendApi(directory = webRoot) {
+  const manifest = readManifest(directory);
+  return manifest.kind === "frontend" ? manifest.frontend?.api : undefined;
+}

@@ -3,11 +3,14 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
 import { plutoTheme } from "./scripts/theme-vite.mjs";
+import { frontendApi } from "./scripts/manifest.mjs";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 const target = new URL(
-  process.env.<%.Prefix%>WEB_API_TARGET ?? "http://127.0.0.1:8080",
+  process.env.<%.Prefix%>WEB_API_TARGET ??
+    frontendApi()?.dev_target ??
+    "http://127.0.0.1:8080",
 );
 if (
   target.protocol !== "http:" ||

@@ -50,14 +50,14 @@ func (f Frontend) ValidateTheme() error {
 	}
 
 	if t.Overrides != "" {
-		prefix := f.Directory + "/src/"
+		prefix := f.Path("src") + "/"
 		if !strings.HasPrefix(t.Overrides, prefix) ||
 			!strings.HasSuffix(t.Overrides, ".css") ||
 			strings.Contains(t.Overrides, "/generated/") {
 			return fmt.Errorf(
 				"frontend.theme.overrides must be a CSS file below %ssrc "+
 					"outside generated directories",
-				f.Directory+"/",
+				strings.TrimSuffix(prefix, "src/"),
 			)
 		}
 

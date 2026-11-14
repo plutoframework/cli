@@ -47,6 +47,7 @@ func frontendMenu(kind string) wizardModel {
 func frontendForm(
 	model wizardModel,
 	m project.Manifest,
+	found bool,
 	cmd *cobra.Command,
 	args []string,
 ) wizardModel {
@@ -57,7 +58,58 @@ func frontendForm(
 
 	switch model.kind {
 	case "frontend-init":
+
+		// Inside an application the default stays the embedded frontend;
+		// a separate repository is an explicit choice.
+		location := "application"
+		locations := []wizardChoice{
+			{"Inside this application (" + m.Project.Name + ")", "application"},
+			{"Separate repository (current directory)", "separate"},
+		}
+
+		if !found || seed(cmd, "api", "") != "" ||
+			seed(cmd, "openapi", "") != "" {
+			location = "separate"
+		}
+
+		if !found {
+			locations = locations[1:]
+		}
+
 		model.fields = []wizardField{
+			choiceField(
+				"location",
+				"Frontend location",
+				"Separate repositories keep their own pluto.toml and read the "+
+					"backend's OpenAPI. The backend is not modified.",
+				location,
+				locations...),
+			textField(
+				"api",
+				"Backend checkout path (separate repository)",
+				"Reads name, env prefix and auth settings. Leave blank to "+
+					"use an OpenAPI URL instead.",
+				seed(cmd, "api", ""),
+			),
+			textField(
+				"openapi",
+				"OpenAPI path or HTTPS URL (separate repository)",
+				"Optional with a backend path; it defaults to "+
+					"openapi/openapi.json there.",
+				seed(cmd, "openapi", ""),
+			),
+			textField(
+				"name",
+				"Project name (separate repository without backend path)",
+				"Lowercase kebab-case.",
+				seed(cmd, "name", ""),
+			),
+			textField(
+				"env-prefix",
+				"Backend env prefix (separate repository without backend path)",
+				"For example MY_API_.",
+				seed(cmd, "env-prefix", ""),
+			),
 			choiceField(
 				"ui",
 				"Component library",
@@ -149,6 +201,33 @@ func frontendForm(
 
 		switch model.kind {
 		case "frontend-init":
+			if v["location"] == "separate" {
+				if v["api"] == "" && v["openapi"] == "" {
+					return nil, fmt.Errorf(
+						"a separate repository needs a backend path or an " +
+							"OpenAPI source",
+					)
+				}
+
+				result = append(
+					result,
+					"init",
+					"--ui="+v["ui"],
+					"--auth="+v["auth"],
+				)
+				if v["api"] != "" {
+					result = append(result, "--api="+v["api"])
+				}
+
+				for _, name := range []string{"openapi", "name", "env-prefix"} {
+					if v[name] != "" {
+						result = append(result, "--"+name+"="+v[name])
+					}
+				}
+
+				break
+			}
+
 			candidate := m
 
 			candidate.Frontend = &project.Frontend{

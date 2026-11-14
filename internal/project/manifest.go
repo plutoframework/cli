@@ -31,6 +31,10 @@ type Manifest struct {
 	Endpoints          []Endpoint          `toml:"endpoints,omitempty"`
 	Jobs               []Job               `toml:"jobs,omitempty"`
 	Frontend           *Frontend           `toml:"frontend,omitempty"`
+
+	// Kind is empty for Go applications and KindFrontend for a frontend that
+	// lives in its own repository.
+	Kind string `toml:"kind,omitempty"`
 }
 
 type Project struct {
@@ -86,6 +90,14 @@ var (
 )
 
 func (m Manifest) Validate() error {
+	switch m.Kind {
+	case "":
+	case KindFrontend:
+		return m.validateStandaloneFrontend()
+	default:
+		return fmt.Errorf("kind must be omitted or %q", KindFrontend)
+	}
+
 	if err := ValidateBoundaryProfile(
 		m.Boundary,
 		m.Capabilities.Tenancy,
@@ -363,7 +375,23 @@ func canonicalRoute(path string) string {
 	return strings.Join(parts, "/")
 }
 
+// Discover finds the Go application manifest. Frontend-only repositories are
+// refused so application generators never run against them.
 func Discover(start string) (string, Manifest, error) {
+	root, m, err := DiscoverAny(start)
+	if err == nil && m.Standalone() {
+		return "", Manifest{}, fmt.Errorf(
+			"%s is a frontend-only Pluto project; use pluto frontend, "+
+				"pluto fmt or pluto vet here",
+			filepath.Join(root, "pluto.toml"),
+		)
+	}
+
+	return root, m, err
+}
+
+// DiscoverAny finds an application or frontend-only manifest.
+func DiscoverAny(start string) (string, Manifest, error) {
 	root, err := filepath.Abs(start)
 	if err != nil {
 		return "", Manifest{}, err
@@ -392,24 +420,18 @@ func Discover(start string) (string, Manifest, error) {
 }
 
 func Decode(data []byte) (Manifest, error) {
+	var probe struct {
+		Kind string `toml:"kind"`
+	}
+	if err := toml.Unmarshal(data, &probe); err == nil &&
+		probe.Kind == KindFrontend {
+		return decodeFrontend(data)
+	}
+
 	var m Manifest
 
-	decoder := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields()
-	if err := decoder.Decode(&m); err != nil {
-		var unknown *toml.StrictMissingError
-		if errors.As(err, &unknown) {
-			keys := make([]string, 0, len(unknown.Errors))
-			for _, field := range unknown.Errors {
-				keys = append(keys, strings.Join(field.Key(), "."))
-			}
-
-			return m, fmt.Errorf(
-				"pluto.toml: unknown settings: %s",
-				strings.Join(keys, ", "),
-			)
-		}
-
-		return m, fmt.Errorf("pluto.toml: %w", err)
+	if err := strictDecode(data, &m); err != nil {
+		return m, err
 	}
 
 	if err := m.Validate(); err != nil {
@@ -429,5 +451,31 @@ func Decode(data []byte) (Manifest, error) {
 }
 
 func Encode(m Manifest) ([]byte, error) {
+	if m.Standalone() {
+		return encodeFrontend(m)
+	}
+
 	return toml.Marshal(m)
+}
+
+func strictDecode(data []byte, target any) error {
+	decoder := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		var unknown *toml.StrictMissingError
+		if errors.As(err, &unknown) {
+			keys := make([]string, 0, len(unknown.Errors))
+			for _, field := range unknown.Errors {
+				keys = append(keys, strings.Join(field.Key(), "."))
+			}
+
+			return fmt.Errorf(
+				"pluto.toml: unknown settings: %s",
+				strings.Join(keys, ", "),
+			)
+		}
+
+		return fmt.Errorf("pluto.toml: %w", err)
+	}
+
+	return nil
 }

@@ -19,7 +19,7 @@ func frontendThemeCommand(options Options) *cobra.Command {
 			"CSS",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			root, m, err := project.Discover(options.Directory)
+			root, m, err := project.DiscoverAny(options.Directory)
 			if err != nil {
 				return err
 			}

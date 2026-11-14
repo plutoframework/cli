@@ -20,6 +20,7 @@ func frontendCommand(options Options) *cobra.Command {
 	var (
 		ui, directory        string
 		auth, dry, noInstall bool
+		split                splitFlags
 	)
 
 	init := &cobra.Command{
@@ -27,6 +28,33 @@ func frontendCommand(options Options) *cobra.Command {
 		Short: "Initialize React with native, HeroUI v3 or shadcn controls",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if split.requested() {
+				if cmd.Flags().Changed("directory") {
+					return fmt.Errorf(
+						"--directory is for a frontend inside the " +
+							"application; a separate repository uses the " +
+							"current directory",
+					)
+				}
+
+				root, err := filepath.Abs(options.Directory)
+				if err != nil {
+					return err
+				}
+
+				name, api, err := split.resolve(cmd, root)
+				if err != nil {
+					return err
+				}
+
+				plan, err := frontend.InitStandalone(root, name, api, ui, auth)
+				if err != nil {
+					return err
+				}
+
+				return applyFrontend(cmd, root, plan, dry, noInstall)
+			}
+
 			root, m, err := project.Discover(options.Directory)
 			if err != nil {
 				return err
@@ -40,6 +68,7 @@ func frontendCommand(options Options) *cobra.Command {
 			return applyFrontend(cmd, root, plan, dry, noInstall)
 		},
 	}
+	split.register(init)
 	init.Flags().
 		StringVar(
 			&ui,
@@ -79,7 +108,7 @@ func frontendCommand(options Options) *cobra.Command {
 			"check",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			root, m, err := project.Discover(options.Directory)
+			root, m, err := project.DiscoverAny(options.Directory)
 			if err != nil {
 				return err
 			}
@@ -119,7 +148,7 @@ func frontendAddCommand(options Options, auth bool) *cobra.Command {
 		Short: "Add a presentation component and its required primitives",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			root, m, err := project.Discover(options.Directory)
+			root, m, err := project.DiscoverAny(options.Directory)
 			if err != nil {
 				return err
 			}
