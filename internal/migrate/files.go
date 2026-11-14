@@ -56,6 +56,12 @@ func reconcile(
 		want, inNext := next[name]
 		pristine := exists && inPrevious && sameSource(name, current, old)
 
+		// Anchor reports where the user diverged from the scaffold.
+		line := firstDifference(current, want)
+		if inPrevious {
+			line = firstDifference(current, old)
+		}
+
 		switch {
 		case inNext && !exists:
 			if err := w.Write(name, want); err != nil {
@@ -65,7 +71,7 @@ func reconcile(
 		case isSQLMigration(name):
 			w.Manual(Item{
 				Path:   name,
-				Line:   firstDifference(current, want),
+				Line:   line,
 				Reason: "existing SQL migration differs from the " + profile +
 					" profile; applied migrations are never rewritten",
 				Action: "add a new numbered migration that reaches the " +
@@ -78,7 +84,7 @@ func reconcile(
 		case inNext && isDocumentation(name):
 			w.Note(Item{
 				Path: name,
-				Line: firstDifference(current, want),
+				Line: line,
 				Reason: "documentation edited since scaffold; kept " +
 					"unchanged",
 				Action: "compare with the " + profile + " scaffold text " +
@@ -87,7 +93,7 @@ func reconcile(
 		case inNext:
 			w.Manual(Item{
 				Path:   name,
-				Line:   firstDifference(current, want),
+				Line:   line,
 				Reason: "modified since scaffold; the " + profile +
 					" profile generates this path",
 				Action: "move your changes out of this file (or port them " +
@@ -110,7 +116,7 @@ func reconcile(
 		default:
 			w.Manual(Item{
 				Path:   name,
-				Line:   firstDifference(current, old),
+				Line:   line,
 				Reason: "modified published scaffold file has no " +
 					profile + " counterpart",
 				Action: "port the changes to the " + profile + " seams, " +

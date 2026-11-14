@@ -143,7 +143,7 @@ func reportPlan(out io.Writer, plan *migrate.Plan) {
 
 	if plan.Blocked {
 		fmt.Fprintln(out, "Blocked: nothing will be written until the "+
-			"manual items below are resolved.")
+			"manual items below are resolved; changes are a preview.")
 	}
 
 	if paths := plan.Paths(); len(paths) > 0 {

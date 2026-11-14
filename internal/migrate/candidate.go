@@ -162,7 +162,7 @@ func candidateManifest(
 		})
 	}
 
-	blockers = append(blockers, identityIngress(old, raw)...)
+	blockers = append(blockers, identityIngress(next, raw)...)
 
 	if len(options.Contracts) > 0 {
 		var contracts CandidateContracts
@@ -249,17 +249,24 @@ func candidateManifest(
 // validator currently rejects both; once it accepts them, their foundation
 // files are reconciled like every other scaffold file and any credential-
 // specific manifest or code transforms belong here.
-func identityIngress(old project.Manifest, raw []byte) []Item {
-	if !old.Capabilities.LocalCredentials && !old.Capabilities.OIDC {
+func identityIngress(next project.Manifest, raw []byte) []Item {
+	if !next.Capabilities.LocalCredentials && !next.Capabilities.OIDC {
+		return nil
+	}
+
+	// Probe identity alone: sources, tenancy and operations are reported by
+	// their own checks, and identity is rechecked once sources resolve.
+	if _, err := project.CandidateReplacements(next.Boundary); err != nil {
 		return nil
 	}
 
 	probe := project.Manifest{
-		Boundary:      project.BoundaryProfile{Mode: ProfileCandidate},
-		SchemaVersion: old.SchemaVersion,
-		Capabilities:  old.Capabilities,
-		Database:      old.Database,
+		Boundary:      next.Boundary,
+		SchemaVersion: next.SchemaVersion,
+		Capabilities:  next.Capabilities,
+		Database:      next.Database,
 	}
+	probe.Capabilities.Tenancy = "multi"
 
 	err := project.ValidateManifestContracts(probe)
 	if err == nil {

@@ -192,7 +192,7 @@ func (w *Workspace) Note(item Item) {
 	w.plan.Notes = append(w.plan.Notes, item)
 }
 
-// Block stops the chain: the current step and later steps write nothing.
+// Block stops the chain; Write refuses blocked plans entirely.
 func (w *Workspace) Block(item Item) {
 	w.plan.Blocked = true
 	w.Manual(item)
@@ -362,10 +362,8 @@ func build(
 			return nil, fmt.Errorf("%s: %w", step.ID, err)
 		}
 
+		// A blocked plan keeps its changes as a preview; Write refuses it.
 		if plan.Blocked {
-			plan.Writes = map[string][]byte{}
-			plan.Deletes = map[string]bool{}
-
 			break
 		}
 
