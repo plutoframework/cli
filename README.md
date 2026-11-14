@@ -111,6 +111,24 @@ The script runs `pluto fmt`, `pluto vet`, operation tests and OpenAPI freshness,
 then cleans up. Use real credential and membership integrations for an actual
 application. For React, start with `pluto frontend init --ui heroui-v3`.
 
+### Frontend in its own repository (optional)
+
+By default the frontend lives in `web/` inside the application. To keep it in
+a separate repository instead, run init from that repository:
+
+```sh
+mkdir ../orbital-web && cd ../orbital-web && git init
+pluto frontend init --ui heroui-v3 --api ../orbital
+```
+
+This writes a frontend-only `pluto.toml` (`kind = "frontend"`). Its
+`[frontend.api]` table records the backend's OpenAPI source, env prefix, auth
+capabilities and an optional `dev_target`. The backend is not modified and does
+not reference the frontend. Without a backend checkout, use
+`--openapi https://api.example.com/openapi.json --name orbital
+--env-prefix ORBITAL_`. `pluto fmt` and `pluto vet` run the frontend checks there
+and report drift from a locally linked backend.
+
 ## See Pluto in motion
 
 [![Pluto CLI scaffolds an API and curl receives HTTP 200 from its public health endpoint](https://raw.githubusercontent.com/plutoframework/pluto/main/assets/readme/demo.gif)](https://github.com/plutoframework/pluto/blob/main/docs/DEMO.md)
