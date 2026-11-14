@@ -72,8 +72,9 @@ func New(options Options) *cobra.Command {
 		Use:   "pluto",
 		Short: "Generate and check explicit Go APIs and React applications",
 		Long: "Pluto scaffolds Go/Chi APIs with explicit operations " +
-			"and shared Pluto libraries.\nRun pluto without arguments in " +
-			"a terminal for the guided wizard.\nUse explicit arguments " +
+			"and shared Pluto libraries.\nRun a command such as pluto init " +
+			"in a terminal for its guided wizard, or pluto --interactive " +
+			"for the wizard menu.\nUse explicit arguments " +
 			"and --no-input for agents and scripts.",
 		Version:       options.Version,
 		SilenceErrors: true,
@@ -148,7 +149,9 @@ func New(options Options) *cobra.Command {
 	)
 	root.AddCommand(hook)
 
-	decorateWizard(root, options, "menu", 0, true)
+	// Bare `pluto` prints help; the menu opens only with --interactive.
+	// Subcommands such as `pluto init` still open their wizard on a terminal.
+	decorateWizard(root, options, "menu", 0, false)
 
 	for _, command := range root.Commands() {
 		switch command.Name() {

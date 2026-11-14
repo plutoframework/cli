@@ -41,7 +41,9 @@ curl -fsS http://127.0.0.1:8080/healthz
 
 The response is `{"data":"ok"}`. Change `ORBIT_SERVER_ADDRESS` if the port is busy.
 Docker, mise and fnox presets are included; use `--no-docker --no-mise --no-fnox`
-to omit them. Hooks are opt-in. Run `pluto` in a terminal for the wizard.
+to omit them. Hooks are opt-in. Run a command such as `pluto init` in a
+terminal for its wizard, or `pluto --interactive` for the wizard menu; bare
+`pluto` prints help.
 
 ### 3. Make a protected business endpoint return data
 
