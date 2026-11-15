@@ -504,7 +504,8 @@ func TestStreamBodyFailsClosed(t *testing.T) {
 	}
 
 	err := Vet(context.Background(), root, m, io.Discard, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "does not support streams") {
+	if err == nil ||
+		!strings.Contains(err.Error(), "does not support streams") {
 		t.Fatalf("Vet must refuse stream bodies for that reason: %v", err)
 	}
 }

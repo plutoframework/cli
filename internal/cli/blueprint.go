@@ -253,7 +253,9 @@ func addBlueprintCommand(options Options) *cobra.Command {
 				}
 			}
 
-			if err := merge(project.AuthoredAdapterStubs(manifest)); err != nil {
+			if err := merge(
+				project.AuthoredAdapterStubs(manifest),
+			); err != nil {
 				return err
 			}
 

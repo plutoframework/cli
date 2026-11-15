@@ -51,6 +51,7 @@ func authoredDiagnostics(
 	files map[string]string,
 ) []ArchitectureDiagnostic {
 	t.Helper()
+
 	root := candidateReviewFixture(t, files)
 	diagnostics, _ := inspectCandidateBoundaries(
 		root,

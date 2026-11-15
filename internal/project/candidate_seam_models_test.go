@@ -309,7 +309,10 @@ func TestSeamHandlerAuthenticatesBeforeParsingQuery(t *testing.T) {
 		parse := strings.Index(text, "models.Parse"+operation.Action+"Query")
 
 		if caller < 0 || parse < 0 || caller > parse {
-			t.Fatalf("%s must resolve the caller before parsing", operation.ID())
+			t.Fatalf(
+				"%s must resolve the caller before parsing",
+				operation.ID(),
+			)
 		}
 	}
 }

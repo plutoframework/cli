@@ -94,7 +94,12 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 	// Authored schema and queries come first: the blueprint proposes the
 	// row-level security and append-only migrations for tables that exist.
 	seamFile(t, root, "010_users.sql", "db/migrations/010_users.sql")
-	seamFile(t, root, "011_audit_events.sql", "db/migrations/011_audit_events.sql")
+	seamFile(
+		t,
+		root,
+		"011_audit_events.sql",
+		"db/migrations/011_audit_events.sql",
+	)
 	seamFile(t, root, "events.sql", "db/queries/audit/events.sql")
 	seamFile(t, root, "blueprint.toml", "audit-blueprint.toml")
 
@@ -117,7 +122,12 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 	seamFile(t, root, "list.go.txt", "internal/logic/audit/list.go")
 	seamFile(t, root, "append.go.txt", "internal/logic/audit/append.go")
 	seamFile(t, root, "verify.go.txt", "internal/logic/audit/verify.go")
-	seamFile(t, root, "event_store.go.txt", "internal/adapters/audit/event_store.go")
+	seamFile(
+		t,
+		root,
+		"event_store.go.txt",
+		"internal/adapters/audit/event_store.go",
+	)
 	seamFile(t, root, "logic_test.go.txt", "internal/logic/audit/logic_test.go")
 
 	external(t, root, "sqlc", "generate")

@@ -29,6 +29,7 @@ type authoredOp struct {
 	Resource   string
 	Result     string
 	Pagination bool
+
 	// PagedRequest is set when the request model carries a Page the workflow
 	// must bind from verified scope: a page read exposed as an endpoint.
 	PagedRequest bool
