@@ -25,6 +25,7 @@ func CheckMigrations(cfg Config) ([]Diagnostic, error) {
 	}
 
 	var diagnostics []Diagnostic
+
 	files, err := migrationFiles(cfg)
 	if err != nil {
 		return nil, err
@@ -59,6 +60,7 @@ func CheckMigrations(cfg Config) ([]Diagnostic, error) {
 
 func migrationFiles(cfg Config) ([]string, error) {
 	var files []string
+
 	for _, dir := range cfg.SchemaDirs {
 		entries, err := os.ReadDir(filepath.Join(cfg.Root, dir))
 		if err != nil {
@@ -71,9 +73,11 @@ func migrationFiles(cfg Config) ([]string, error) {
 				strings.HasSuffix(name, ".down.sql") {
 				continue
 			}
+
 			files = append(files, filepath.ToSlash(filepath.Join(dir, name)))
 		}
 	}
+
 	sort.Strings(files)
 
 	return files, nil
@@ -95,15 +99,19 @@ func upSection(source string) string {
 
 func splitStatements(tokens []token) [][]token {
 	var statements [][]token
+
 	start := 0
+
 	for i, tok := range tokens {
 		if tok.punct(";") {
 			if i > start {
 				statements = append(statements, tokens[start:i])
 			}
+
 			start = i + 1
 		}
 	}
+
 	if start < len(tokens) {
 		statements = append(statements, tokens[start:])
 	}
@@ -114,6 +122,7 @@ func splitStatements(tokens []token) [][]token {
 // evaluate turns the final migration state into diagnostics.
 func (s *migrationState) evaluate(cfg Config) []Diagnostic {
 	var diagnostics []Diagnostic
+
 	for _, declared := range cfg.Tables {
 		if declared.TenantColumn == "" {
 			continue
@@ -202,11 +211,14 @@ func (s *migrationState) policyDiagnostics(
 	state *tableState,
 ) []Diagnostic {
 	var diagnostics []Diagnostic
+
 	covered := map[string]bool{}
+
 	names := make([]string, 0, len(state.Policies))
 	for name := range state.Policies {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
 
 	for _, name := range names {
@@ -294,17 +306,20 @@ func (s *migrationState) triggerDiagnostics(
 	state *tableState,
 ) []Diagnostic {
 	covered := map[string]bool{}
+
 	for _, trigger := range state.Triggers {
 		if !trigger.Before || trigger.Disabled ||
 			!s.functions[trigger.Function] {
 			continue
 		}
+
 		for event := range trigger.Events {
 			covered[event] = true
 		}
 	}
 
 	var diagnostics []Diagnostic
+
 	for _, event := range []string{"update", "delete"} {
 		if covered[event] {
 			continue

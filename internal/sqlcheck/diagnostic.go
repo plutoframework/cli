@@ -18,12 +18,15 @@ const RuleID = "ARCH612"
 // Table is a declared authored-data table.
 type Table struct {
 	Name string
+
 	// Group owns the table; informational only.
 	Group string
+
 	// TenantColumn is the column every query and RLS policy must bind.
 	// An empty value declares a table that is not tenant scoped. Tenant
 	// scoped tables always require FORCE ROW LEVEL SECURITY and a policy.
 	TenantColumn string
+
 	// AppendOnly requires no-update and no-delete triggers.
 	AppendOnly bool
 }
@@ -31,27 +34,35 @@ type Table struct {
 // QuerySet is a declared set of authored sqlc query files.
 type QuerySet struct {
 	Group string
+
 	// Files are glob patterns relative to the project root.
 	Files []string
+
 	// Tables lists the declared tables this set may touch.
 	Tables []string
 }
 
 // Config is the complete input of a check run.
 type Config struct {
+
 	// Root is the project directory; all other paths are relative to it.
 	Root   string
 	Tables []Table
 	Sets   []QuerySet
+
 	// SchemaDirs hold the migrations sqlc and the migration scanner read.
 	SchemaDirs []string
+
 	// QueryRoots are directories scanned for stray *.sql query files.
 	QueryRoots []string
+
 	// SQLCConfig is the managed sqlc configuration verified by sqlc diff.
 	// Empty skips the diff step.
 	SQLCConfig string
+
 	// SQLCPath overrides the sqlc binary; empty searches PATH.
 	SQLCPath string
+
 	// TenantSetting is the per-transaction setting read by RLS policies.
 	// Empty means app.tenant_id.
 	TenantSetting string

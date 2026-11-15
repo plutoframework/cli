@@ -20,6 +20,7 @@ type query struct {
 	Line   int
 	Text   string
 	Params []queryParam
+
 	// Tables are the tables sqlc resolved for columns and parameters.
 	Tables []string
 }
@@ -127,6 +128,7 @@ func analyzeQuery(q query, env queryEnv) []Diagnostic {
 	}
 
 	var diagnostics []Diagnostic
+
 	diagnostics = append(diagnostics, checkDeclared(q, stmt, env)...)
 	if len(diagnostics) > 0 {
 		return diagnostics
@@ -193,13 +195,16 @@ func tableKey(name string) string {
 // the query set.
 func checkDeclared(q query, stmt *statement, env queryEnv) []Diagnostic {
 	seen := map[string]bool{}
+
 	var names []string
+
 	for _, ref := range stmt.Refs {
 		if !seen[ref.Name] {
 			seen[ref.Name] = true
 			names = append(names, ref.Name)
 		}
 	}
+
 	for _, name := range q.Tables {
 		key := tableKey(name)
 		if key != "" && !seen[key] {
@@ -209,6 +214,7 @@ func checkDeclared(q query, stmt *statement, env queryEnv) []Diagnostic {
 	}
 
 	var diagnostics []Diagnostic
+
 	for _, name := range names {
 		if _, declared := env.tables[name]; !declared {
 			diagnostics = append(diagnostics, newDiagnostic(

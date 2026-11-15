@@ -2,18 +2,20 @@ package sqlcheck
 
 // tenantExpression reports whether a policy expression is exactly
 // `<column> = current_setting('<setting>'[, true|false])`, in either order,
-// ignoring parentheses, `::type` casts and a wrapping SELECT.
+// ignoring parentheses, `::type` casts and a scalar SELECT wrapper.
 func (s *migrationState) tenantExpression(tokens []token, column string) bool {
 	if column == "" {
 		return false
 	}
 
 	var flat []token
+
 	for i := 0; i < len(tokens); i++ {
 		switch {
-		case tokens[i].punct("("), tokens[i].punct(")"):
+		case tokens[i].punct("("), tokens[i].punct(")"), tokens[i].is("select"):
 			continue
 		case tokens[i].punct("::"):
+
 			// Skip the cast target, including a schema-qualified name.
 			i++
 			for i+1 < len(tokens) && tokens[i+1].punct(".") {
@@ -22,11 +24,8 @@ func (s *migrationState) tenantExpression(tokens []token, column string) bool {
 
 			continue
 		}
-		flat = append(flat, tokens[i])
-	}
 
-	if len(flat) > 0 && flat[0].is("select") {
-		flat = flat[1:]
+		flat = append(flat, tokens[i])
 	}
 
 	for i, tok := range flat {

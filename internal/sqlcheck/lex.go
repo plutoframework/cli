@@ -34,7 +34,9 @@ func isIdentStart(c byte) bool {
 		c >= 0x80
 }
 
-func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+func isDigit(c byte) bool {
+	return c >= '0' && c <= '9'
+}
 
 func isIdentPart(c byte) bool {
 	return isIdentStart(c) || isDigit(c) || c == '$'
@@ -104,6 +106,7 @@ func (l *lexer) skipLineComment() {
 
 func (l *lexer) skipBlockComment() bool {
 	depth := 0
+
 	for l.pos < len(l.src) {
 		switch {
 		case strings.HasPrefix(l.src[l.pos:], "/*"):
@@ -112,6 +115,7 @@ func (l *lexer) skipBlockComment() bool {
 		case strings.HasPrefix(l.src[l.pos:], "*/"):
 			depth--
 			l.pos += 2
+
 			if depth == 0 {
 				return true
 			}
@@ -119,6 +123,7 @@ func (l *lexer) skipBlockComment() bool {
 			if l.src[l.pos] == '\n' {
 				l.line++
 			}
+
 			l.pos++
 		}
 	}
@@ -129,23 +134,27 @@ func (l *lexer) skipBlockComment() bool {
 // quoted reads a string or quoted identifier with doubled-quote escapes.
 func (l *lexer) quoted(quote byte, kind tokenKind) bool {
 	start, line := l.pos, l.line
+
 	l.pos++
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
 		if c == '\n' {
 			l.line++
 		}
+
 		if c == quote {
 			if l.pos+1 < len(l.src) && l.src[l.pos+1] == quote {
 				l.pos += 2
 
 				continue
 			}
+
 			l.pos++
 			l.emit(kind, l.src[start:l.pos], line)
 
 			return true
 		}
+
 		l.pos++
 	}
 
@@ -155,11 +164,13 @@ func (l *lexer) quoted(quote byte, kind tokenKind) bool {
 // dollar reads $n parameters and $tag$ ... $tag$ quoted bodies.
 func (l *lexer) dollar() bool {
 	start, line := l.pos, l.line
+
 	end := l.pos + 1
 	if end < len(l.src) && isDigit(l.src[end]) {
 		for end < len(l.src) && isDigit(l.src[end]) {
 			end++
 		}
+
 		l.pos = end
 		l.emit(tokParam, l.src[start:end], line)
 
@@ -169,6 +180,7 @@ func (l *lexer) dollar() bool {
 	for end < len(l.src) && (isIdentPart(l.src[end]) && l.src[end] != '$') {
 		end++
 	}
+
 	if end >= len(l.src) || l.src[end] != '$' {
 		l.pos++
 		l.emit(tokPunct, "$", line)
@@ -177,6 +189,7 @@ func (l *lexer) dollar() bool {
 	}
 
 	tag := l.src[start : end+1]
+
 	closing := strings.Index(l.src[end+1:], tag)
 	if closing < 0 {
 		return false
@@ -196,6 +209,7 @@ func (l *lexer) number() {
 		(isDigit(l.src[l.pos]) || l.src[l.pos] == '.') {
 		l.pos++
 	}
+
 	l.emit(tokNumber, l.src[start:l.pos], l.line)
 }
 
@@ -204,6 +218,7 @@ func (l *lexer) word() {
 	for l.pos < len(l.src) && isIdentPart(l.src[l.pos]) {
 		l.pos++
 	}
+
 	text := l.src[start:l.pos]
 
 	// E'...' and similar prefixed strings keep their body as one token.
@@ -224,11 +239,14 @@ func (l *lexer) punct() {
 	for _, op := range []string{"::", "<>", "!=", "<=", ">=", "||"} {
 		if strings.HasPrefix(l.src[l.pos:], op) {
 			l.emit(tokPunct, op, l.line)
+
 			l.pos += len(op)
 
 			return
 		}
 	}
+
 	l.emit(tokPunct, string(l.src[l.pos]), l.line)
+
 	l.pos++
 }

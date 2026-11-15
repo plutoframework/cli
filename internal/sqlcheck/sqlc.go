@@ -20,6 +20,7 @@ func checkWithSQLC(
 	tables := tableMap(cfg)
 
 	var diagnostics []Diagnostic
+
 	for _, set := range cfg.Sets {
 		files, err := expandSet(cfg.Root, set)
 		if err != nil || len(files) == 0 {
@@ -30,6 +31,7 @@ func checkWithSQLC(
 		if err != nil {
 			return nil, err
 		}
+
 		diagnostics = append(diagnostics, found...)
 	}
 
@@ -93,6 +95,7 @@ func analyzeSet(
 	}
 
 	locations := queryLocations(cfg.Root, files)
+
 	env := queryEnv{
 		tables:  tables,
 		allowed: map[string]bool{},
@@ -103,8 +106,10 @@ func analyzeSet(
 	}
 
 	var diagnostics []Diagnostic
+
 	for _, raw := range payload.Queries {
 		q := query{Name: raw.Name, Text: raw.Text}
+
 		location, known := locations[raw.Name]
 		if known {
 			q.File, q.Line = location.file, location.line
@@ -117,15 +122,18 @@ func analyzeSet(
 				q.Tables = append(q.Tables, column.Table.Name)
 			}
 		}
+
 		for _, param := range raw.Params {
 			item := queryParam{Number: param.Number}
 			if param.Column != nil {
 				item.NotNull = param.Column.NotNull
+
 				item.Slice = param.Column.IsSQLCSlice
 				if param.Column.Table != nil {
 					q.Tables = append(q.Tables, param.Column.Table.Name)
 				}
 			}
+
 			q.Params = append(q.Params, item)
 		}
 
@@ -143,6 +151,7 @@ type location struct {
 // queryLocations maps sqlc query names to their `-- name:` comment line.
 func queryLocations(root string, files []string) map[string]location {
 	locations := map[string]location{}
+
 	for _, file := range files {
 		data, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {
@@ -205,17 +214,29 @@ func captureCatalog(
 
 	capture := filepath.Join(dir, "request.json")
 	plugin := filepath.Join(dir, "capture.sh")
+
 	script := "#!/bin/sh\ncat > " + shellQuote(capture) + "\nprintf '{}'\n"
 	if err := os.WriteFile(plugin, []byte(script), 0o700); err != nil {
 		return nil, "", err
 	}
 
 	var schemas, queries []string
-	for _, schema := range cfg.SchemaDirs {
-		schemas = append(schemas, filepath.Join(cfg.Root, schema))
+
+	// sqlc resolves paths relative to the config file, so make them so.
+	relative := func(path string) string {
+		rel, err := filepath.Rel(dir, filepath.Join(cfg.Root, path))
+		if err != nil {
+			return filepath.Join(cfg.Root, path)
+		}
+
+		return rel
 	}
+	for _, schema := range cfg.SchemaDirs {
+		schemas = append(schemas, relative(schema))
+	}
+
 	for _, file := range files {
-		queries = append(queries, filepath.Join(cfg.Root, file))
+		queries = append(queries, relative(file))
 	}
 
 	generated := sqlcConfigFile{Version: "2"}
@@ -234,12 +255,14 @@ func captureCatalog(
 	if err != nil {
 		return nil, "", err
 	}
+
 	configPath := filepath.Join(dir, "sqlc.json")
 	if err := os.WriteFile(configPath, encoded, 0o600); err != nil {
 		return nil, "", err
 	}
 
 	output, runErr := runSQLC(ctx, cfg.Root, sqlc, "generate", "-f", configPath)
+
 	data, readErr := os.ReadFile(capture)
 	if runErr != nil || readErr != nil {
 		return nil, output, nil
@@ -267,6 +290,7 @@ func runSQLC(
 	command.Dir = root
 
 	var output bytes.Buffer
+
 	command.Stdout = &output
 	command.Stderr = &output
 	err := command.Run()

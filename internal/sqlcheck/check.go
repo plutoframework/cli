@@ -21,6 +21,7 @@ func Check(ctx context.Context, cfg Config) ([]Diagnostic, error) {
 	}
 
 	var diagnostics []Diagnostic
+
 	diagnostics = append(diagnostics, checkQueryFiles(cfg)...)
 
 	sqlc, err := findSQLC(cfg)
@@ -38,6 +39,7 @@ func Check(ctx context.Context, cfg Config) ([]Diagnostic, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		diagnostics = append(diagnostics, found...)
 	}
 
@@ -45,6 +47,7 @@ func Check(ctx context.Context, cfg Config) ([]Diagnostic, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	diagnostics = append(diagnostics, migrations...)
 
 	sortDiagnostics(diagnostics)
@@ -66,6 +69,7 @@ func findSQLC(cfg Config) (string, error) {
 
 func tableMap(cfg Config) map[string]Table {
 	tables := map[string]Table{}
+
 	for _, table := range cfg.Tables {
 		table.Name = tableKey(table.Name)
 		tables[table.Name] = table
@@ -77,7 +81,9 @@ func tableMap(cfg Config) map[string]Table {
 // expandSet resolves a set's globs to sorted project-relative files.
 func expandSet(root string, set QuerySet) ([]string, error) {
 	seen := map[string]bool{}
+
 	var files []string
+
 	for _, pattern := range set.Files {
 		matches, err := filepath.Glob(filepath.Join(root, pattern))
 		if err != nil {
@@ -89,14 +95,17 @@ func expandSet(root string, set QuerySet) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			rel = filepath.ToSlash(rel)
 			if seen[rel] {
 				continue
 			}
+
 			seen[rel] = true
 			files = append(files, rel)
 		}
 	}
+
 	sort.Strings(files)
 
 	return files, nil
@@ -105,7 +114,9 @@ func expandSet(root string, set QuerySet) ([]string, error) {
 // checkQueryFiles verifies query files live only in declared sets.
 func checkQueryFiles(cfg Config) []Diagnostic {
 	var diagnostics []Diagnostic
+
 	owner := map[string]string{}
+
 	for _, set := range cfg.Sets {
 		files, err := expandSet(cfg.Root, set)
 		if err != nil {
@@ -141,6 +152,7 @@ func checkQueryFiles(cfg Config) []Diagnostic {
 
 				continue
 			}
+
 			owner[file] = set.Group
 		}
 	}
@@ -161,30 +173,35 @@ func strayFiles(
 	owner map[string]string,
 ) []Diagnostic {
 	var diagnostics []Diagnostic
+
 	base := filepath.Join(root, queryRoot)
-	_ = filepath.WalkDir(base, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() ||
-			!strings.EqualFold(filepath.Ext(path), ".sql") {
-			return nil
-		}
+	_ = filepath.WalkDir(
+		base,
+		func(path string, entry os.DirEntry, err error) error {
+			if err != nil || entry.IsDir() ||
+				!strings.EqualFold(filepath.Ext(path), ".sql") {
+				return nil
+			}
 
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if _, declared := owner[rel]; !declared {
-			diagnostics = append(diagnostics, newDiagnostic(
-				rel,
-				1,
-				"SQL query file is not part of any declared query set.",
-				"Declare it in a [[queries]] set with its tables or "+
-					"delete it.",
-			))
-		}
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				return nil
+			}
 
-		return nil
-	})
+			rel = filepath.ToSlash(rel)
+			if _, declared := owner[rel]; !declared {
+				diagnostics = append(diagnostics, newDiagnostic(
+					rel,
+					1,
+					"SQL query file is not part of any declared query set.",
+					"Declare it in a [[queries]] set with its tables or "+
+						"delete it.",
+				))
+			}
+
+			return nil
+		},
+	)
 
 	return diagnostics
 }

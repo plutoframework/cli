@@ -30,6 +30,7 @@ func qualifiedName(tokens []token, at int) (string, int) {
 	}
 
 	name, _ := identName(tokens[at])
+
 	at++
 	for at+1 < len(tokens) && tokens[at].punct(".") {
 		name, _ = identName(tokens[at+1])
@@ -63,12 +64,14 @@ func (s *migrationState) apply(file string, st []token) {
 
 func (s *migrationState) applyCreateTable(file string, st []token, line int) {
 	at := skipWords(st, 2, "if", "not", "exists")
+
 	name, at := qualifiedName(st, at)
 	if name == "" || at >= len(st) || !st[at].punct("(") {
 		return
 	}
 
 	state := s.create(name, file, line)
+
 	closing := skipParens(st, at)
 	for _, part := range splitTop(st[at+1 : closing-1]) {
 		if len(part) == 0 {
@@ -80,6 +83,7 @@ func (s *migrationState) applyCreateTable(file string, st []token, line int) {
 			"exclude":
 			continue
 		}
+
 		if column, ok := identName(part[0]); ok {
 			state.Columns[tableKey(column)] = true
 		}
@@ -89,6 +93,7 @@ func (s *migrationState) applyCreateTable(file string, st []token, line int) {
 func (s *migrationState) applyAlterTable(st []token) {
 	at := skipWords(st, 2, "if", "exists", "only")
 	name, at := qualifiedName(st, at)
+
 	state := s.table(name)
 	if state == nil {
 		return
@@ -102,6 +107,7 @@ func (s *migrationState) applyAlterTable(st []token) {
 func hasSeq(have []string, want ...string) bool {
 	for i := 0; i+len(want) <= len(have); i++ {
 		match := true
+
 		for j, word := range want {
 			if have[i+j] != word {
 				match = false
@@ -109,6 +115,7 @@ func hasSeq(have []string, want ...string) bool {
 				break
 			}
 		}
+
 		if match {
 			return true
 		}
@@ -161,7 +168,9 @@ func (s *migrationState) renameColumn(state *tableState, tokens []token) {
 
 	from, _ := identName(tokens[at])
 	to, _ := identName(tokens[at+2])
+
 	delete(state.Columns, tableKey(from))
+
 	state.Columns[tableKey(to)] = true
 }
 
@@ -173,12 +182,14 @@ func (s *migrationState) applyTriggerState(
 ) {
 	disabled := action[0] == "disable" || hasSeq(action, "enable", "replica")
 	at := skipWords(tokens, 1, "replica", "always")
+
 	at = skipWords(tokens, at, "trigger")
 	if at >= len(tokens) {
 		return
 	}
 
 	target, _ := identName(tokens[at])
+
 	target = tableKey(target)
 	for name, trigger := range state.Triggers {
 		if target == "all" || target == "user" || target == name {
@@ -197,16 +208,19 @@ func (s *migrationState) applyDrop(st []token) {
 		}
 	case st[1].is("policy"), st[1].is("trigger"):
 		at := skipWords(st, 2, "if", "exists")
+
 		name, at := qualifiedName(st, at)
 		if at >= len(st) || !st[at].is("on") {
 			return
 		}
 
 		table, _ := qualifiedName(st, at+1)
+
 		state := s.table(table)
 		if state == nil {
 			return
 		}
+
 		if st[1].is("policy") {
 			delete(state.Policies, name)
 		} else {
@@ -267,11 +281,13 @@ func alwaysRaises(body string) bool {
 	}
 
 	raises := false
+
 	for i, tok := range tokens {
 		if tok.is("raise") && i+1 < len(tokens) &&
 			tokens[i+1].is("exception") {
 			raises = true
 		}
+
 		if tok.is("return") && i+1 < len(tokens) &&
 			(tokens[i+1].is("new") || tokens[i+1].is("old")) {
 			return false
@@ -330,6 +346,7 @@ func (s *migrationState) applyPolicy(
 	}
 
 	table, at := qualifiedName(st, at+1)
+
 	state := s.table(table)
 	if state == nil {
 		return

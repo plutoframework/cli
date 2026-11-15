@@ -35,9 +35,11 @@ type triggerState struct {
 // migrationState accumulates state across migration files.
 type migrationState struct {
 	tables map[string]*tableState
+
 	// functions maps a function name to whether its body always raises.
 	functions map[string]bool
 	setting   string
+
 	// columns maps declared table names to their tenant column.
 	columns map[string]string
 }

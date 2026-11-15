@@ -76,8 +76,10 @@ func TestAnalyzeQueryAccepts(t *testing.T) {
 
 	for name, text := range cases {
 		t.Run(name, func(t *testing.T) {
-			q := query{Name: "Q", File: "q.sql", Line: 3, Text: text,
-				Params: params(3)}
+			q := query{
+				Name: "Q", File: "q.sql", Line: 3, Text: text,
+				Params: params(3),
+			}
 			if got := analyzeQuery(q, testEnv()); len(got) != 0 {
 				t.Fatalf("want accept, got %v", got)
 			}
@@ -86,7 +88,10 @@ func TestAnalyzeQueryAccepts(t *testing.T) {
 }
 
 func TestAnalyzeQueryRejects(t *testing.T) {
-	cases := map[string]struct{ text, want string }{
+	cases := map[string]struct {
+		text string
+		want string
+	}{
 		"no tenant": {
 			"SELECT id FROM audit_events WHERE id = $1",
 			"does not bind",
@@ -291,8 +296,11 @@ func TestAnalyzeQueryRejects(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			q := query{Name: "Q", File: "q.sql", Line: 3, Text: tc.text,
-				Params: params(3)}
+			q := query{
+				Name: "Q", File: "q.sql", Line: 3, Text: tc.text,
+				Params: params(3),
+			}
+
 			got := analyzeQuery(q, testEnv())
 			if len(got) == 0 {
 				t.Fatalf("want rejection containing %q, got none", tc.want)
@@ -306,6 +314,7 @@ func TestAnalyzeQueryRejects(t *testing.T) {
 					t.Fatalf("malformed diagnostic %+v", d)
 				}
 			}
+
 			if !strings.Contains(joined, tc.want) {
 				t.Fatalf("want %q in %q", tc.want, joined)
 			}
@@ -315,13 +324,16 @@ func TestAnalyzeQueryRejects(t *testing.T) {
 
 func TestAnalyzeQueryParamShape(t *testing.T) {
 	text := "SELECT id FROM audit_events WHERE org_id = $1"
+
 	for name, param := range map[string]queryParam{
 		"nullable": {Number: 1, NotNull: false},
 		"slice":    {Number: 1, NotNull: true, Slice: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			q := query{Name: "Q", File: "q.sql", Line: 1, Text: text,
-				Params: []queryParam{param}}
+			q := query{
+				Name: "Q", File: "q.sql", Line: 1, Text: text,
+				Params: []queryParam{param},
+			}
 			if len(analyzeQuery(q, testEnv())) == 0 {
 				t.Fatal("want rejection")
 			}
@@ -329,6 +341,7 @@ func TestAnalyzeQueryParamShape(t *testing.T) {
 	}
 
 	q := query{Name: "Q", File: "q.sql", Line: 1, Text: text}
+
 	got := analyzeQuery(q, testEnv())
 	if len(got) == 0 || !strings.Contains(got[0].Message, "did not report") {
 		t.Fatalf("unreported param must fail closed: %v", got)
@@ -338,8 +351,11 @@ func TestAnalyzeQueryParamShape(t *testing.T) {
 func TestAnalyzeQuerySetMembership(t *testing.T) {
 	env := testEnv()
 	env.allowed = map[string]bool{"audit_events": true}
-	q := query{Name: "Q", File: "q.sql", Line: 1, Params: params(1),
-		Text: "SELECT t.id FROM audit_tags t WHERE t.org_id = $1"}
+	q := query{
+		Name: "Q", File: "q.sql", Line: 1, Params: params(1),
+		Text: "SELECT t.id FROM audit_tags t WHERE t.org_id = $1",
+	}
+
 	got := analyzeQuery(q, env)
 	if len(got) != 1 || !strings.Contains(got[0].Message, "does not list") {
 		t.Fatalf("want set-membership rejection, got %v", got)
@@ -347,9 +363,12 @@ func TestAnalyzeQuerySetMembership(t *testing.T) {
 }
 
 func TestAnalyzeQueryCatalogTablesMustBeDeclared(t *testing.T) {
-	q := query{Name: "Q", File: "q.sql", Line: 1, Params: params(1),
+	q := query{
+		Name: "Q", File: "q.sql", Line: 1, Params: params(1),
 		Text:   "SELECT id FROM audit_events WHERE org_id = $1",
-		Tables: []string{"hidden"}}
+		Tables: []string{"hidden"},
+	}
+
 	got := analyzeQuery(q, testEnv())
 	if len(got) != 1 || !strings.Contains(got[0].Message, "hidden") {
 		t.Fatalf("catalog table must be checked, got %v", got)

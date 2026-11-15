@@ -8,13 +8,17 @@ import (
 // statement is the structure extracted from a supported statement.
 type statement struct {
 	Kind string
+
 	// Refs are the table instances the statement reads or writes.
 	Refs []tableRef
+
 	// Where is the depth-0 WHERE clause, without the keyword.
 	Where []token
+
 	// InsertColumns and InsertRows describe INSERT ... VALUES.
 	InsertColumns []string
 	InsertRows    [][][]token
+
 	// Set is the UPDATE SET clause, without the keyword.
 	Set []token
 }
@@ -48,8 +52,6 @@ var aliasStoppers = map[string]bool{
 	"values":      true,
 	"tablesample": true,
 }
-
-var errUnsupported = errors.New("unsupported construct")
 
 func parseStatement(tokens []token) (*statement, error) {
 	first := tokens[0]
@@ -85,6 +87,7 @@ func depthZero(
 	match func(i int) bool,
 ) int {
 	depth := 0
+
 	for i := from; i < len(tokens); i++ {
 		switch {
 		case tokens[i].punct("("):
@@ -108,11 +111,13 @@ func parseSelect(stmt *statement, tokens []token) error {
 		return tokens[i].is("from") && !isKeyword(tokens, i-1, "distinct")
 	})
 	if from < 0 {
+
 		// A table-less select touches nothing.
 		return nil
 	}
 
 	end := clauseEnd(tokens, from+1)
+
 	refs, err := parseFromList(tokens[from+1 : end])
 	if err != nil {
 		return err
@@ -174,12 +179,14 @@ func isJoinStart(tokens []token, i int) bool {
 // Join conditions are skipped; tenant binding is only read from WHERE.
 func parseFromList(tokens []token) ([]tableRef, error) {
 	var refs []tableRef
+
 	i := 0
 	for i < len(tokens) {
 		for i < len(tokens) && (isJoinStart(tokens, i) ||
 			tokens[i].is("outer") || tokens[i].is("join")) {
 			i++
 		}
+
 		if i < len(tokens) && tokens[i].is("lateral") {
 			return nil, errors.New("LATERAL joins")
 		}
@@ -188,6 +195,7 @@ func parseFromList(tokens []token) ([]tableRef, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		refs = append(refs, ref)
 		i = next
 
@@ -198,8 +206,10 @@ func parseFromList(tokens []token) ([]tableRef, error) {
 
 				continue
 			}
+
 			i++
 		}
+
 		if i < len(tokens) && tokens[i].punct(",") {
 			i++
 		}
@@ -210,10 +220,12 @@ func parseFromList(tokens []token) ([]tableRef, error) {
 
 func skipParens(tokens []token, i int) int {
 	depth := 0
+
 	for ; i < len(tokens); i++ {
 		if tokens[i].punct("(") {
 			depth++
 		}
+
 		if tokens[i].punct(")") {
 			depth--
 			if depth == 0 {
@@ -266,16 +278,19 @@ func parseTableRefAt(
 			tokens[i].Text,
 		)
 	}
+
 	i++
 
 	if i < len(tokens) && tokens[i].punct(".") {
 		if i+1 >= len(tokens) {
 			return tableRef{}, i, errors.New("dangling qualified name")
 		}
+
 		qualified, ok := identName(tokens[i+1])
 		if !ok {
 			return tableRef{}, i, errors.New("malformed qualified name")
 		}
+
 		name = qualified
 		i += 2
 	}
@@ -288,11 +303,14 @@ func parseTableRefAt(
 	}
 
 	ref := tableRef{Name: tableKey(name)}
+
 	if i < len(tokens) && tokens[i].is("as") {
 		i++
 	}
+
 	if i < len(tokens) {
 		alias, ok := identName(tokens[i])
+
 		isStopper := tokens[i].Kind == tokIdent &&
 			(aliasStoppers[tokens[i].Text] ||
 				fromTerminators[tokens[i].Text])
@@ -310,6 +328,7 @@ func parseUpdate(stmt *statement, tokens []token) error {
 	if err != nil {
 		return err
 	}
+
 	stmt.Refs = []tableRef{ref}
 
 	if next >= len(tokens) || !tokens[next].is("set") {
@@ -323,6 +342,7 @@ func parseUpdate(stmt *statement, tokens []token) error {
 	if end < 0 {
 		end = len(tokens)
 	}
+
 	stmt.Set = tokens[next+1 : end]
 
 	if end < len(tokens) && tokens[end].is("from") {
@@ -343,6 +363,7 @@ func parseDelete(stmt *statement, tokens []token) error {
 	if err != nil {
 		return err
 	}
+
 	stmt.Refs = []tableRef{ref}
 
 	if next < len(tokens) && tokens[next].is("using") {
@@ -363,6 +384,7 @@ func parseInsert(stmt *statement, tokens []token) error {
 	if err != nil {
 		return err
 	}
+
 	stmt.Refs = []tableRef{ref}
 
 	if next >= len(tokens) || !tokens[next].punct("(") {
@@ -374,10 +396,12 @@ func parseInsert(stmt *statement, tokens []token) error {
 		if len(part) != 1 {
 			return errors.New("malformed INSERT column list")
 		}
+
 		name, ok := identName(part[0])
 		if !ok {
 			return errors.New("malformed INSERT column list")
 		}
+
 		stmt.InsertColumns = append(stmt.InsertColumns, tableKey(name))
 	}
 
@@ -424,7 +448,9 @@ func parseInsertRows(stmt *statement, tokens []token, i int) error {
 // splitTop splits tokens on depth-0 commas.
 func splitTop(tokens []token) [][]token {
 	var parts [][]token
+
 	depth, start := 0, 0
+
 	for i, tok := range tokens {
 		switch {
 		case tok.punct("("):

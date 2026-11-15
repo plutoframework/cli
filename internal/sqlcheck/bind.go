@@ -20,6 +20,7 @@ func checkTenantBinding(
 	}
 
 	var diagnostics []Diagnostic
+
 	for _, ref := range stmt.Refs {
 		table := env.tables[ref.Name]
 		if table.TenantColumn == "" {
@@ -32,6 +33,7 @@ func checkTenantBinding(
 		} else {
 			problem, repair = checkWhereBinding(q, stmt, ref, table)
 		}
+
 		if problem != "" {
 			diagnostics = append(diagnostics, fail(problem, repair)...)
 		}
@@ -39,7 +41,8 @@ func checkTenantBinding(
 
 	if stmt.Kind == "update" && len(stmt.Refs) == 1 {
 		table := env.tables[stmt.Refs[0].Name]
-		if table.TenantColumn != "" && setsColumn(stmt.Set, table.TenantColumn) {
+		if table.TenantColumn != "" &&
+			setsColumn(stmt.Set, table.TenantColumn) {
 			diagnostics = append(diagnostics, fail(
 				fmt.Sprintf(
 					"assigns tenant column %s in UPDATE SET.",
@@ -112,11 +115,13 @@ func checkInsertBinding(
 	table Table,
 ) (string, string) {
 	index := -1
+
 	for i, column := range stmt.InsertColumns {
 		if column == tableKey(table.TenantColumn) {
 			index = i
 		}
 	}
+
 	if index < 0 {
 		return fmt.Sprintf(
 				"inserts into %s without the tenant column %s.",
@@ -156,6 +161,7 @@ func paramProblem(q query, number int, table Table) string {
 		if param.Number != number {
 			continue
 		}
+
 		if param.Slice {
 			return fmt.Sprintf(
 				"binds %s.%s with sqlc.slice.",
@@ -163,6 +169,7 @@ func paramProblem(q query, number int, table Table) string {
 				table.TenantColumn,
 			)
 		}
+
 		if !param.NotNull {
 			return fmt.Sprintf(
 				"binds %s.%s with a nullable argument (sqlc.narg) or "+
@@ -187,7 +194,9 @@ func paramProblem(q query, number int, table Table) string {
 // the AND that belongs to BETWEEN inside its conjunct.
 func splitConjuncts(where []token) [][]token {
 	var parts [][]token
+
 	depth, start, between := 0, 0, 0
+
 	for i, tok := range where {
 		switch {
 		case tok.punct("("):
@@ -202,6 +211,7 @@ func splitConjuncts(where []token) [][]token {
 
 				continue
 			}
+
 			parts = append(parts, where[start:i])
 			start = i + 1
 		}
@@ -285,6 +295,7 @@ func tenantComparison(
 		if columnExpression(left, ref, column, single) {
 			return paramExpression(right)
 		}
+
 		if columnExpression(right, ref, column, single) {
 			return paramExpression(left)
 		}
