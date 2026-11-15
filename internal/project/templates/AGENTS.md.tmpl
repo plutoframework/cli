@@ -67,6 +67,18 @@ Authored seams (candidate): declare, then write only authored role files.
 - `[memberships]` binds roles to an app table; `active_column`/`active_values`
   deny suspended subjects. `[database] runtime_role` names the least-privilege
   role; a migration is proposed and startup refuses owner/BYPASSRLS roles.
+{{- if .HasMachine}}
+- Machine identity (gateways, agents): `[[principals]]` kind = "machine" binds a
+  table; `scope = "enroll"` is the generated public enrollment (single-use
+  hashed token, expiry, rate limit, binds the ed25519 key, tenant read from the
+  token row). `auth = "machine:<principal>"` operations are verified by
+  signature (`pluto-machine-v1`: method, path, query, body hash, timestamp,
+  nonce) and run as a scope.Execution whose tenant is the machine's and subject
+  its id. Machine permissions live on the principal, never on user roles.
+  Register machines in an authored write with `tx.IssueEnrollment(ctx,
+  principal, machineID)`; never accept a tenant or actor from machine input.
+  Revoke by changing the state column; the next request is denied.
+{{- end}}
 - Declaration changes: edit pluto.toml (or pluto add blueprint), then run
   `pluto generate`. Full reference: the CANDIDATE.md in the Pluto CLI docs.
 

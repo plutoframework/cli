@@ -101,16 +101,24 @@ func NewVerified(principal, machineID, tenantID, key string) Verified {
 }
 
 // Principal is the declared principal the machine belongs to.
-func (v Verified) Principal() string { return v.principal }
+func (v Verified) Principal() string {
+	return v.principal
+}
 
 // MachineID is the verified machine and the subject of its executions.
-func (v Verified) MachineID() string { return v.machineID }
+func (v Verified) MachineID() string {
+	return v.machineID
+}
 
 // TenantID is the tenant of the machine row.
-func (v Verified) TenantID() string { return v.tenantID }
+func (v Verified) TenantID() string {
+	return v.tenantID
+}
 
 // Key is the public key the signature verified against.
-func (v Verified) Key() string { return v.key }
+func (v Verified) Key() string {
+	return v.key
+}
 
 // Verifier verifies signed machine requests of a declared principal.
 type Verifier interface {

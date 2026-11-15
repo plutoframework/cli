@@ -3,572 +3,23 @@ package app_test
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"example.test/gwapp/internal/access"
-	"example.test/gwapp/internal/app"
-	"example.test/gwapp/internal/auth/credentials"
-	"example.test/gwapp/internal/config"
 	machineauth "example.test/gwapp/internal/ports/machineauth"
-	"example.test/gwapp/internal/transport"
 	models "example.test/gwapp/internal/models/gateways"
-	"example.test/gwapp/internal/storage/identity"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/plutoframework/pluto-auth/httpauth"
-	"github.com/plutoframework/pluto-auth/methods/password"
-	authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
-	"github.com/plutoframework/pluto-core/cache"
-	jobs "github.com/plutoframework/pluto-jobs"
 )
-
-const gwOrigin = "http://127.0.0.1:8080"
-
-type gwSender struct {
-	mutex sync.Mutex
-	items []password.Notification
-}
-
-func (s *gwSender) Send(
-	ctx context.Context,
-	notification password.Notification,
-) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	s.items = append(s.items, notification)
-
-	return nil
-}
-
-func (s *gwSender) token(t *testing.T, purpose password.Purpose) string {
-	t.Helper()
-
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	for index := len(s.items) - 1; index >= 0; index-- {
-		if s.items[index].Purpose == purpose {
-			return s.items[index].Token
-		}
-	}
-
-	t.Fatal("missing delivery")
-
-	return ""
-}
-
-type gwFixture struct {
-	admin   *pgxpool.Pool
-	runtime *pgxpool.Pool
-	app     *app.CandidateRuntime
-	sender  *gwSender
-	schema  string
-}
-
-// gwSetup applies the migrations as the database owner, then runs the whole
-// application as a separate login role that owns nothing, is not a superuser
-// and cannot bypass row-level security: the deployment the design requires.
-func gwSetup(t *testing.T) *gwFixture {
-	t.Helper()
-
-	address := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
-	if address == "" {
-		t.Fatal("audit fixture needs PLUTO_CLI_TEST_DATABASE_URL")
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
-	defer cancel()
-
-	admin, err := pgxpool.New(ctx, address)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(admin.Close)
-
-	suffix := strings.ToLower(jobs.NewID())
-	schema := "gw_" + suffix
-	role := "gw_rt_" + suffix
-	quoted := pgx.Identifier{schema}.Sanitize()
-	quotedRole := pgx.Identifier{role}.Sanitize()
-
-	for _, statement := range []string{
-		"CREATE SCHEMA " + quoted,
-		"CREATE ROLE " + quotedRole + " LOGIN PASSWORD 'runtime' " +
-			"NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
-	} {
-		if _, err := admin.Exec(ctx, statement); err != nil {
-			t.Fatal(statement, err)
-		}
-	}
-
-	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(
-			context.Background(),
-			10*time.Second,
-		)
-		defer cancel()
-
-		_, _ = admin.Exec(cleanup, "DROP SCHEMA "+quoted+" CASCADE")
-		_, _ = admin.Exec(cleanup, "DROP ROLE "+quotedRole)
-	})
-
-	owner, err := pgxpool.ParseConfig(address)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	owner.ConnConfig.RuntimeParams["search_path"] = schema
-
-	migrator, err := pgxpool.NewWithConfig(ctx, owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(migrator.Close)
-
-	migrations, err := filepath.Glob(
-		filepath.Join("..", "..", "db", "migrations", "*.sql"),
-	)
-	if err != nil || len(migrations) == 0 {
-		t.Fatal("missing migrations", err)
-	}
-
-	sort.Strings(migrations)
-
-	for _, path := range migrations {
-		migration, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := migrator.Exec(ctx, string(migration)); err != nil {
-			t.Fatal(path, err)
-		}
-	}
-
-	for _, statement := range []string{
-		"GRANT USAGE ON SCHEMA " + quoted + " TO " + quotedRole,
-		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA " +
-			quoted + " TO " + quotedRole,
-		"GRANT USAGE ON ALL SEQUENCES IN SCHEMA " + quoted + " TO " +
-			quotedRole,
-	} {
-		if _, err := migrator.Exec(ctx, statement); err != nil {
-			t.Fatal(statement, err)
-		}
-	}
-
-	settings, err := pgxpool.ParseConfig(address)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	settings.ConnConfig.User = role
-	settings.ConnConfig.Password = "runtime"
-	settings.ConnConfig.RuntimeParams["search_path"] = schema
-	settings.MaxConns = 24
-
-	pool, err := pgxpool.NewWithConfig(ctx, settings)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(pool.Close)
-
-	var super, bypass bool
-
-	if err := pool.QueryRow(
-		ctx,
-		"SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = "+
-			"current_user",
-	).Scan(&super, &bypass); err != nil || super || bypass {
-		t.Fatalf(
-			"runtime role must not bypass RLS: %v %v %v",
-			super,
-			bypass,
-			err,
-		)
-	}
-
-	cfg, err := config.LoadFrom(
-		func(key string) (string, bool) {
-			return address, key == config.Prefix+"DATABASE_URL"
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	limiter, err := identity.NewAttemptLimiter(pool, 1000, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sender := &gwSender{}
-
-	runtime, err := app.NewCandidateRuntime(
-		ctx,
-		cfg,
-		pool,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		cache.Disabled{},
-		"test",
-		map[string]string{},
-		credentials.Integrations{
-			Sender:  sender,
-			Limiter: limiter,
-			Ingress: func(next http.Handler) http.Handler {
-				return next
-			},
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return &gwFixture{
-		admin:   migrator,
-		runtime: pool,
-		app:     runtime,
-		sender:  sender,
-		schema:  schema,
-	}
-}
-
-func (f *gwFixture) request(
-	t *testing.T,
-	method, path, cookie, tenant string,
-) *httptest.ResponseRecorder {
-	t.Helper()
-
-	request := httptest.NewRequest(method, path, nil)
-	request.Header.Set("Origin", gwOrigin)
-
-	if tenant != "" {
-		request.Header.Set("X-Tenant-ID", tenant)
-	}
-
-	if cookie != "" {
-		request.AddCookie(
-			&http.Cookie{Name: httpauth.CookieName, Value: cookie},
-		)
-	}
-
-	response := httptest.NewRecorder()
-	f.app.Handler().ServeHTTP(response, request)
-
-	return response
-}
-
-func (f *gwFixture) post(
-	t *testing.T,
-	path, body string,
-	want int,
-) *httptest.ResponseRecorder {
-	t.Helper()
-
-	request := httptest.NewRequest(
-		http.MethodPost,
-		path,
-		strings.NewReader(body),
-	)
-	request.Header.Set("Origin", gwOrigin)
-	request.Header.Set("Content-Type", "application/json")
-
-	response := httptest.NewRecorder()
-	f.app.Handler().ServeHTTP(response, request)
-
-	if response.Code != want {
-		t.Fatalf("%s status=%d want=%d %s", path, response.Code, want,
-			response.Body.String())
-	}
-
-	return response
-}
-
-type gwUser struct {
-	id, session string
-}
-
-// enroll creates a verified password account and signs it in.
-func (f *gwFixture) enroll(t *testing.T, email string) gwUser {
-	t.Helper()
-
-	input := fmt.Sprintf(
-		`{"email":%q,"password":"synthetic long passphrase"}`,
-		email,
-	)
-
-	f.post(t, "/auth/enroll", input, 202)
-	f.post(t, "/auth/verification", fmt.Sprintf(`{"email":%q}`, email), 202)
-
-	verification, _ := json.Marshal(
-		map[string]string{"token": f.sender.token(t, password.VerifyEmail)},
-	)
-	f.post(t, "/auth/verify", string(verification), 200)
-
-	response := f.post(t, "/auth/signin", input, 200)
-
-	var session string
-
-	for _, cookie := range response.Result().Cookies() {
-		if cookie.Name == httpauth.CookieName {
-			session = cookie.Value
-		}
-	}
-
-	store, err := authpostgres.NewLocal(f.runtime)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	account, err := store.LookupAccount(t.Context(), email)
-	if err != nil || account.ID == "" || session == "" {
-		t.Fatal("enrollment failed", err)
-	}
-
-	return gwUser{id: account.ID, session: session}
-}
-
-
-func (f *gwFixture) call(
-	method, path, body, cookie, tenant string,
-) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(method, path, strings.NewReader(body))
-	request.Header.Set("Origin", gwOrigin)
-
-	if body != "" {
-		request.Header.Set("Content-Type", "application/json")
-	}
-
-	if tenant != "" {
-		request.Header.Set("X-Tenant-ID", tenant)
-	}
-
-	if cookie != "" {
-		request.AddCookie(
-			&http.Cookie{Name: httpauth.CookieName, Value: cookie},
-		)
-	}
-
-	response := httptest.NewRecorder()
-	f.app.Handler().ServeHTTP(response, request)
-
-	return response
-}
-
-func (f *gwFixture) expect(
-	t *testing.T,
-	response *httptest.ResponseRecorder,
-	want int,
-) {
-	t.Helper()
-
-	if response.Code != want {
-		t.Fatalf("status=%d want=%d %s", response.Code, want,
-			response.Body.String())
-	}
-}
-
-const gwPrincipal = "gateways.Gateway"
-
-type gwOrg struct {
-	tenant string
-	admin  gwUser
-}
-
-// org creates a tenant whose only member is a verified admin. Membership is
-// an explicit trusted SQL assignment, as in production.
-func (f *gwFixture) org(t *testing.T, email string) gwOrg {
-	t.Helper()
-
-	admin := f.enroll(t, email)
-	tenant := "org-" + strings.ToLower(jobs.NewID())
-
-	if _, err := f.admin.Exec(
-		t.Context(),
-		"INSERT INTO users (org_id, id, role) VALUES ($1, $2, 'admin')",
-		tenant,
-		admin.id,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	return gwOrg{tenant: tenant, admin: admin}
-}
-
-// create registers a pending gateway through the authored admin operation.
-func (f *gwFixture) create(
-	t *testing.T,
-	org gwOrg,
-	name string,
-) models.CreatedGateway {
-	t.Helper()
-
-	var created models.CreatedGateway
-
-	err := f.app.WithSession(
-		t.Context(),
-		org.admin.session,
-		org.tenant,
-		func(ctx context.Context, caller access.Caller) error {
-			var err error
-
-			created, err = f.app.Operations.GatewaysCreate.Execute(
-				ctx,
-				caller,
-				models.NewGateway{Name: name},
-			)
-
-			return err
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return created
-}
-
-func gwKey(t *testing.T) (ed25519.PrivateKey, string) {
-	t.Helper()
-
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return private, base64.RawURLEncoding.EncodeToString(public)
-}
-
-func (f *gwFixture) enrollGateway(
-	token, public string,
-) *httptest.ResponseRecorder {
-	body, _ := json.Marshal(
-		map[string]string{"token": token, "public_key": public},
-	)
-
-	return f.call("POST", "/api/gateways/enroll", string(body), "", "")
-}
-
-// active creates and enrolls a gateway, returning its id and private key.
-func (f *gwFixture) active(
-	t *testing.T,
-	org gwOrg,
-	name string,
-) (string, ed25519.PrivateKey) {
-	t.Helper()
-
-	created := f.create(t, org, name)
-	private, public := gwKey(t)
-
-	response := f.enrollGateway(created.Token, public)
-	f.expect(t, response, 200)
-
-	if !strings.Contains(response.Body.String(), created.ID) {
-		t.Fatalf("enrollment returned another machine: %s",
-			response.Body.String())
-	}
-
-	return created.ID, private
-}
-
-// signed builds a request signed for the exact body at the given time.
-func signed(
-	t *testing.T,
-	method, target, body string,
-	key ed25519.PrivateKey,
-	id string,
-	at time.Time,
-) *http.Request {
-	t.Helper()
-
-	request := httptest.NewRequest(method, target, strings.NewReader(body))
-	request.Header.Set("Origin", gwOrigin)
-
-	if body != "" {
-		request.Header.Set("Content-Type", "application/json")
-	}
-
-	if err := transport.SignMachineRequest(
-		request,
-		[]byte(body),
-		key,
-		gwPrincipal,
-		id,
-		at,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	return request
-}
-
-func (f *gwFixture) serve(r *http.Request) *httptest.ResponseRecorder {
-	response := httptest.NewRecorder()
-	f.app.Handler().ServeHTTP(response, r)
-
-	return response
-}
-
-func (f *gwFixture) heartbeat(
-	t *testing.T,
-	key ed25519.PrivateKey,
-	id string,
-	seq int,
-) *httptest.ResponseRecorder {
-	t.Helper()
-
-	return f.serve(signed(
-		t,
-		"POST",
-		"/api/gateway/heartbeat",
-		fmt.Sprintf(`{"seq":%d}`, seq),
-		key,
-		id,
-		time.Now(),
-	))
-}
-
-func (f *gwFixture) scalar(t *testing.T, query string, args ...any) string {
-	t.Helper()
-
-	var value string
-
-	if err := f.admin.QueryRow(
-		t.Context(),
-		"SELECT coalesce(("+query+")::text, '')",
-		args...,
-	).Scan(&value); err != nil {
-		t.Fatal(err)
-	}
-
-	return value
-}
 
 // A gateway enrolls once with the token an admin created, then every request
 // is verified by signature and acts in the tenant of its own row.
@@ -823,9 +274,12 @@ func TestMachineEnrollmentRejections(t *testing.T) {
 	created := f.create(t, org, "edge-enroll")
 	_, public := gwKey(t)
 
+	unknownToken := `{"token":"plt_enr_` + strings.Repeat("A", 43) +
+		`","public_key":"` + public + `"}`
+
 	for name, body := range map[string]string{
 		"empty":           `{}`,
-		"unknown token":   `{"token":"plt_enr_` + strings.Repeat("A", 43) + `","public_key":"` + public + `"}`,
+		"unknown token":   unknownToken,
 		"malformed token": `{"token":"nope","public_key":"` + public + `"}`,
 		"short key":       `{"token":"` + created.Token + `","public_key":"AAAA"}`,
 		"padded key":      `{"token":"` + created.Token + `","public_key":"` + public + `="}`,
@@ -987,7 +441,9 @@ func TestMachineRowLevelBoundaries(t *testing.T) {
 		t.Helper()
 
 		var n int
-		if err := f.runtime.QueryRow(t.Context(), query, args...).Scan(&n); err != nil {
+
+		row := f.runtime.QueryRow(t.Context(), query, args...)
+		if err := row.Scan(&n); err != nil {
 			t.Fatal(query, err)
 		}
 
@@ -995,8 +451,11 @@ func TestMachineRowLevelBoundaries(t *testing.T) {
 	}
 
 	for _, table := range []string{
-		"gateways", "pluto_machine_enrollments", "pluto_machine_nonces",
-		"pluto_machine_enrollment_lookup", "pluto_lookup_gateways_gatewaymachine",
+		"gateways",
+		"pluto_machine_enrollments",
+		"pluto_machine_nonces",
+		"pluto_machine_enrollment_lookup",
+		"pluto_lookup_gateways_gatewaymachine",
 	} {
 		if got := count("SELECT count(*) FROM " + table); got != 0 {
 			t.Fatalf("%s leaked %d rows without a setting", table, got)
@@ -1009,27 +468,42 @@ func TestMachineRowLevelBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defer func() { _ = tx.Rollback(t.Context()) }()
+	defer func() {
+		_ = tx.Rollback(t.Context())
+	}()
 
-	if _, err := tx.Exec(t.Context(),
-		"SELECT set_config('app.machine_enrollment', $1, true)", hash); err != nil {
+	if _, err := tx.Exec(
+		t.Context(),
+		"SELECT set_config('app.machine_enrollment', $1, true)",
+		hash,
+	); err != nil {
 		t.Fatal(err)
 	}
 
 	var rows int
-	if err := tx.QueryRow(t.Context(),
-		"SELECT count(*) FROM pluto_machine_enrollment_lookup").Scan(&rows); err != nil || rows != 1 {
+
+	err = tx.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM pluto_machine_enrollment_lookup",
+	).Scan(&rows)
+	if err != nil || rows != 1 {
 		t.Fatalf("lookup view returned %d rows: %v", rows, err)
 	}
 
 	// The base table is still closed to writes outside a tenant.
-	if _, err := tx.Exec(t.Context(),
-		"UPDATE pluto_machine_enrollments SET used_at = now()"); err != nil {
+	if _, err := tx.Exec(
+		t.Context(),
+		"UPDATE pluto_machine_enrollments SET used_at = now()",
+	); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := tx.QueryRow(t.Context(),
-		"SELECT count(*) FROM pluto_machine_enrollments WHERE used_at IS NOT NULL").Scan(&rows); err != nil || rows != 0 {
+	err = tx.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM pluto_machine_enrollments "+
+			"WHERE used_at IS NOT NULL",
+	).Scan(&rows)
+	if err != nil || rows != 0 {
 		t.Fatalf("lookup policy admitted a write: %d %v", rows, err)
 	}
 }

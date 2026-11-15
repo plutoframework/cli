@@ -27,7 +27,9 @@ func machineFixture(t *testing.T) Manifest {
 	m.Ports = append(m.Ports, Port{
 		ID:      "gateways.Registry",
 		Adapter: "gateways.Store",
-		Methods: []string{"Beat(scope.Execution, models.Beat) (models.Ack, error)"},
+		Methods: []string{
+			"Beat(scope.Execution, models.Beat) (models.Ack, error)",
+		},
 	})
 	m.Models = append(
 		m.Models,

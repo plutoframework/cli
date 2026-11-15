@@ -122,6 +122,15 @@ func TestCandidateMachineEndToEnd(t *testing.T) {
 
 	writeSeam(t, root, "internal/app/machine_runtime_test.go", string(source))
 
+	helpers, err := os.ReadFile("testdata/candidate_machine_helpers.go.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(
+		t, root, "internal/app/machine_helpers_test.go", string(helpers),
+	)
+
 	output := external(
 		t, root, "go", "test", "-race", "-json", "-count=1",
 		"-run", "^TestMachine", "./internal/app",
@@ -163,7 +172,9 @@ func assertMachineGenerated(t *testing.T, root string) {
 		}
 	}
 
-	files, err := filepath.Glob(filepath.Join(root, "internal", "access", "*.go"))
+	files, err := filepath.Glob(
+		filepath.Join(root, "internal", "access", "*.go"),
+	)
 	if err != nil || len(files) == 0 {
 		t.Fatal("missing access package", err)
 	}

@@ -201,6 +201,117 @@ Steps:
   candidate validator, so they become migratable when that support lands. Scaffold
   tests specific to the published composition are removed while pristine.
 
+## Machine identity
+
+Gateways, relays and other non-human callers are not users. A declared
+principal gives them a lifecycle: an org admin registers one (a pending row plus
+a one-time token), the machine enrolls once through a public generated endpoint
+that binds its ed25519 public key, and from then on every request is verified by
+signature. Tenant and subject come from the machine's own row, never from
+request input.
+
+```toml
+[[tables]]
+group = "gateways"
+name = "gateways"
+tenant_column = "org_id"
+row_security = true
+
+[[principals]]
+id = "gateways.Gateway"            # <group>.<Name>
+kind = "machine"
+table = "gateways"                 # declared table of the same group
+id_column = "id"                   # text-comparable (text, uuid)
+key_column = "public_key"          # nullable text: base64url ed25519 key
+state_column = "state"             # text
+pending_value = "pending"          # state until enrollment
+active_value = "active"            # the only state that authenticates
+permissions = ["gateway.heartbeat", "gateway.status"]
+enroll_ttl = "24h"                 # default 24h, max 168h
+replay_window = "2m"               # default 2m, 5s to 10m
+
+[[operations]]
+group = "gateways"
+action = "Enroll"
+scope = "enroll"
+principal = "gateways.Gateway"
+public = true
+write = true
+idempotency = "exempt"
+replay_reason = "A single-use token is the replay protection."
+rate_limit = "12/1h"
+body = "system"
+response = "object"
+input = "gateways.EnrollInput"    # exactly token:string, public_key:string
+output = "gateways.Enrolled"      # exactly machine_id:string
+
+[[operations]]
+group = "gateways"
+action = "Heartbeat"
+auth = "machine:gateways.Gateway" # signature-verified, no user session
+permission = "gateway.heartbeat"  # must be one of the principal's permissions
+write = true
+idempotency = "exempt"
+replay_reason = "Signed nonces reject replays."
+body = "authored"
+resource = "gateways.heartbeat"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.Beat"           # JSON body (writes) or [[operations.query]] (reads)
+output = "gateways.Ack"
+```
+
+Rules, all enforced before any write:
+
+- Each principal needs exactly one `enroll` operation; machine permissions are
+  declared only on the principal and must not equal any user role or operation
+  permission, so they never enter the user permission catalog. Machine
+  operations use `body = "authored"`, a non-collection `response = "object"`,
+  `resource_policy = "tenant"` and exactly one endpoint (POST for writes, GET
+  for reads). Machines require `tenancy = "multi"` and local credentials (the
+  shared attempt limiter rate limits enrollment).
+- Registration is authored: insert the pending row (`state = pending_value`,
+  key null) and, in the same write transaction, call
+  `tx.IssueEnrollment(ctx, "gateways.Gateway", id)`. It returns the token once;
+  only its SHA-256 is stored, tokens are 256-bit random, and re-issuing removes
+  the earlier unused token. It refuses a machine that is not a pending row of
+  the transaction's tenant.
+- Enrollment resolves the token before any tenant is known through the lookup
+  pattern: a `security_invoker` view plus a SELECT policy admitting only the row
+  whose hash equals a transaction-local setting. The token's tenant then selects
+  the tenant of the rest of one transaction: the token is marked used
+  (`used_at IS NULL AND expires_at > now()` in one UPDATE) and the machine row
+  moves from pending to active with the key. Unknown, expired, used and foreign
+  tokens, a non-pending machine and malformed input are the same
+  `401 invalid_enrollment`; a failed attempt does not spend the token.
+- A request is signed with ed25519 over the newline-joined string
+  `pluto-machine-v1`, principal id, machine id, method, escaped path, raw query,
+  hex SHA-256 of the body, unix seconds and nonce, sent as
+  `X-Pluto-Machine-ID`, `X-Pluto-Timestamp`, `X-Pluto-Nonce` (16 to 64
+  base64url characters) and `X-Pluto-Signature` (base64url, no padding). The
+  verifier looks the machine up by id through its own lookup view and policy,
+  requires `active_value`, a timestamp within `replay_window`, a valid
+  signature, and a fresh nonce (consumed in the tenant's nonce table even if the
+  operation later fails). Every failure is the same `401 unauthenticated`.
+- The body receives a `scope.Execution` whose tenant is the machine row's and
+  whose `SubjectID()` is the machine id. `DB.Read/Write` recheck inside the
+  transaction that the machine is still active with the verified key, so a
+  revoked or re-keyed machine is denied on its next data access.
+- Generated storage uses forced-RLS framework tables (`pluto_machine_enrollments`,
+  `pluto_machine_nonces`, migration `101_machine_identity.sql`) and the machine
+  table's lookup policy/view (proposed with the table's RLS migration). ARCH612
+  checks the policy exactly; authored queries cannot touch the framework tables
+  or the lookup view. Authored code cannot construct `machineauth.Verified` or
+  call `scope.BindMachine` (ARCH603/ARCH604) nor import the machine packages
+  (ARCH610). Client helpers: `transport.SignMachineRequest` signs a request in
+  Go; any ed25519 client can build the headers from the canonical string.
+
+Limits: key rotation, revocation and offline detection are authored on the
+machine table (change the state or key column; liveness is a normal tenant
+column); machine operations cannot paginate or stream yet; the registering
+operation is an authored write and so has no HTTP endpoint of its own.
+
 ## Same-transaction writes across groups
 
 A port method that takes `scope.Tx` first may be called by another group's
