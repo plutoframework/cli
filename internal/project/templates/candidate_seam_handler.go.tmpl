@@ -65,12 +65,13 @@ func Register{{.Action}}(
 					Page: output.Page,
 				},
 			)
-{{else}}
+{{- else}}
+
 			transport.JSON(
 				w,
 				paths.{{.Symbol}}.SuccessStatus,
 				models.{{.Action}}Response{Data: output},
 			)
-{{end}}
+{{- end}}
 		})
 }

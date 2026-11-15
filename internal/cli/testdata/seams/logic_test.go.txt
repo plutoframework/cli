@@ -1,0 +1,143 @@
+package audit_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"example.test/auditapp/internal/domain"
+	logic "example.test/auditapp/internal/logic/audit"
+	models "example.test/auditapp/internal/models/audit"
+	"example.test/auditapp/internal/scope"
+	"example.test/auditapp/internal/scope/scopetest"
+
+	"github.com/plutoframework/pluto-core/pagination"
+	rbac "github.com/plutoframework/pluto-rbac"
+	"github.com/plutoframework/pluto-rbac/identity/identitytest"
+)
+
+type events struct {
+	tenant  string
+	subject string
+	appends int
+}
+
+func (e *events) Append(
+	_ context.Context,
+	execution scope.Execution,
+	_ models.NewEvent,
+) error {
+	e.tenant = execution.Tenant().String()
+	e.subject = execution.SubjectID()
+	e.appends++
+
+	return nil
+}
+
+func (e *events) Query(
+	_ context.Context,
+	execution scope.Execution,
+	_ models.ListRequest,
+) (pagination.Page[models.Entry], error) {
+	e.tenant = execution.Tenant().String()
+
+	return pagination.Page[models.Entry]{}, nil
+}
+
+func (e *events) Scan(
+	context.Context,
+	scope.Execution,
+	int64,
+	int64,
+) ([]models.Entry, error) {
+	return nil, nil
+}
+
+func harness(t *testing.T) *scopetest.Harness {
+	t.Helper()
+
+	h, err := scopetest.New(identitytest.Options{
+		Policy: rbac.Definition{
+			Permissions: []rbac.Permission{
+				{ID: "audit.write", Name: "Write", Description: "Write"},
+			},
+			Roles: []rbac.Role{{
+				ID: "recorder", Name: "Recorder", Description: "Records",
+				Permissions: []rbac.PermissionID{"audit.write"},
+			}},
+		},
+		Permission: "audit.write",
+		Members: []identitytest.Member{{
+			SubjectID: "alice", TenantID: "north",
+			Roles: []rbac.RoleID{"recorder"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return h
+}
+
+func TestBodiesRunOnlyWithGateMintedScope(t *testing.T) {
+	h := harness(t)
+	port := &events{}
+
+	err := h.Within(
+		context.Background(), "alice", "north", "audit.events",
+		func(ctx context.Context, e scope.Execution) error {
+			return logic.Append(
+				ctx, e, logic.AppendPorts{Events: port},
+				models.AppendRequest{Type: "login", Payload: []byte(`{}`)},
+			)
+		},
+	)
+	if err != nil || port.tenant != "north" || port.subject != "alice" {
+		t.Fatalf("err=%v tenant=%q subject=%q", err, port.tenant, port.subject)
+	}
+
+	// The actor is the verified subject and rules reject malformed events.
+	err = h.Within(
+		context.Background(), "alice", "north", "audit.events",
+		func(ctx context.Context, e scope.Execution) error {
+			return logic.Append(
+				ctx, e, logic.AppendPorts{Events: port},
+				models.AppendRequest{Type: "bad type", Payload: []byte(`{}`)},
+			)
+		},
+	)
+	if !errors.Is(err, domain.ErrInvalidInput) || port.appends != 1 {
+		t.Fatalf("invalid event reached the port: %v", err)
+	}
+
+	// A subject that is not a member never receives an execution.
+	called := false
+
+	err = h.Within(
+		context.Background(), "mallory", "north", "audit.events",
+		func(context.Context, scope.Execution) error {
+			called = true
+
+			return nil
+		},
+	)
+	if err == nil || called {
+		t.Fatal("non-member reached the body scope")
+	}
+
+	// The zero Execution carries no tenant: it cannot become a query
+	// argument, and no value can be forged from outside the generated gate.
+	var zero scope.Execution
+	if _, err := zero.Tenant().Value(); !errors.Is(err, scope.ErrNoTenant) {
+		t.Fatal("zero tenant must be rejected as a query argument")
+	}
+
+	var forged scope.Tenant
+	if err := forged.Scan("south"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := forged.Value(); err == nil {
+		t.Fatal("scanned tenant became usable")
+	}
+}

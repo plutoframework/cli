@@ -58,8 +58,7 @@ func (operation *{{.Action}}) execute(
 	}
 
 	request.Page = page
-
-{{- end}}
+{{end}}
 	return logic.{{.Action}}(
 		ctx,
 		scope.Bind(

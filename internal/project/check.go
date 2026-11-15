@@ -390,7 +390,8 @@ func Contracts(root string, m Manifest) error {
 
 				// The sealed scope package is the declared capability
 				// surface; its driver imports are not charged to its users.
-				if local == scopeDir {
+				if local == scopeDir ||
+					strings.HasPrefix(local, scopeDir+"/") {
 					continue
 				}
 

@@ -1,0 +1,707 @@
+package app_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"example.test/auditapp/internal/access"
+	"example.test/auditapp/internal/app"
+	"example.test/auditapp/internal/auth/credentials"
+	"example.test/auditapp/internal/config"
+	models "example.test/auditapp/internal/models/audit"
+	"example.test/auditapp/internal/storage/identity"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/plutoframework/pluto-auth/httpauth"
+	"github.com/plutoframework/pluto-auth/methods/password"
+	authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+	"github.com/plutoframework/pluto-core/cache"
+	jobs "github.com/plutoframework/pluto-jobs"
+)
+
+const auditOrigin = "http://127.0.0.1:8080"
+
+type auditSender struct {
+	mutex sync.Mutex
+	items []password.Notification
+}
+
+func (s *auditSender) Send(
+	ctx context.Context,
+	notification password.Notification,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.items = append(s.items, notification)
+
+	return nil
+}
+
+func (s *auditSender) token(t *testing.T, purpose password.Purpose) string {
+	t.Helper()
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for index := len(s.items) - 1; index >= 0; index-- {
+		if s.items[index].Purpose == purpose {
+			return s.items[index].Token
+		}
+	}
+
+	t.Fatal("missing delivery")
+
+	return ""
+}
+
+type auditFixture struct {
+	admin   *pgxpool.Pool
+	runtime *pgxpool.Pool
+	app     *app.CandidateRuntime
+	sender  *auditSender
+	schema  string
+}
+
+// auditSetup applies the migrations as the database owner, then runs the whole
+// application as a separate login role that owns nothing, is not a superuser
+// and cannot bypass row-level security: the deployment the design requires.
+func auditSetup(t *testing.T) *auditFixture {
+	t.Helper()
+
+	address := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
+	if address == "" {
+		t.Fatal("audit fixture needs PLUTO_CLI_TEST_DATABASE_URL")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	defer cancel()
+
+	admin, err := pgxpool.New(ctx, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(admin.Close)
+
+	suffix := strings.ToLower(jobs.NewID())
+	schema := "audit_" + suffix
+	role := "audit_rt_" + suffix
+	quoted := pgx.Identifier{schema}.Sanitize()
+	quotedRole := pgx.Identifier{role}.Sanitize()
+
+	for _, statement := range []string{
+		"CREATE SCHEMA " + quoted,
+		"CREATE ROLE " + quotedRole + " LOGIN PASSWORD 'runtime' " +
+			"NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+	} {
+		if _, err := admin.Exec(ctx, statement); err != nil {
+			t.Fatal(statement, err)
+		}
+	}
+
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second,
+		)
+		defer cancel()
+
+		_, _ = admin.Exec(cleanup, "DROP SCHEMA "+quoted+" CASCADE")
+		_, _ = admin.Exec(cleanup, "DROP ROLE "+quotedRole)
+	})
+
+	owner, err := pgxpool.ParseConfig(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	owner.ConnConfig.RuntimeParams["search_path"] = schema
+
+	migrator, err := pgxpool.NewWithConfig(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(migrator.Close)
+
+	migrations, err := filepath.Glob(
+		filepath.Join("..", "..", "db", "migrations", "*.sql"),
+	)
+	if err != nil || len(migrations) == 0 {
+		t.Fatal("missing migrations", err)
+	}
+
+	sort.Strings(migrations)
+
+	for _, path := range migrations {
+		migration, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := migrator.Exec(ctx, string(migration)); err != nil {
+			t.Fatal(path, err)
+		}
+	}
+
+	for _, statement := range []string{
+		"GRANT USAGE ON SCHEMA " + quoted + " TO " + quotedRole,
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA " +
+			quoted + " TO " + quotedRole,
+		"GRANT USAGE ON ALL SEQUENCES IN SCHEMA " + quoted + " TO " +
+			quotedRole,
+	} {
+		if _, err := migrator.Exec(ctx, statement); err != nil {
+			t.Fatal(statement, err)
+		}
+	}
+
+	settings, err := pgxpool.ParseConfig(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings.ConnConfig.User = role
+	settings.ConnConfig.Password = "runtime"
+	settings.ConnConfig.RuntimeParams["search_path"] = schema
+	settings.MaxConns = 24
+
+	pool, err := pgxpool.NewWithConfig(ctx, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(pool.Close)
+
+	var super, bypass bool
+
+	if err := pool.QueryRow(
+		ctx,
+		"SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = "+
+			"current_user",
+	).Scan(&super, &bypass); err != nil || super || bypass {
+		t.Fatalf("runtime role must not bypass RLS: %v %v %v", super, bypass, err)
+	}
+
+	cfg, err := config.LoadFrom(
+		func(key string) (string, bool) {
+			return address, key == config.Prefix+"DATABASE_URL"
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	limiter, err := identity.NewAttemptLimiter(pool, 1000, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sender := &auditSender{}
+
+	runtime, err := app.NewCandidateRuntime(
+		ctx,
+		cfg,
+		pool,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cache.Disabled{},
+		"test",
+		map[string]string{},
+		credentials.Integrations{
+			Sender:  sender,
+			Limiter: limiter,
+			Ingress: func(next http.Handler) http.Handler { return next },
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &auditFixture{
+		admin:   migrator,
+		runtime: pool,
+		app:     runtime,
+		sender:  sender,
+		schema:  schema,
+	}
+}
+
+func (f *auditFixture) request(
+	t *testing.T,
+	method, path, cookie, tenant string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(method, path, nil)
+	request.Header.Set("Origin", auditOrigin)
+
+	if tenant != "" {
+		request.Header.Set("X-Tenant-ID", tenant)
+	}
+
+	if cookie != "" {
+		request.AddCookie(
+			&http.Cookie{Name: httpauth.CookieName, Value: cookie},
+		)
+	}
+
+	response := httptest.NewRecorder()
+	f.app.Handler().ServeHTTP(response, request)
+
+	return response
+}
+
+func (f *auditFixture) post(
+	t *testing.T,
+	path, body string,
+	want int,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	request.Header.Set("Origin", auditOrigin)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	f.app.Handler().ServeHTTP(response, request)
+
+	if response.Code != want {
+		t.Fatalf("%s status=%d want=%d %s", path, response.Code, want,
+			response.Body.String())
+	}
+
+	return response
+}
+
+type auditUser struct {
+	id, session string
+}
+
+// enroll creates a verified password account and signs it in.
+func (f *auditFixture) enroll(t *testing.T, email string) auditUser {
+	t.Helper()
+
+	input := fmt.Sprintf(
+		`{"email":%q,"password":"synthetic long passphrase"}`,
+		email,
+	)
+
+	f.post(t, "/auth/enroll", input, 202)
+	f.post(t, "/auth/verification", fmt.Sprintf(`{"email":%q}`, email), 202)
+
+	verification, _ := json.Marshal(
+		map[string]string{"token": f.sender.token(t, password.VerifyEmail)},
+	)
+	f.post(t, "/auth/verify", string(verification), 200)
+
+	response := f.post(t, "/auth/signin", input, 200)
+
+	var session string
+
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == httpauth.CookieName {
+			session = cookie.Value
+		}
+	}
+
+	store, err := authpostgres.NewLocal(f.runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	account, err := store.LookupAccount(t.Context(), email)
+	if err != nil || account.ID == "" || session == "" {
+		t.Fatal("enrollment failed", err)
+	}
+
+	return auditUser{id: account.ID, session: session}
+}
+
+func (f *auditFixture) member(t *testing.T, user auditUser, tenant, role string) {
+	t.Helper()
+
+	// The migration owner is the trusted administrator: RLS does not bind it.
+	if _, err := f.admin.Exec(
+		t.Context(),
+		`INSERT INTO users (org_id, id, role) VALUES ($1, $2, $3)`,
+		tenant, user.id, role,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *auditFixture) appendEvent(
+	user auditUser,
+	tenant, eventType, payload string,
+) error {
+	return f.app.WithSession(
+		context.Background(),
+		user.session,
+		tenant,
+		func(ctx context.Context, caller access.Caller) error {
+			return f.app.Operations.AuditAppend.Execute(
+				ctx,
+				caller,
+				models.AppendRequest{
+					Type:    eventType,
+					Payload: json.RawMessage(payload),
+				},
+			)
+		},
+	)
+}
+
+type auditPage struct {
+	Data []struct {
+		Seq     int64           `json:"seq"`
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
+		Hash    string          `json:"hash"`
+	} `json:"data"`
+	Page struct {
+		HasMore    bool   `json:"has_more"`
+		NextCursor string `json:"next_cursor"`
+	} `json:"page"`
+}
+
+func (f *auditFixture) list(
+	t *testing.T,
+	user auditUser,
+	tenant, query string,
+	want int,
+) auditPage {
+	t.Helper()
+
+	path := "/api/audit"
+	if query != "" {
+		path += "?" + query
+	}
+
+	response := f.request(t, "GET", path, user.session, tenant)
+	if response.Code != want {
+		t.Fatalf("GET %s tenant=%s status=%d want=%d %s", path, tenant,
+			response.Code, want, response.Body.String())
+	}
+
+	var page auditPage
+	if want == 200 {
+		if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return page
+}
+
+func TestAuditSeamEndToEnd(t *testing.T) {
+	f := auditSetup(t)
+
+	alice := f.enroll(t, "alice@example.test")
+	bob := f.enroll(t, "bob@example.test")
+	carol := f.enroll(t, "carol@example.test")
+	mallory := f.enroll(t, "mallory@example.test")
+
+	f.member(t, alice, "north", "recorder")
+	f.member(t, bob, "north", "auditor")
+	f.member(t, carol, "south", "recorder")
+
+	// Unauthenticated, forged-tenant and non-member callers reach nothing.
+	f.list(t, auditUser{}, "north", "", 401)
+	f.list(t, mallory, "north", "", 403)
+	f.list(t, bob, "south", "", 403)
+
+	for index := 0; index < 3; index++ {
+		if err := f.appendEvent(
+			alice, "north", fmt.Sprintf("login.%d", index),
+			fmt.Sprintf(`{"n": %d}`, index),
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for index := 0; index < 2; index++ {
+		if err := f.appendEvent(
+			carol, "south", "south.event", `{"s":true}`,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Writes without the permission, without membership or into another
+	// tenant are denied before the authored body runs.
+	for name, run := range map[string]func() error{
+		"auditor": func() error {
+			return f.appendEvent(bob, "north", "x", `{}`)
+		},
+		"non-member": func() error {
+			return f.appendEvent(mallory, "north", "x", `{}`)
+		},
+		"cross-tenant write": func() error {
+			return f.appendEvent(alice, "south", "x", `{}`)
+		},
+	} {
+		if err := run(); err == nil {
+			t.Fatalf("%s write was not denied", name)
+		}
+	}
+
+	// Authored rules reject malformed input through the same gate.
+	if err := f.appendEvent(alice, "north", "bad type", `{}`); err == nil {
+		t.Fatal("invalid event type accepted")
+	}
+
+	if err := f.appendEvent(alice, "north", "ok", `not json`); err == nil {
+		t.Fatal("invalid payload accepted")
+	}
+
+	// Reads are tenant scoped and paged with cursors bound to the verified
+	// scope and filters.
+	first := f.list(t, bob, "north", "limit=2", 200)
+	if len(first.Data) != 2 || !first.Page.HasMore ||
+		first.Page.NextCursor == "" {
+		t.Fatalf("first page: %+v", first)
+	}
+
+	second := f.list(
+		t, bob, "north",
+		"limit=2&cursor="+url.QueryEscape(first.Page.NextCursor), 200,
+	)
+	if len(second.Data) != 1 || second.Page.HasMore {
+		t.Fatalf("second page: %+v", second)
+	}
+
+	seen := map[int64]bool{}
+
+	for _, page := range []auditPage{first, second} {
+		for _, entry := range page.Data {
+			if !strings.HasPrefix(entry.Type, "login.") || seen[entry.Seq] {
+				t.Fatalf("unexpected entry %+v", entry)
+			}
+
+			seen[entry.Seq] = true
+		}
+	}
+
+	// A cursor is bound to its filters, tenant and subject.
+	f.list(
+		t, bob, "north",
+		"limit=2&type=login.1&cursor="+url.QueryEscape(first.Page.NextCursor),
+		400,
+	)
+	f.list(
+		t, carol, "south",
+		"limit=2&cursor="+url.QueryEscape(first.Page.NextCursor), 400,
+	)
+
+	filtered := f.list(t, bob, "north", "type=login.1", 200)
+	if len(filtered.Data) != 1 || filtered.Data[0].Type != "login.1" {
+		t.Fatalf("type filter: %+v", filtered)
+	}
+
+	byActor := f.list(t, bob, "north", "actor_id="+alice.id, 200)
+	if len(byActor.Data) != 3 {
+		t.Fatalf("actor filter: %+v", byActor)
+	}
+
+	if got := f.list(t, bob, "north", "actor_id="+carol.id, 200); len(got.Data) != 0 {
+		t.Fatalf("another tenant's actor visible: %+v", got)
+	}
+
+	for _, query := range []string{
+		"unknown=1", "limit=0", "limit=101", "type=", "from=yesterday",
+		"to=2024-01-01T00:00:00Z&from=2025-01-01T00:00:00Z",
+		"cursor=bad", "type=a&type=b",
+	} {
+		f.list(t, bob, "north", query, 400)
+	}
+
+	south := f.list(t, carol, "south", "", 200)
+	if len(south.Data) != 2 {
+		t.Fatalf("south tenant sees %d events", len(south.Data))
+	}
+
+	verified := f.request(t, "GET", "/api/audit/verify", bob.session, "north")
+	if verified.Code != 200 ||
+		!strings.Contains(verified.Body.String(), `"valid":true`) ||
+		!strings.Contains(verified.Body.String(), `"checked":3`) {
+		t.Fatalf("verify: %d %s", verified.Code, verified.Body.String())
+	}
+
+	// The database refuses what the application would never ask for. The
+	// runtime role is neither owner nor superuser, so these hold even for
+	// code that bypassed every gate.
+	f.assertRowLevelSecurity(t)
+
+	// Concurrent appends never lose or duplicate an event.
+	var group sync.WaitGroup
+
+	failures := make(chan error, 40)
+
+	for index := 0; index < 40; index++ {
+		group.Add(1)
+
+		go func(index int) {
+			defer group.Done()
+
+			if err := f.appendEvent(
+				alice, "north", "concurrent", fmt.Sprintf(`{"i":%d}`, index),
+			); err != nil {
+				failures <- err
+			}
+		}(index)
+	}
+
+	group.Wait()
+	close(failures)
+
+	for err := range failures {
+		t.Fatal(err)
+	}
+
+	var count, distinct int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		`SELECT count(*), count(DISTINCT seq) FROM audit_events
+		 WHERE org_id = 'north'`,
+	).Scan(&count, &distinct); err != nil || count != 43 || distinct != 43 {
+		t.Fatalf("concurrent appends: count=%d distinct=%d err=%v",
+			count, distinct, err)
+	}
+
+	verified = f.request(t, "GET", "/api/audit/verify", bob.session, "north")
+	if !strings.Contains(verified.Body.String(), `"checked":43`) ||
+		!strings.Contains(verified.Body.String(), `"valid":true`) {
+		t.Fatalf("verify after concurrency: %s", verified.Body.String())
+	}
+
+	// Tampering with a stored hash (as the trusted owner, bypassing the
+	// append-only trigger) is detected by the authored verification.
+	connection, err := f.admin.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer connection.Release()
+
+	if _, err := connection.Exec(
+		t.Context(), `SET session_replication_role = replica`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := connection.Exec(
+		t.Context(),
+		`UPDATE audit_events SET hash = 'tampered'
+		 WHERE seq = (SELECT min(seq) FROM audit_events WHERE org_id = 'north')`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	tampered := f.request(t, "GET", "/api/audit/verify", bob.session, "north")
+	if !strings.Contains(tampered.Body.String(), `"valid":false`) {
+		t.Fatalf("tampering not detected: %s", tampered.Body.String())
+	}
+}
+
+func (f *auditFixture) assertRowLevelSecurity(t *testing.T) {
+	t.Helper()
+
+	ctx := t.Context()
+
+	tenantTx := func(tenant string) pgx.Tx {
+		tx, err := f.runtime.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+
+		if tenant != "" {
+			if _, err := tx.Exec(
+				ctx, "SELECT set_config('app.tenant_id', $1, true)", tenant,
+			); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		return tx
+	}
+
+	count := func(tx pgx.Tx) int {
+		var n int
+
+		if err := tx.QueryRow(
+			ctx, `SELECT count(*) FROM audit_events`,
+		).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+
+		return n
+	}
+
+	if n := count(tenantTx("")); n != 0 {
+		t.Fatalf("no tenant bound: %d rows visible", n)
+	}
+
+	if n := count(tenantTx("north")); n != 3 {
+		t.Fatalf("north rows = %d", n)
+	}
+
+	if n := count(tenantTx("nowhere")); n != 0 {
+		t.Fatalf("unknown tenant rows = %d", n)
+	}
+
+	insert := `INSERT INTO audit_events (org_id, actor_id, type, payload, hash)
+		VALUES ($1, 'x', 'forged', '{}', 'h')`
+
+	if _, err := tenantTx("north").Exec(ctx, insert, "south"); err == nil ||
+		!strings.Contains(err.Error(), "row-level security") {
+		t.Fatalf("cross-tenant insert not denied by RLS: %v", err)
+	}
+
+	if _, err := tenantTx("").Exec(ctx, insert, "north"); err == nil ||
+		!strings.Contains(err.Error(), "row-level security") {
+		t.Fatalf("insert without tenant not denied by RLS: %v", err)
+	}
+
+	for _, statement := range []string{
+		`UPDATE audit_events SET type = 'edited'`,
+		`DELETE FROM audit_events`,
+		`TRUNCATE audit_events`,
+	} {
+		tx := tenantTx("north")
+		if _, err := tx.Exec(ctx, statement); err == nil {
+			t.Fatalf("append-only table accepted %q", statement)
+		}
+	}
+
+	var rls, forced bool
+
+	if err := f.runtime.QueryRow(
+		ctx,
+		`SELECT relrowsecurity, relforcerowsecurity FROM pg_class
+		 WHERE oid = 'audit_events'::regclass`,
+	).Scan(&rls, &forced); err != nil || !rls || !forced {
+		t.Fatalf("audit_events RLS: %v %v %v", rls, forced, err)
+	}
+}

@@ -33,18 +33,22 @@ func (r {{.Action}}Request) Values() url.Values {
 	values := url.Values{}
 {{- range .Query}}
 {{- if eq .Kind "string"}}
+
 	if r.{{.GoName}} != "" {
 		values.Set({{q .Name}}, r.{{.GoName}})
 	}
 {{- else if eq .Kind "int64"}}
+
 	if r.{{.GoName}} != nil {
 		values.Set({{q .Name}}, strconv.FormatInt(*r.{{.GoName}}, 10))
 	}
 {{- else if eq .Kind "bool"}}
+
 	if r.{{.GoName}} != nil {
 		values.Set({{q .Name}}, strconv.FormatBool(*r.{{.GoName}}))
 	}
 {{- else}}
+
 	if !r.{{.GoName}}.IsZero() {
 		values.Set({{q .Name}}, r.{{.GoName}}.UTC().Format(time.RFC3339Nano))
 	}

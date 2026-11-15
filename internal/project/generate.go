@@ -577,7 +577,8 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	for path, data := range ToolFiles(m) {
-		if _, managed := files[path]; managed && path == "sqlc.yaml" &&
+		if _, managed := files[path]; managed &&
+			(path == "sqlc.yaml" || path == ".golangci.yml") &&
 			m.Boundary.Mode == "candidate" {
 			continue
 		}

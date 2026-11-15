@@ -1,0 +1,26 @@
+package audit
+
+import (
+	"context"
+	"fmt"
+
+	"example.test/auditapp/internal/domain"
+	models "example.test/auditapp/internal/models/audit"
+	rules "example.test/auditapp/internal/rules/audit"
+	"example.test/auditapp/internal/scope"
+)
+
+// Append records one event for the verified tenant. The actor is the
+// verified subject; the request cannot name one.
+func Append(
+	ctx context.Context,
+	e scope.Execution,
+	p AppendPorts,
+	in models.AppendRequest,
+) error {
+	if !rules.ValidType(in.Type) || !rules.ValidPayload(in.Payload) {
+		return fmt.Errorf("%w: event", domain.ErrInvalidInput)
+	}
+
+	return p.Events.Append(ctx, e, in)
+}

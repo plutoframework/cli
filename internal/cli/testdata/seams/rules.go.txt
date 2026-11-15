@@ -1,0 +1,43 @@
+package audit
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"unicode/utf8"
+)
+
+// MaxPayload bounds one event payload.
+const MaxPayload = 8192
+
+// ValidType reports whether an event type is a short printable name.
+func ValidType(eventType string) bool {
+	if eventType == "" || len(eventType) > 64 || !utf8.ValidString(eventType) {
+		return false
+	}
+
+	for _, r := range eventType {
+		if r <= ' ' || r == 0x7f {
+			return false
+		}
+	}
+
+	return true
+}
+
+// ValidPayload reports whether a payload is bounded, well-formed JSON.
+func ValidPayload(payload []byte) bool {
+	return len(payload) > 0 && len(payload) <= MaxPayload && json.Valid(payload)
+}
+
+// EventHash is the content hash recorded with an event and recomputed by
+// verification. The type and payload are length framed.
+func EventHash(eventType string, payload []byte) string {
+	sum := sha256.New()
+
+	_, _ = sum.Write([]byte(eventType))
+	_, _ = sum.Write([]byte{0})
+	_, _ = sum.Write(payload)
+
+	return hex.EncodeToString(sum.Sum(nil))
+}

@@ -298,11 +298,16 @@ func applyBlueprintChange(
 		return err
 	}
 
-	// sqlc.yaml is the published stanza until a query set is declared; the
-	// candidate render then extends it, so the untouched file is replaceable.
-	if _, owned := previous["sqlc.yaml"]; !owned {
-		if tool, ok := project.ToolFiles(old)["sqlc.yaml"]; ok {
-			previous["sqlc.yaml"] = tool
+	// sqlc.yaml and .golangci.yml are the published tool files until a query
+	// set is declared; the candidate render then extends them, so untouched
+	// copies are replaceable.
+	for _, name := range []string{"sqlc.yaml", ".golangci.yml"} {
+		if _, owned := previous[name]; owned {
+			continue
+		}
+
+		if tool, ok := project.ToolFiles(old)[name]; ok {
+			previous[name] = tool
 		}
 	}
 

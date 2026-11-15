@@ -14,6 +14,22 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// candidateLintConfig is the managed lint configuration. sqlc output is proved
+// by sqlc diff, not by style linters; excluding both sqlc output directories
+// keeps pluto fmt from rewriting files that sqlc would then report as stale.
+func candidateLintConfig(m Manifest) []byte {
+	config := strings.ReplaceAll(lintConfig, "MODULE", m.Project.Module)
+
+	return []byte(strings.Replace(
+		config,
+		"  exclusions:\n    generated: strict\n    presets: []\n",
+		"  exclusions:\n    generated: strict\n    presets: []\n"+
+			"    paths:\n      - internal/storage/queries\n"+
+			"      - internal/storage/postgres/db\n",
+		1,
+	))
+}
+
 // sqlcGeneratedFiles lists the files sqlc writes for the declared query sets:
 // db.go, models.go and one <query file>.go per query file. Only these exact
 // names are exempt from authored ownership; ARCH612 runs sqlc diff to prove
