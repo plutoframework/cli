@@ -151,6 +151,17 @@ func candidateRuntimeSetup(t *testing.T) *candidateRuntimeFixture {
 		}
 	}
 
+	// Bob also belongs to a second tenant that owns no records: a resource
+	// in north must be indistinguishable from a missing one there.
+	if _, err := f.pool.Exec(
+		t.Context(),
+		"INSERT INTO \"pluto_resource_memberships\" (\"tenant_id\","+
+			"\"actor_id\",\"roles\") VALUES ('south','bob',"+
+			"ARRAY['operator'])",
+	); err != nil {
+		t.Fatal(err)
+	}
+
 	store, err := authpostgres.New(f.pool)
 	if err != nil {
 		t.Fatal(err)

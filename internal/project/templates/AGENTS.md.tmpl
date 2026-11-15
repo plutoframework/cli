@@ -58,6 +58,10 @@ Authored seams (candidate): declare, then write only authored role files.
   `body = "authored"`) and internal/adapters/<group> (SQL behind declared
   `[[ports]]`; sqlc query sets via `[[queries]]`). Adapters use only the
   scope's `queriesOf(...)`; tenant and actor come from the verified scope.
+- Not found: an adapter maps an empty single-row result with
+  `scope.NotFound(err)`; the generated handler answers 404. Cross-tenant rows
+  are invisible (RLS), so never answer 403 for a missing row. Missing
+  membership in the caller's tenant stays 401/403.
 - Signup that creates an org: declare `tenant_root = true` on the root
   `[[tables]]` entry and an operation with `scope = "provision"` (authored write,
   verified identity, no membership; generated code mints the tenant id). Pre-

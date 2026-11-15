@@ -81,6 +81,12 @@ func OperationError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
+	if errors.Is(err, domain.ErrNotFound) {
+		Error(w, r, http.StatusNotFound, "not_found")
+
+		return
+	}
+
 	if errors.Is(err, domain.ErrForbidden) {
 		Error(w, r, http.StatusForbidden, "forbidden")
 

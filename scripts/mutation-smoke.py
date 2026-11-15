@@ -707,6 +707,26 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "TestCandidateGeneratedConsumer",
             ),
             (
+                "candidate cross-tenant not-found",
+                "internal/project/templates/candidate_data.go.tmpl",
+                (
+                    '\t\t\tif !allowed {\n'
+                    '\t\t\t\treturn commonDomain.ErrNotFound'
+                ),
+                (
+                    '\t\t\tif !allowed {\n'
+                    '\t\t\t\treturn rbac.ErrForbidden'
+                ),
+                "TestCandidateGeneratedConsumer",
+            ),
+            (
+                "candidate not-found transport mapping",
+                "internal/project/templates/http.go.tmpl",
+                "Error(w, r, http.StatusNotFound, \"not_found\")",
+                "Error(w, r, http.StatusForbidden, \"forbidden\")",
+                "TestCandidateGeneratedConsumer",
+            ),
+            (
                 "candidate shared credential attempt window",
                 "internal/project/templates/candidate_limiter.go.tmpl",
                 "if count > l.attempts {",
@@ -834,6 +854,8 @@ required_assertions = {
         "shared attempt window not enforced across replicas"
     ),
     "candidate authoritative transition guard": "FORGED_ACTOR_FACTS_COMMITTED",
+    "candidate cross-tenant not-found": "CROSS_TENANT_NOT_FOUND",
+    "candidate not-found transport mapping": "CROSS_TENANT_NOT_FOUND",
     "candidate downstream stable delivery key": (
         "TYPED_DELIVERY_SINK_REJECTED_PAYLOAD"
     ),

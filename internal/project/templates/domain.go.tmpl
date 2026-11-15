@@ -9,6 +9,9 @@ import (
 var (
 	ErrInvalidInput    = errors.New("invalid operation input")
 	ErrConflict        = errors.New("operation conflict")
+	// ErrNotFound is the one outcome for a resource that is missing or not
+	// visible to the caller's verified tenant; the two are indistinguishable.
+	ErrNotFound        = errors.New("resource not found")
 	ErrExportLimit     = errors.New("export bound exceeded")
 	ErrNotImplemented  = errors.New("operation not implemented")
 	ErrUnauthenticated = rbac.ErrUnauthenticated

@@ -514,6 +514,22 @@ verified session; ARCH612 accepts exactly this policy beside tenant isolation,
 and the runtime role gets SELECT on the view only. Without `[auth.events]`
 neither the policy, the view, nor any read exists.
 
+## Not-found semantics
+
+A resource in another tenant is indistinguishable from a missing one. Row-level
+security and the `tenant_id` predicate make foreign rows invisible, so generated
+resource policies and repositories return `domain.ErrNotFound` and the generated
+handler maps it to `404 {"error":{"code":"not_found"}}` for GET, PUT/transition
+and DELETE alike. Missing membership in the caller's tenant (an `X-Tenant-ID`
+the verified subject does not belong to) and missing permission still fail in
+the gate before any lookup: 401 or 403, never 404. Owner-visibility rows owned
+by someone else are not found too.
+
+Authored adapters map an empty single-row result with
+`return scope.NotFound(err)` (or `scope.NoRows(err)` then `scope.ErrNotFound`);
+any other error passes through unchanged and stays a 500. Do not return a
+forbidden error for a missing row: that leaks existence.
+
 ## Tenant-less system operations
 
 Everything is tenant scoped except two explicit shapes. Declare the tenant root

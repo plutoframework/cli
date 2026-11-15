@@ -30,10 +30,10 @@ import (
 {{end}}
 	jobs "github.com/plutoframework/pluto-jobs"
 	jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
+	commonDomain "{{.Module}}/internal/domain"
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
 {{- if .HasMachine}}
 
-	commonDomain "{{.Module}}/internal/domain"
 	machineauth "{{.Module}}/internal/ports/machineauth"
 	machinestore "{{.Module}}/internal/storage/machineauth"
 {{- end}}
@@ -256,6 +256,20 @@ func Queries[Q, D any](t Tx, constructor func(D) Q) Q {
 // NoRows reports an empty single-row result.
 func NoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
+}
+
+// ErrNotFound is the typed not-found the generated handler maps to 404.
+var ErrNotFound = commonDomain.ErrNotFound
+
+// NotFound maps an empty single-row result to ErrNotFound and returns every
+// other error unchanged. Row-level security hides other tenants' rows, so a
+// cross-tenant resource is indistinguishable from a missing one.
+func NotFound(err error) error {
+	if NoRows(err) {
+		return ErrNotFound
+	}
+
+	return err
 }
 
 // ErrUnknownJob rejects an Enqueue of a kind no [[jobs]] entry declares.

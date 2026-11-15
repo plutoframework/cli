@@ -396,3 +396,21 @@ func TestScopeAlwaysRollsBack(t *testing.T) {
 			source)
 	}
 }
+
+func TestScopeExposesTypedNotFound(t *testing.T) {
+	files, err := candidateManaged(authoredManifest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(files[scopeFile])
+	for _, want := range []string{
+		"var ErrNotFound = commonDomain.ErrNotFound",
+		"func NotFound(err error) error",
+		"if NoRows(err) {",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("scope lacks %q:\n%s", want, source)
+		}
+	}
+}
