@@ -358,7 +358,7 @@ mutations = [
         "tx write caller allowlist",
         "internal/project/manifest_txwrite.go",
         "!slices.Contains(port.TxCallers, o.ID()) {",
-        "false {",
+        "!slices.Contains(port.TxCallers, o.ID()) && false {",
         "./internal/project#TestTxWriteManifestRejections",
     ),
     (
@@ -372,7 +372,7 @@ mutations = [
         "tx write narrow port",
         "internal/project/candidate_adapters.go",
         "if slices.Contains(port.TxMethods, method.Name) {",
-        "if true {",
+        "if slices.Contains(port.TxMethods, method.Name) || true {",
         "./internal/project#TestTxWriteGeneratesNarrowPortAndWiring",
     ),
     (
@@ -650,14 +650,14 @@ mutations.extend(
             "protected columns rejected on insert",
             "internal/sqlcheck/query.go",
             "named = named || tableKey(inserted) == tableKey(column)",
-            "named = named || false",
+            "named = named || (false && tableKey(inserted) == tableKey(column))",
             "./internal/sqlcheck#TestAnalyzeQueryProtectedColumns",
         ),
         (
             "machine credential columns protected",
             "internal/project/manifest_machine.go",
-            "columns = append(columns, principal.KeyColumn, principal.StateColumn)",
-            "columns = append(columns, principal.KeyColumn)",
+            "principal.KeyColumn,\n\t\t\t\tprincipal.StateColumn,\n",
+            "principal.KeyColumn,\n",
             "./internal/project#TestMachineProtectedColumnsReachSQLCheck",
         ),
         (

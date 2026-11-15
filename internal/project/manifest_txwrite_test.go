@@ -109,7 +109,7 @@ func TestTxWriteManifestRejections(t *testing.T) {
 				approve(m).Idempotency = "none"
 				approve(m).ReplayReason = ""
 			},
-			"write = true",
+			"cross-group transactional write",
 		},
 		"operation not listed as caller": {
 			func(m *Manifest) {
