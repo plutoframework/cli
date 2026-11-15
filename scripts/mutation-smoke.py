@@ -282,6 +282,57 @@ mutations = [
         "if false {",
         "./internal/project#TestVerifyCandidatePinsAgainstModuleProxy",
     ),
+    (
+        "authored query tenant argument",
+        "internal/sqlcheck/bind.go",
+        "\treturn fmt.Sprintf(\n\t\t\"does not bind %s.%s to a sqlc.arg in "
+        "WHERE.\",\n\t\ttable.Name,\n\t\ttable.TenantColumn,\n\t), "
+        "bindingRepair(table)\n}",
+        "\treturn \"\", \"\"\n}",
+        "./internal/sqlcheck#TestAnalyzeQueryRejects",
+    ),
+    (
+        "authored adapter pool import",
+        "internal/project/candidate_adapter_role.go",
+        "case candidateDataPackage(path):\n\t\treturn false\n\t}",
+        "case candidateDataPackage(path):\n\t\treturn true\n\t}",
+        "./internal/project#TestAuthoredRoleViolations",
+    ),
+    (
+        "authored logic reachable only from its workflow",
+        "internal/project/candidate_authored_rules.go",
+        "file.directory != rolesLogicDir+role.group {",
+        "false {",
+        "./internal/project#TestAuthoredRoleViolations",
+    ),
+    (
+        "authored forged scope tenant",
+        "internal/project/candidate_authored_rules.go",
+        '[]string{"Execution", "Tenant", "DB", "Tx"}',
+        '[]string{"Execution", "DB", "Tx"}',
+        "./internal/project#TestAuthoredRoleViolations",
+    ),
+    (
+        "authored rules purity",
+        "internal/project/candidate_authored_rules.go",
+        '"C", "unsafe", "reflect", "plugin", "os", "net", "syscall", "log",',
+        '"C", "unsafe", "plugin", "os", "net", "syscall", "log",',
+        "./internal/project#TestAuthoredRoleViolations",
+    ),
+    (
+        "authored role shape",
+        "internal/project/candidate_authored_rules.go",
+        'inspectAuthoredShape(file, role.role+" role", emit)',
+        "_ = inspectAuthoredShape",
+        "./internal/project#TestAuthoredRoleViolations",
+    ),
+    (
+        "table row-level security migration",
+        "internal/project/candidate_table_migrations.go",
+        "ALTER TABLE %[1]s FORCE ROW LEVEL SECURITY;\n",
+        "",
+        "./internal/project#TestAuthoredSQLRejectsBypasses",
+    ),
 ]
 
 if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
@@ -313,10 +364,25 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 'request.Header.Set("X-Idempotency-Key", command.Key())',
                 "TestCandidateGeneratedConsumer",
             ),
+            (
+                "authored page cursor binding",
+                "internal/project/templates/candidate_authored_workflow.go.tmpl",
+                "execution.SubjectID(),\n\t\t\texecution.TenantID()))",
+                '""))',
+                "TestCandidateAuthoredSeamEndToEnd",
+            ),
+            (
+                "authored tenant transaction binding",
+                "internal/project/templates/candidate_scope.go.tmpl",
+                "\"SELECT set_config('app.tenant_id', $1, true)\",",
+                "\"SELECT set_config('app.tenant_id_unbound', $1, true)\",",
+                "TestCandidateAuthoredSeamEndToEnd",
+            ),
         ]
     )
 
 required_assertions = {
+    "authored page cursor binding": "status=200 want=400",
     "candidate private authority fields": (
         "managed sibling altered opaque caller field"
     ),
