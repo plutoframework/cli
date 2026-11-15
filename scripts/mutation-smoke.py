@@ -662,8 +662,8 @@ mutations.extend(
         (
             "authored write endpoint needs an input model",
             "internal/project/candidate_seam_models.go",
-            'if out.Input == "" || o.Response != ResponseObject || o.Collection {',
-            'if false {',
+            'out.Input == "" && len(o.Path) == 0 {',
+            'false {',
             "./internal/project#TestAuthoredWriteEndpointRejections",
         ),
         (

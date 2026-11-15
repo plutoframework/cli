@@ -581,7 +581,9 @@ func TestDeviceStream(t *testing.T) {
 		t.Fatalf("scoped stream refused: %v (status %d)", err, status)
 	}
 
-	t.Cleanup(func() { _ = conn.CloseNow() })
+	t.Cleanup(func() {
+		_ = conn.CloseNow()
+	})
 
 	// A scope without audit.read is refused before any upgrade.
 	if _, status, err := dialBearer(
