@@ -3,6 +3,8 @@ package project
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -467,14 +469,21 @@ func TestAuthoredBodyFailsClosedBeforeGenerators(t *testing.T) {
 		t.Fatal("CandidateManagedPaths must refuse authored bodies")
 	}
 
-	if err := Vet(
-		context.Background(),
-		t.TempDir(),
-		m,
-		io.Discard,
-		io.Discard,
-	); err == nil {
-		t.Fatal("Vet must refuse authored bodies")
+	root := t.TempDir()
+	module := "module " + m.Project.Module + "\n"
+
+	if err := os.WriteFile(
+		filepath.Join(root, "go.mod"),
+		[]byte(module),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Vet(context.Background(), root, m, io.Discard, io.Discard)
+	if err == nil ||
+		!strings.Contains(err.Error(), "seam generation is not implemented") {
+		t.Fatalf("Vet must refuse authored bodies for that reason: %v", err)
 	}
 }
 
