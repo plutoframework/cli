@@ -174,7 +174,9 @@ func assertSeamNegatives(t *testing.T, root string) {
 
 	module := "example.test/auditapp/"
 	appendTo := func(extra string) func(string) string {
-		return func(original string) string { return original + "\n" + extra }
+		return func(original string) string {
+			return original + "\n" + extra
+		}
 	}
 
 	cases := []seamNegative{

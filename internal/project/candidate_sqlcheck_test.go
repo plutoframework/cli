@@ -16,8 +16,7 @@ WHERE org_id = sqlc.arg(org_id) AND seq > sqlc.arg(after_seq)
 ORDER BY seq LIMIT 50;
 `
 
-const adapterTable = `CREATE TABLE schema_metadata (version integer NOT NULL);
-CREATE TABLE audit_events (
+const adapterTable = `CREATE TABLE audit_events (
     seq bigserial PRIMARY KEY,
     org_id text NOT NULL,
     type text NOT NULL
@@ -60,7 +59,8 @@ func sqlcFixture(t *testing.T) (string, Manifest, []byte) {
 		}
 	}
 
-	write("db/migrations/001_tables.sql", adapterTable)
+	write("db/migrations/001_initial.sql", initialMigrationSQL)
+	write("db/migrations/002_tables.sql", adapterTable)
 	write("db/queries/schema.sql", "-- name: SchemaVersion :one\n"+
 		"SELECT version FROM schema_metadata LIMIT 1;\n")
 	write("db/queries/audit/audit.sql", adapterQuery)
@@ -75,7 +75,7 @@ func sqlcFixture(t *testing.T) (string, Manifest, []byte) {
 	}
 
 	for path, source := range proposals {
-		if path != "db/migrations/002_rls_audit_events.sql" {
+		if path != "db/migrations/003_rls_audit_events.sql" {
 			t.Fatalf("unexpected proposal path %s", path)
 		}
 
@@ -143,7 +143,7 @@ func TestAuthoredSQLRejectsBypasses(t *testing.T) {
 		},
 		"RLS migration removed": func(t *testing.T, root string) {
 			if err := os.Remove(filepath.Join(
-				root, "db/migrations/002_rls_audit_events.sql",
+				root, "db/migrations/003_rls_audit_events.sql",
 			)); err != nil {
 				t.Fatal(err)
 			}

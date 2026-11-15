@@ -109,13 +109,12 @@ func nextMigrationNumber(root string, m Manifest) (int, error) {
 		}
 
 		number, err := strconv.Atoi(match[1])
-		if err == nil && number > highest &&
-			!ReservedMigrationNumber(fmt.Sprintf("%03d", number)) {
+		if err == nil && number > highest && number < 99 {
 			highest = number
 		}
 	}
 
-	if ReservedMigrationNumber(fmt.Sprintf("%03d", highest+1)) {
+	if highest+1 >= 99 {
 		return 0, fmt.Errorf(
 			"no free migration number below 099 for table policies",
 		)

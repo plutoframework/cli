@@ -227,6 +227,15 @@ func TestMigrateAppliesPublishedToCandidate(t *testing.T) {
 		"--no-docker",
 	)
 	mustInvoke(t, root, "fmt")
+
+	// The scaffold test calls the removed published app.New; the migration
+	// reports it as a manual item, so apply it as the user would.
+	if err := os.Remove(
+		filepath.Join(root, "internal", "app", "app_test.go"),
+	); err != nil {
+		t.Fatal(err)
+	}
+
 	commitAll(t, root)
 
 	output := mustInvoke(t, root, args...)

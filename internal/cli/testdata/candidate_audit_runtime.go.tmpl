@@ -199,7 +199,12 @@ func auditSetup(t *testing.T) *auditFixture {
 		"SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = "+
 			"current_user",
 	).Scan(&super, &bypass); err != nil || super || bypass {
-		t.Fatalf("runtime role must not bypass RLS: %v %v %v", super, bypass, err)
+		t.Fatalf(
+			"runtime role must not bypass RLS: %v %v %v",
+			super,
+			bypass,
+			err,
+		)
 	}
 
 	cfg, err := config.LoadFrom(
@@ -229,7 +234,9 @@ func auditSetup(t *testing.T) *auditFixture {
 		credentials.Integrations{
 			Sender:  sender,
 			Limiter: limiter,
-			Ingress: func(next http.Handler) http.Handler { return next },
+			Ingress: func(next http.Handler) http.Handler {
+				return next
+			},
 		},
 	)
 	if err != nil {
@@ -277,7 +284,11 @@ func (f *auditFixture) post(
 ) *httptest.ResponseRecorder {
 	t.Helper()
 
-	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	request := httptest.NewRequest(
+		http.MethodPost,
+		path,
+		strings.NewReader(body),
+	)
 	request.Header.Set("Origin", auditOrigin)
 	request.Header.Set("Content-Type", "application/json")
 
@@ -336,7 +347,11 @@ func (f *auditFixture) enroll(t *testing.T, email string) auditUser {
 	return auditUser{id: account.ID, session: session}
 }
 
-func (f *auditFixture) member(t *testing.T, user auditUser, tenant, role string) {
+func (f *auditFixture) member(
+	t *testing.T,
+	user auditUser,
+	tenant, role string,
+) {
 	t.Helper()
 
 	// The migration owner is the trusted administrator: RLS does not bind it.
@@ -524,7 +539,8 @@ func TestAuditSeamEndToEnd(t *testing.T) {
 		t.Fatalf("actor filter: %+v", byActor)
 	}
 
-	if got := f.list(t, bob, "north", "actor_id="+carol.id, 200); len(got.Data) != 0 {
+	other := f.list(t, bob, "north", "actor_id="+carol.id, 200)
+	if got := other; len(got.Data) != 0 {
 		t.Fatalf("another tenant's actor visible: %+v", got)
 	}
 
@@ -636,7 +652,9 @@ func (f *auditFixture) assertRowLevelSecurity(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+		t.Cleanup(func() {
+			_ = tx.Rollback(context.Background())
+		})
 
 		if tenant != "" {
 			if _, err := tx.Exec(

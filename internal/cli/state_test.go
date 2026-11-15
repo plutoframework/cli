@@ -72,8 +72,17 @@ func TestStateScaffoldConsumers(t *testing.T) {
 			// Names that overlap library imports must still produce valid Go.
 			mustInvoke(t, root, "add", "state", "state")
 			external(t, root, "go", "test", "-race", "./...")
-			external(t, root, "go", "test", "./internal/domain/purchases",
-				"-run=^$", "-fuzz=FuzzLifecycle", "-fuzztime=20000x", "-parallel=2")
+			external(
+				t,
+				root,
+				"go",
+				"test",
+				"./internal/domain/purchases",
+				"-run=^$",
+				"-fuzz=FuzzLifecycle",
+				"-fuzztime=20000x",
+				"-parallel=2",
+			)
 			mustInvoke(t, root, "fmt")
 			mustVetPublishedCompatibility(t, root)
 		})
