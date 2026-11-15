@@ -32,6 +32,10 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 `,
 	)
 
+	if m.hasScope(ScopeProvision) || m.hasScope(ScopeLookup) {
+		source.WriteString("\t\"time\"\n")
+	}
+
 	local := m.Capabilities.LocalCredentials
 	internalImports := []string{
 		"access",
@@ -146,11 +150,26 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 	}
 
 	authoredGroups := map[string]bool{}
+	lookupGroups := map[string]bool{}
 
 	for _, operation := range m.Operations {
 		if operation.isAuthored() {
 			authoredGroups[operation.Group] = true
 		}
+
+		if operation.Scope == ScopeLookup {
+			lookupGroups[operation.Group] = true
+		}
+	}
+
+	for group := range lookupGroups {
+		fmt.Fprintf(
+			&source,
+			`%slookup %s
+`,
+			group,
+			q(m.Project.Module+"/internal/storage/"+group),
+		)
 	}
 
 	if len(authoredGroups) > 0 {
@@ -357,6 +376,18 @@ func NewCandidateRuntime(
 	}
 
 	for index, operation := range m.Operations {
+		if operation.Scope != "" {
+			if err := writeSystemOperation(
+				&source,
+				operation,
+				index,
+			); err != nil {
+				return nil, err
+			}
+
+			continue
+		}
+
 		if operation.isAuthored() {
 			writeAuthoredOperation(&source, operation, index)
 
@@ -657,12 +688,31 @@ func writeAuthoredOperation(
 	var ports bytes.Buffer
 
 	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			fmt.Fprintf(
+				&ports,
+				"%s: adapters.%sTx, ",
+				foreignPortField(id),
+				adapterField(Port{ID: id}),
+			)
+
+			continue
+		}
+
 		fmt.Fprintf(
 			&ports,
 			"%s: adapters.%s, ",
 			modelName(id),
 			adapterField(Port{ID: id}),
 		)
+	}
+
+	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			ports.WriteString("TxDB: adapters.DB, ")
+
+			break
+		}
 	}
 
 	fmt.Fprintf(
@@ -699,3 +749,84 @@ func candidateTenantResource(resource string) rbac.ResourcePolicyFunc {
 	}
 }
 `
+
+// writeSystemOperation wires one provision or lookup operation: the shared
+// attempt limiter plus either the provisioning gate over the declared ports
+// or the generated lookup reader. Neither has a membership gate: no tenant
+// or membership exists at that point.
+func writeSystemOperation(
+	source *bytes.Buffer,
+	operation Operation,
+	index int,
+) error {
+	attempts, window, err := ParseRateLimit(operation.RateLimit)
+	if err != nil {
+		return fmt.Errorf("operation %s: %w", operation.ID(), err)
+	}
+
+	suffix := fmt.Sprint(index)
+
+	fmt.Fprintf(
+		source,
+		`
+	limiter%[1]s, err := identity.NewAttemptLimiter(
+		pool,
+		%[2]d,
+		time.Duration(%[3]d),
+	)
+	if err != nil {
+		return nil, err
+	}
+`,
+		suffix,
+		attempts,
+		window.Nanoseconds(),
+	)
+
+	if operation.Scope == ScopeLookup {
+		fmt.Fprintf(
+			source,
+			`
+	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
+		%[2]slookup.New%[3]sReader(pool),
+		limiter%[4]s,
+	)
+`,
+			symbol(operation.Endpoint()),
+			operation.Group,
+			operation.Action,
+			suffix,
+		)
+
+		return nil
+	}
+
+	var ports bytes.Buffer
+
+	for _, id := range operation.Ports {
+		fmt.Fprintf(
+			&ports,
+			"%s: adapters.%s, ",
+			modelName(id),
+			adapterField(Port{ID: id}),
+		)
+	}
+
+	fmt.Fprintf(
+		source,
+		`
+	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
+		authentication.Manager,
+		limiter%[4]s,
+		%[2]slogic.%[3]sPorts{%[5]s},
+	)
+`,
+		symbol(operation.Endpoint()),
+		operation.Group,
+		operation.Action,
+		suffix,
+		ports.String(),
+	)
+
+	return nil
+}

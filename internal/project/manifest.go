@@ -37,6 +37,7 @@ type Manifest struct {
 	Models             []Model             `toml:"models,omitempty"`
 	Authored           *Authored           `toml:"authored,omitempty"`
 	Memberships        *Memberships        `toml:"memberships,omitempty"`
+	Lookups            []Lookup            `toml:"lookups,omitempty"`
 	Migrations         Migrations          `toml:"migrations,omitempty"`
 
 	// Kind is empty for Go applications and KindFrontend for a frontend that
@@ -59,6 +60,11 @@ type Capabilities struct {
 type Database struct {
 	Engine  string `toml:"engine"`
 	Queries string `toml:"queries"`
+
+	// RuntimeRole names the least-privilege role the application connects as.
+	// pluto proposes the migration that creates it; the runtime refuses to
+	// start under any other role.
+	RuntimeRole string `toml:"runtime_role,omitempty"`
 }
 type Development struct {
 	Mise   bool `toml:"mise"`
@@ -80,6 +86,9 @@ type Endpoint struct {
 	Permission     string `toml:"permission,omitempty"`
 	Feature        string `toml:"feature,omitempty"`
 	ClientVisible  bool   `toml:"feature_client_visible"`
+
+	// Scope is copied from the referenced operation; see manifest_system.go.
+	Scope string `toml:"-"`
 }
 
 var (
@@ -161,6 +170,10 @@ func (m Manifest) Validate() error {
 
 	if m.Database.Engine != "postgres" || m.Database.Queries != "sqlc" {
 		return fmt.Errorf("database requires engine=postgres and queries=sqlc")
+	}
+
+	if err := validateRuntimeRole(m); err != nil {
+		return err
 	}
 
 	if err := ValidateManifestContracts(m); err != nil {
@@ -337,14 +350,14 @@ func (e Endpoint) Validate(multi bool) error {
 		}
 	}
 
-	if e.Public && (e.Permission != "" || multi) {
+	if e.Public && (e.Permission != "" || multi && e.Scope == "") {
 		return fmt.Errorf(
 			"public endpoints cannot require permissions or multi-tenant " +
 				"scope",
 		)
 	}
 
-	if !e.Public && e.isWrite() && e.Permission == "" {
+	if !e.Public && e.isWrite() && e.Permission == "" && e.Scope == "" {
 		return fmt.Errorf("authenticated writes require an explicit " +
 			"permission")
 	}

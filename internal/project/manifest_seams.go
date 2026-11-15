@@ -14,6 +14,7 @@ import (
 const (
 	BodyAuthored  = "authored"
 	BodyGenerated = "generated"
+	BodySystem    = "system"
 
 	ResponsePage   = "page"
 	ResponseObject = "object"
@@ -28,6 +29,10 @@ type Table struct {
 	TenantColumn string `toml:"tenant_column"`
 	AppendOnly   bool   `toml:"append_only,omitempty"`
 	RowSecurity  bool   `toml:"row_security"`
+
+	// TenantRoot marks the table whose rows are the tenants themselves: its
+	// tenant_column is its own identifier. At most one table is the root.
+	TenantRoot bool `toml:"tenant_root,omitempty"`
 }
 
 func (t Table) ID() string {
@@ -46,6 +51,12 @@ type Port struct {
 	ID      string   `toml:"id"`
 	Adapter string   `toml:"adapter"`
 	Methods []string `toml:"methods"`
+
+	// TxMethods names the methods another group's operation may call inside
+	// its own transaction; each takes scope.Tx. TxCallers names the only
+	// operations allowed to do so (see manifest_txwrite.go).
+	TxMethods []string `toml:"tx_methods,omitempty"`
+	TxCallers []string `toml:"tx_callers,omitempty"`
 }
 
 // Model declares typed fields that generate structs and OpenAPI schemas.
@@ -80,7 +91,16 @@ type Memberships struct {
 	TenantColumn  string `toml:"tenant_column"`
 	SubjectColumn string `toml:"subject_column"`
 	RoleColumn    string `toml:"role_column"`
+
+	// ActiveColumn restricts membership to active rows so suspended or
+	// deprovisioned subjects lose their role on the next request. With
+	// ActiveValues the column is compared as text against that set; without
+	// it the column must be boolean and true.
+	ActiveColumn string   `toml:"active_column,omitempty"`
+	ActiveValues []string `toml:"active_values,omitempty"`
 }
+
+var activeValue = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 var (
 	snakeName   = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
@@ -113,8 +133,10 @@ const (
 )
 
 func (m Manifest) hasSeamDeclarations() bool {
-	if len(m.Tables)+len(m.Queries)+len(m.Ports)+len(m.Models) != 0 ||
-		m.Authored != nil || m.Memberships != nil {
+	if len(m.Tables)+len(m.Queries)+len(m.Ports)+len(m.Models)+
+		len(m.Lookups) != 0 ||
+		m.Authored != nil || m.Memberships != nil ||
+		m.Database.RuntimeRole != "" {
 		return true
 	}
 
@@ -130,7 +152,8 @@ func (m Manifest) hasSeamDeclarations() bool {
 func (o Operation) usesSeams() bool {
 	return o.Body != "" || o.Resource != "" || o.ResourcePolicy != "" ||
 		len(o.Ports) != 0 || o.Response != "" || o.Item != "" ||
-		o.Output != "" || o.Input != "" || len(o.Query) != 0
+		o.Output != "" || o.Input != "" || len(o.Query) != 0 ||
+		o.Scope != "" || o.Lookup != "" || o.RateLimit != ""
 }
 
 // validateSeams checks every seam declaration. Published projects may declare
@@ -174,13 +197,17 @@ func validateSeams(m Manifest) error {
 		return err
 	}
 
+	if err := validateTxCallers(m.Ports, m.Operations); err != nil {
+		return err
+	}
+
 	for _, operation := range m.Operations {
 		if err := operation.validateSeams(ports, models); err != nil {
 			return fmt.Errorf("operation %s: %w", operation.ID(), err)
 		}
 	}
 
-	return nil
+	return validateSystem(m, tables, models)
 }
 
 func validateTables(tables []Table) (map[string]Table, error) {
@@ -217,7 +244,7 @@ func validateTables(tables []Table) (map[string]Table, error) {
 		seen[table.ID()] = table
 	}
 
-	return seen, nil
+	return seen, validateTenantRoots(tables)
 }
 
 func validateQuerySets(sets []QuerySet, tables map[string]Table) error {
@@ -336,6 +363,10 @@ func validatePorts(ports []Port) (map[string]Port, error) {
 			}
 
 			methods[portMethodName(method)] = true
+		}
+
+		if err := validateTxMethods(port); err != nil {
+			return nil, err
 		}
 
 		seen[port.ID] = port
@@ -474,6 +505,84 @@ func validateMemberships(
 		)
 	}
 
+	return validateMembershipActive(memberships)
+}
+
+var runtimeRoleName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+
+func validateRuntimeRole(m Manifest) error {
+	role := m.Database.RuntimeRole
+	if role == "" {
+		return nil
+	}
+
+	if !runtimeRoleName.MatchString(role) ||
+		role == "postgres" || role == "public" ||
+		strings.HasPrefix(role, "pg_") {
+		return fmt.Errorf(
+			"database runtime_role must be a lowercase snake_case role name " +
+				"that is not postgres, public or pg_*",
+		)
+	}
+
+	if len(m.Tables) == 0 {
+		return fmt.Errorf("database runtime_role requires declared tables")
+	}
+
+	// The framework membership table is created in the reserved range after
+	// every numbered migration, so no earlier grant can cover it.
+	if m.Memberships == nil {
+		return fmt.Errorf(
+			"database runtime_role requires [memberships]: the framework " +
+				"membership table is created after the role migration",
+		)
+	}
+
+	return nil
+}
+
+func validateMembershipActive(memberships *Memberships) error {
+	if memberships.ActiveColumn == "" {
+		if len(memberships.ActiveValues) != 0 {
+			return fmt.Errorf("memberships active_values require active_column")
+		}
+
+		return nil
+	}
+
+	if !snakeName.MatchString(memberships.ActiveColumn) {
+		return fmt.Errorf("memberships active_column must be snake_case")
+	}
+
+	for _, other := range []string{
+		memberships.TenantColumn,
+		memberships.SubjectColumn,
+		memberships.RoleColumn,
+	} {
+		if other == memberships.ActiveColumn {
+			return fmt.Errorf(
+				"memberships active_column must be distinct from other columns",
+			)
+		}
+	}
+
+	if len(memberships.ActiveValues) > 16 {
+		return fmt.Errorf("memberships active_values allows at most 16 values")
+	}
+
+	seen := map[string]bool{}
+
+	for _, value := range memberships.ActiveValues {
+		if !activeValue.MatchString(value) || seen[value] {
+			return fmt.Errorf(
+				"memberships active_values must be distinct 1-64 character " +
+					"values of letters, digits, '_', '-' or '.'",
+			)
+		}
+
+		seen[value] = true
+	}
+
 	return nil
 }
 
@@ -482,9 +591,17 @@ func (o Operation) validateSeams(
 	models map[string]Model,
 ) error {
 	switch o.Body {
-	case "", BodyGenerated, BodyAuthored:
+	case "", BodyGenerated, BodyAuthored, BodySystem:
 	default:
 		return fmt.Errorf("body must be authored or generated")
+	}
+
+	if o.Scope != "" {
+		return o.validateSystemSeams(ports, models)
+	}
+
+	if o.Body == BodySystem {
+		return fmt.Errorf("body = \"system\" requires scope = \"lookup\"")
 	}
 
 	if o.Body != BodyAuthored {
@@ -508,8 +625,8 @@ func (o Operation) validateSeams(
 			return fmt.Errorf("references undeclared port %s", id)
 		}
 
-		if group, _, _ := splitQualified(id); group != o.Group {
-			return fmt.Errorf("port %s belongs to another group", id)
+		if err := o.checkPortGroup(ports[id]); err != nil {
+			return err
 		}
 	}
 
@@ -580,7 +697,8 @@ func (o Operation) validateModelRefs(models map[string]Model) error {
 		return fmt.Errorf("response must be page, object or stream")
 	}
 
-	if o.Response != "" && o.Body != BodyAuthored && o.Body != BodyGenerated {
+	if o.Response != "" && o.Body != BodyAuthored && o.Body != BodyGenerated &&
+		o.Body != BodySystem {
 		return fmt.Errorf("response requires an explicit body")
 	}
 
@@ -600,7 +718,7 @@ func (o Operation) validateQuery() error {
 		return nil
 	}
 
-	if o.Write || o.Public {
+	if o.Write || o.Public && o.Scope != ScopeLookup {
 		return fmt.Errorf("query parameters require a protected read")
 	}
 

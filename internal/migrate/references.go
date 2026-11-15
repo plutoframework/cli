@@ -102,6 +102,35 @@ func inspectReferences(
 	}
 
 	seen := map[string]bool{}
+	found := []Item{}
+
+	// An unedited scaffold test that exercises a removed scaffold API is
+	// deleted with a note; everything else is a manual item.
+	defer func() {
+		if len(found) == 0 {
+			return
+		}
+
+		if w.pristineTests[name] {
+			if err := w.Delete(name); err == nil {
+				w.Note(Item{
+					Path: name,
+					Line: found[0].Line,
+					Reason: "pristine scaffold test removed: it tests " +
+						found[0].Reason[len("uses "):],
+					Action: "port its cases to the " + profile +
+						" seams if they still matter",
+				})
+
+				return
+			}
+		}
+
+		for _, item := range found {
+			w.Manual(item)
+		}
+	}()
+
 	report := func(position token.Pos, symbol string) {
 		line := files.Position(position).Line
 
@@ -112,7 +141,7 @@ func inspectReferences(
 
 		seen[key] = true
 
-		w.Manual(Item{
+		found = append(found, Item{
 			Path: name,
 			Line: line,
 			Reason: "uses " + symbol + ", which the " + profile +

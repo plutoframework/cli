@@ -26,19 +26,29 @@ func (s *EventStore) Append(
 	in models.NewEvent,
 ) error {
 	return s.db.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
-		_, err := queriesOf(tx).AppendEvent(
-			ctx,
-			queries.AppendEventParams{
-				OrgID:   tx.Tenant(),
-				ActorID: e.SubjectID(),
-				Type:    in.Type,
-				Payload: []byte(in.Payload),
-				Hash:    rules.EventHash(in.Type, in.Payload),
-			},
-		)
-
-		return err
+		return s.AppendTx(ctx, tx, in)
 	})
+}
+
+// AppendTx joins a caller's transaction, so the event commits or rolls back
+// with the business change. The actor and tenant come from the transaction.
+func (s *EventStore) AppendTx(
+	ctx context.Context,
+	tx scope.Tx,
+	in models.NewEvent,
+) error {
+	_, err := queriesOf(tx).AppendEvent(
+		ctx,
+		queries.AppendEventParams{
+			OrgID:   tx.Tenant(),
+			ActorID: tx.SubjectID(),
+			Type:    in.Type,
+			Payload: []byte(in.Payload),
+			Hash:    rules.EventHash(in.Type, in.Payload),
+		},
+	)
+
+	return err
 }
 
 func (s *EventStore) Query(

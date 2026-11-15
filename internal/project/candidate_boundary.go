@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -47,6 +48,10 @@ type candidateRules struct {
 	domainFiles        map[string]bool
 	roles              map[string]authoredRole
 	dependencies       []string
+
+	// foreignPorts maps a logic group to the other groups' ports packages
+	// its operations declare for transactional writes.
+	foreignPorts map[string]map[string]bool
 }
 
 // inspectCandidateBoundaries checks the closed, declared candidate source
@@ -185,7 +190,7 @@ func inspectCandidateBoundaries(
 		}
 
 		operations[operation.ID()] = operation
-		if operation.Body == BodyAuthored {
+		if operation.outsideContracts() {
 			continue
 		}
 
@@ -652,7 +657,7 @@ func inspectCandidateBoundaries(
 			"Declare supported behavior in metadata. Unsupported hooks, "+
 				"initializers, ports or adapters require a framework "+
 				"contract extension; preserve authored code during "+
-				"explicit migration.",
+				"explicit migration. "+outsideOwnershipTarget(file, rules),
 		)
 		inspectCandidateFile(file, rules, types, functions, emit)
 	}
@@ -714,4 +719,38 @@ func candidateCriticalPackage(path string) bool {
 		path == "github.com/plutoframework/pluto-rbac" ||
 		path == "github.com/plutoframework/pluto-rbac/identity" ||
 		path == lifecycleStatePackage
+}
+
+// outsideOwnershipTarget names where code in an unowned package belongs, so
+// ARCH602 points at a concrete declaration instead of only the rule.
+func outsideOwnershipTarget(
+	file *candidateSource,
+	rules candidateRules,
+) string {
+	name := strings.ToLower(filepath.Base(file.path))
+
+	switch {
+	case strings.HasPrefix(file.directory, "internal/api") ||
+		strings.Contains(name, "openapi") ||
+		strings.Contains(name, "parameter"):
+		return "Suggested target: OpenAPI parameters and schemas are " +
+			"generated; declare query parameters with [[operations.query]] " +
+			"in pluto.toml and delete this authored component file."
+	}
+
+	roles := []string{}
+	for directory := range rules.roles {
+		roles = append(roles, directory)
+	}
+
+	sort.Strings(roles)
+
+	if len(roles) == 0 {
+		return "Suggested target: declare a [[roles]] package in " +
+			"pluto.toml and move this logic into it."
+	}
+
+	return "Suggested target: move this logic into a declared role " +
+		"package (" + strings.Join(roles, ", ") + ") that generated code " +
+		"calls."
 }

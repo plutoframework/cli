@@ -42,6 +42,13 @@ type templateData struct {
 	// Authored-body seam views; see candidate_authored.go.
 	Authored      authoredOp
 	AuthoredGroup authoredGroupView
+
+	// System lookup views; see candidate_system.go.
+	Lookup       Lookup
+	KeyGoName    string
+	LookupQuery  string
+	LookupBind   string
+	LookupFields []string
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {
@@ -314,8 +321,12 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 			query := ""
 
 			if authored, ok := m.Operation(e.Operation); ok &&
-				authored.isAuthored() {
+				authored.usesSeamWire() {
 				query = seamPathQuery(authored)
+
+				if authored.Scope == ScopeProvision {
+					query += "SessionOnly:true,\n"
+				}
 			}
 
 			if d.Body {

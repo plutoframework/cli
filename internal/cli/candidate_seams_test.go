@@ -101,23 +101,53 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		"db/migrations/011_audit_events.sql",
 	)
 	seamFile(t, root, "events.sql", "db/queries/audit/events.sql")
+	seamFile(t, root, "approvals.sql", "db/queries/approvals/requests.sql")
+	systemFileAs(
+		t,
+		root,
+		"example.test/auditapp",
+		"orgs.sql",
+		"db/queries/orgs/orgs.sql",
+	)
 	seamFile(t, root, "blueprint.toml", "audit-blueprint.toml")
 
 	mustInvoke(t, root, "--no-input", "add", "blueprint", "--file",
 		filepath.Join(root, "audit-blueprint.toml"))
 
 	for _, path := range []string{
-		"db/migrations/012_rls_users.sql",
-		"db/migrations/013_rls_audit_events.sql",
+		"internal/storage/postgres/runtime_role_gen.go",
 		"internal/adapters/audit/event_store.go",
 		"internal/logic/audit/list.go",
+		"internal/adapters/approvals/request_store.go",
+		"internal/logic/approvals/approve.go",
 	} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Fatalf("blueprint did not create %s: %v", path, err)
 		}
 	}
 
+	for _, name := range []string{
+		"rls_users", "rls_orgs", "rls_approval_requests", "rls_audit_events",
+		"runtime_role",
+	} {
+		matches, err := filepath.Glob(
+			filepath.Join(root, "db/migrations/*_"+name+".sql"),
+		)
+		if err != nil || len(matches) != 1 {
+			t.Fatalf("expected one %s migration: %v %v", name, matches, err)
+		}
+	}
+
 	// Scaffolds are authored starting points; replace them with real bodies.
+	for fixture, target := range map[string]string{
+		"rules.go.txt":        "internal/rules/orgs/rules.go",
+		"provision.go.txt":    "internal/logic/orgs/provision.go",
+		"count.go.txt":        "internal/logic/orgs/count.go",
+		"tenant_store.go.txt": "internal/adapters/orgs/tenant_store.go",
+	} {
+		systemFileAs(t, root, "example.test/auditapp", fixture, target)
+	}
+
 	seamFile(t, root, "rules.go.txt", "internal/rules/audit/rules.go")
 	seamFile(t, root, "list.go.txt", "internal/logic/audit/list.go")
 	seamFile(t, root, "append.go.txt", "internal/logic/audit/append.go")
@@ -127,6 +157,18 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		root,
 		"event_store.go.txt",
 		"internal/adapters/audit/event_store.go",
+	)
+	seamFile(
+		t,
+		root,
+		"approvals_request_store.go.txt",
+		"internal/adapters/approvals/request_store.go",
+	)
+	seamFile(
+		t,
+		root,
+		"approvals_approve.go.txt",
+		"internal/logic/approvals/approve.go",
 	)
 	seamFile(t, root, "logic_test.go.txt", "internal/logic/audit/logic_test.go")
 
@@ -153,13 +195,88 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 
 	writeSeam(t, root, "internal/app/audit_runtime_test.go", string(source))
 
+	approvals, err := os.ReadFile(
+		"testdata/candidate_approvals_runtime.go.tmpl",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(
+		t, root, "internal/app/approvals_runtime_test.go", string(approvals),
+	)
+
 	output := external(
 		t, root, "go", "test", "-race", "-json", "-count=1",
-		"-run", "^TestAuditSeamEndToEnd$", "./internal/app",
+		"-run", "^(TestAuditSeamEndToEnd|TestApprovalsTxEndToEnd)$",
+		"./internal/app",
 	)
-	assertCandidateCaseNames(t, output, "TestAuditSeamEndToEnd")
+	assertCandidateCaseNames(
+		t, output, "TestAuditSeamEndToEnd", "TestApprovalsTxEndToEnd",
+	)
+
+	members, err := os.ReadFile("testdata/candidate_audit_members.go.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(t, root, "internal/app/audit_members_test.go", string(members))
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestAuditMembers", "./internal/app",
+	)
+	assertCandidateCaseNames(
+		t, output,
+		"TestAuditMembersActiveState",
+		"TestAuditMembersRuntimeRole",
+	)
+
+	system, err := os.ReadFile("testdata/candidate_system_runtime.go.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(
+		t, root, "internal/app/system_runtime_test.go",
+		strings.ReplaceAll(
+			string(system), "example.test/sysapp", "example.test/auditapp",
+		),
+	)
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestSystem", "./internal/app",
+	)
+	assertCandidateCaseNames(
+		t, output,
+		"TestSystemProvisionThenTenantRoutes",
+		"TestSystemProvisionRateLimit",
+		"TestSystemProvisionOnce",
+		"TestSystemLookup",
+		"TestSystemLookupRateLimit",
+		"TestSystemRowLevelBoundaries",
+	)
 
 	assertSeamNegatives(t, root)
+	assertSystemNegatives(
+		t, root, "example.test/auditapp/", migrationPath(t, root, "rls_orgs"),
+	)
+}
+
+// migrationPath finds a generated migration by its name, whose number depends
+// on the declared table order.
+func migrationPath(t *testing.T, root, name string) string {
+	t.Helper()
+
+	matches, err := filepath.Glob(
+		filepath.Join(root, "db/migrations/*_"+name+".sql"),
+	)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected one %s migration: %v %v", name, matches, err)
+	}
+
+	return "db/migrations/" + filepath.Base(matches[0])
 }
 
 // seamNegative mutates one file, expects the canonical inspection to report
@@ -347,6 +464,33 @@ func assertSeamNegatives(t *testing.T, root string) {
 			},
 		},
 		{
+			name:  "adapter reaches another group's port",
+			check: "ARCH610",
+			path:  "internal/adapters/approvals/audit_port.go",
+			mutate: func(string) string {
+				return "package approvals\n\nimport _ \"" + module +
+					"internal/ports/audit\"\n"
+			},
+		},
+		{
+			name:  "logic of a group without a tx port reads another's models",
+			check: "ARCH610",
+			path:  "internal/logic/audit/approvals_models.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport _ \"" + module +
+					"internal/models/approvals\"\n"
+			},
+		},
+		{
+			name:  "logic reaches another group's logic",
+			check: "ARCH610",
+			path:  "internal/logic/approvals/audit_logic.go",
+			mutate: func(string) string {
+				return "package approvals\n\nimport _ \"" + module +
+					"internal/logic/audit\"\n"
+			},
+		},
+		{
 			name:  "query without tenant argument",
 			check: "ARCH612",
 			path:  "db/queries/audit/events.sql",
@@ -370,7 +514,7 @@ func assertSeamNegatives(t *testing.T, root string) {
 		{
 			name:  "missing row-level security migration",
 			check: "ARCH612",
-			path:  "db/migrations/013_rls_audit_events.sql",
+			path:  migrationPath(t, root, "rls_audit_events"),
 			mutate: func(string) string {
 				return "-- removed\n"
 			},

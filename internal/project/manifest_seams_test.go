@@ -312,6 +312,71 @@ func TestSeamManifestRejections(t *testing.T) {
 			},
 			"distinct",
 		},
+		"active values without column": {
+			func(m *Manifest) {
+				m.Memberships.ActiveValues = []string{"active"}
+			},
+			"require active_column",
+		},
+		"active column collides": {
+			func(m *Manifest) {
+				m.Memberships.ActiveColumn = "role"
+			},
+			"distinct from other",
+		},
+		"active column not snake": {
+			func(m *Manifest) {
+				m.Memberships.ActiveColumn = "State"
+			},
+			"snake_case",
+		},
+		"active value unsafe": {
+			func(m *Manifest) {
+				m.Memberships.ActiveColumn = "state"
+				m.Memberships.ActiveValues = []string{"a'b"}
+			},
+			"active_values must be",
+		},
+		"active value duplicate": {
+			func(m *Manifest) {
+				m.Memberships.ActiveColumn = "state"
+				m.Memberships.ActiveValues = []string{"on", "on"}
+			},
+			"active_values must be",
+		},
+		"runtime role reserved": {
+			func(m *Manifest) {
+				m.Database.RuntimeRole = "postgres"
+			},
+			"runtime_role",
+		},
+		"runtime role bad name": {
+			func(m *Manifest) {
+				m.Database.RuntimeRole = "App-Role"
+			},
+			"runtime_role",
+		},
+		"runtime role without tables": {
+			func(m *Manifest) {
+				m.Database.RuntimeRole = "app_runtime"
+				m.Tables = nil
+				m.Queries = nil
+				m.Memberships = nil
+				m.Operations = nil
+				m.Endpoints = nil
+				m.Ports = nil
+				m.Models = nil
+				m.Authored = nil
+			},
+			"requires declared tables",
+		},
+		"runtime role without memberships": {
+			func(m *Manifest) {
+				m.Database.RuntimeRole = "app_runtime"
+				m.Memberships = nil
+			},
+			"requires [memberships]",
+		},
 		"bad body": {
 			func(m *Manifest) {
 				list(m).Body = "custom"

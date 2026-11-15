@@ -80,6 +80,12 @@ func run() error {
 	}
 
 	defer pool.Close()
+{{- if .Manifest.Tables}}
+
+	if err := postgres.VerifyRuntimeRole(startup, pool); err != nil {
+		return err
+	}
+{{- end}}
 
 	dataCache, closeCache, err := caching.New(cfg.Cache)
 	if err != nil {

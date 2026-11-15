@@ -156,16 +156,28 @@ func sqlcheckConfig(root string, m Manifest) sqlcheck.Config {
 			Group:        table.Group,
 			TenantColumn: table.TenantColumn,
 			AppendOnly:   table.AppendOnly,
+			TenantRoot:   table.TenantRoot,
 		})
+	}
+
+	provisioning := map[string]bool{}
+
+	for _, operation := range m.Operations {
+		if operation.Scope == ScopeProvision {
+			provisioning[operation.Group] = true
+		}
 	}
 
 	for _, set := range m.Queries {
 		cfg.Sets = append(cfg.Sets, sqlcheck.QuerySet{
-			Group:  set.Group,
-			Files:  set.Files,
-			Tables: set.Tables,
+			Group:     set.Group,
+			Files:     set.Files,
+			Tables:    set.Tables,
+			Provision: provisioning[set.Group],
 		})
 	}
+
+	cfg.Lookups = sqlcheckLookups(m)
 
 	// Top-level files under db/queries belong to the framework; only group
 	// subdirectories hold authored SQL.
@@ -224,4 +236,19 @@ func inspectAuthoredSQL(
 	}
 
 	return diagnostics
+}
+
+func sqlcheckLookups(m Manifest) []sqlcheck.Lookup {
+	var lookups []sqlcheck.Lookup
+
+	for _, lookup := range m.Lookups {
+		lookups = append(lookups, sqlcheck.Lookup{
+			Table:   lookup.Table,
+			Key:     lookup.Key,
+			Policy:  lookup.PolicyName(),
+			Setting: lookup.Setting(),
+		})
+	}
+
+	return lookups
 }

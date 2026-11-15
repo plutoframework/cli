@@ -1,0 +1,68 @@
+package {{.Group}}
+
+import (
+	"errors"
+	"net"
+	"net/http"
+
+	models "{{.Module}}/internal/models/{{.Group}}"
+	operations "{{.Module}}/internal/operations/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/transport"
+	"github.com/plutoframework/pluto-auth/methods/password"
+)
+
+type {{.Action}}Operations = operations.{{.Action}}Boundary
+
+// Register{{.Action}} serves a public, rate-limited lookup. The limit key is
+// the remote address; deploy behind a proxy that sets it correctly.
+func Register{{.Action}}(
+	reg transport.Registrar,
+	operation {{.Action}}Operations,
+	bodyLimit int64,
+) {
+	_ = bodyLimit
+
+	reg.Handle(
+		paths.{{.Symbol}},
+		func(w http.ResponseWriter, r *http.Request) {
+			input, err := models.Parse{{.Action}}Query(r.URL.Query())
+			if err != nil {
+				var rejected *models.QueryError
+				if errors.As(err, &rejected) {
+					transport.Error(w, r, 400, rejected.Code)
+
+					return
+				}
+
+				transport.Error(w, r, 400, "invalid_query_parameter")
+
+				return
+			}
+
+			client, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+			if splitErr != nil {
+				client = r.RemoteAddr
+			}
+
+			output, err := operation.Execute(r.Context(), client, input)
+			if err != nil {
+				switch {
+				case errors.Is(err, password.ErrLimited):
+					transport.Error(w, r, 429, "rate_limited")
+				case errors.Is(err, operations.Err{{.Action}}NotFound):
+					transport.Error(w, r, 404, "not_found")
+				default:
+					transport.OperationError(w, r, err)
+				}
+
+				return
+			}
+
+			transport.JSON(
+				w,
+				paths.{{.Symbol}}.SuccessStatus,
+				models.{{.Action}}Response{Data: output},
+			)
+		})
+}

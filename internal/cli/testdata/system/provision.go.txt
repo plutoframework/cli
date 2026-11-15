@@ -1,0 +1,32 @@
+package orgs
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"example.test/sysapp/internal/domain"
+	models "example.test/sysapp/internal/models/orgs"
+	rules "example.test/sysapp/internal/rules/orgs"
+	"example.test/sysapp/internal/scope"
+)
+
+// Provision creates the organization for the verified subject. The tenant
+// identifier is minted by generated code; the body cannot choose it.
+func Provision(
+	ctx context.Context,
+	p scope.Provisioning,
+	ports ProvisionPorts,
+	in models.ProvisionRequest,
+) (models.Org, error) {
+	if !rules.ValidSlug(in.Slug) || !rules.ValidName(in.Name) {
+		return models.Org{}, fmt.Errorf("%w: signup", domain.ErrInvalidInput)
+	}
+
+	org, err := ports.Tenants.Provision(ctx, p, in)
+	if errors.Is(err, rules.ErrSlugTaken) {
+		return models.Org{}, domain.ErrConflict
+	}
+
+	return org, err
+}

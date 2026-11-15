@@ -9,10 +9,21 @@ package scope
 
 import (
 	"context"
+{{- if .HasProvision}}
+	"crypto/rand"
+{{- end}}
 	"database/sql/driver"
+{{- if .HasProvision}}
+	"encoding/hex"
+{{- end}}
 	"errors"
 	"fmt"
+{{- if .HasProvision}}
+	"sync"
 
+	auth "github.com/plutoframework/pluto-auth"
+{{- else}}
+{{end}}
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
 
 	"github.com/jackc/pgx/v5"
@@ -91,13 +102,21 @@ type DB struct {
 
 // Tx is one open tenant-scoped transaction.
 type Tx struct {
-	scopeTx     pgx.Tx
-	scopeTenant Tenant
+	scopeTx      pgx.Tx
+	scopeTenant  Tenant
+	scopeSubject string
 }
 
 // Tenant is the verified tenant this transaction is bound to.
 func (t Tx) Tenant() Tenant {
 	return t.scopeTenant
+}
+
+// SubjectID is the verified acting subject of the execution that opened this
+// transaction. A method that joins another operation's transaction attributes
+// its writes to it instead of trusting an actor argument.
+func (t Tx) SubjectID() string {
+	return t.scopeSubject
 }
 
 // Read rechecks the live gate, opens a read-only transaction and binds
@@ -138,7 +157,13 @@ func (d DB) within(
 		tenant,
 		e.scopeResource,
 		func(ctx context.Context) error {
-			return d.transact(ctx, mode, Tenant{scopeTenant: tenant}, run)
+			return d.transact(
+				ctx,
+				mode,
+				Tenant{scopeTenant: tenant},
+				e.scopeExecution.SubjectID(),
+				run,
+			)
 		},
 	)
 }
@@ -147,6 +172,7 @@ func (d DB) transact(
 	ctx context.Context,
 	mode pgx.TxAccessMode,
 	tenant Tenant,
+	subject string,
 	run func(context.Context, Tx) error,
 ) (err error) {
 	tx, err := d.scopeDBPool.BeginTx(ctx, pgx.TxOptions{AccessMode: mode})
@@ -168,7 +194,11 @@ func (d DB) transact(
 		return err
 	}
 
-	if err = run(ctx, Tx{scopeTx: tx, scopeTenant: tenant}); err != nil {
+	if err = run(ctx, Tx{
+		scopeTx:      tx,
+		scopeTenant:  tenant,
+		scopeSubject: subject,
+	}); err != nil {
 		return err
 	}
 
@@ -217,3 +247,115 @@ func Bind(
 func NewDB(pool *pgxpool.Pool) DB {
 	return DB{scopeDBPool: pool}
 }
+{{if .HasProvision}}
+// ErrProvisioned rejects a second tenant in one provisioning execution.
+var ErrProvisioned = errors.New("scope: provisioning already used")
+
+// Provisioning is the identity of a tenant-less provisioning request: a
+// verified subject with no tenant and no membership yet. It has no
+// constructor, the zero value denies, it is valid only inside its generated
+// workflow, and it provisions at most one tenant.
+type Provisioning struct {
+	scopeProvision *provisionState
+}
+
+type provisionState struct {
+	mutex    sync.Mutex
+	manager  *auth.Manager
+	identity *auth.Identity
+	subject  string
+	used     bool
+}
+
+// SubjectID is the verified subject that becomes the new tenant's first
+// member. Never take it from request input.
+func (p Provisioning) SubjectID() string {
+	if p.scopeProvision == nil {
+		return ""
+	}
+
+	return p.scopeProvision.subject
+}
+
+// Provision rechecks the live session, mints a new tenant identifier, opens
+// one read-write transaction and binds app.tenant_id to the NEW tenant. The
+// transaction's Tenant is the only tenant authored code can name, and forced
+// row-level security rejects any row for another tenant, so a provisioning
+// body can create a tenant root and its first rows but can never write into
+// an existing tenant. It runs once per Provisioning.
+func (d DB) Provision(
+	ctx context.Context,
+	p Provisioning,
+	run func(context.Context, Tx) error,
+) error {
+	state := p.scopeProvision
+	if d.scopeDBPool == nil || state == nil || state.manager == nil ||
+		state.identity == nil || run == nil {
+		return ErrNoTenant
+	}
+
+	state.mutex.Lock()
+
+	if state.used {
+		state.mutex.Unlock()
+
+		return ErrProvisioned
+	}
+
+	state.used = true
+	state.mutex.Unlock()
+
+	return state.manager.UseIdentity(
+		ctx,
+		state.identity,
+		func(ctx context.Context, subject string) error {
+			if subject != state.subject {
+				return auth.ErrUnauthenticated
+			}
+
+			tenant, err := newTenantID()
+			if err != nil {
+				return err
+			}
+
+			return d.transact(
+				ctx,
+				pgx.ReadWrite,
+				Tenant{scopeTenant: tenant},
+				state.subject,
+				run,
+			)
+		},
+	)
+}
+
+// newTenantID mints a random version 4 UUID.
+func newTenantID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+
+	raw[6] = raw[6]&0x0f | 0x40
+	raw[8] = raw[8]&0x3f | 0x80
+	encoded := hex.EncodeToString(raw[:])
+
+	return encoded[0:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" +
+		encoded[16:20] + "-" + encoded[20:], nil
+}
+
+// BindProvisioning is a capability: only a generated provisioning workflow
+// may call it. The manager and identity are callback-scoped, so the value
+// cannot outlive its request.
+func BindProvisioning(
+	manager *auth.Manager,
+	identity *auth.Identity,
+	subject string,
+) Provisioning {
+	return Provisioning{scopeProvision: &provisionState{
+		manager:  manager,
+		identity: identity,
+		subject:  subject,
+	}}
+}
+{{end}}

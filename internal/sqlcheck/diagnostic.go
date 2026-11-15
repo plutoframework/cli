@@ -29,6 +29,20 @@ type Table struct {
 
 	// AppendOnly requires no-update and no-delete triggers.
 	AppendOnly bool
+
+	// TenantRoot marks the table whose rows are the tenants: its
+	// TenantColumn is its own identifier. Only provisioning query sets may
+	// INSERT into it.
+	TenantRoot bool
+}
+
+// Lookup is one declared tenant-root lookup by unique key. Its migration
+// state is exactly one SELECT policy keyed to a transaction-local setting.
+type Lookup struct {
+	Table   string
+	Key     string
+	Policy  string
+	Setting string
 }
 
 // QuerySet is a declared set of authored sqlc query files.
@@ -40,15 +54,20 @@ type QuerySet struct {
 
 	// Tables lists the declared tables this set may touch.
 	Tables []string
+
+	// Provision allows INSERT into the tenant root table: the set belongs
+	// to a group whose provisioning operation mints the new tenant.
+	Provision bool
 }
 
 // Config is the complete input of a check run.
 type Config struct {
 
 	// Root is the project directory; all other paths are relative to it.
-	Root   string
-	Tables []Table
-	Sets   []QuerySet
+	Root    string
+	Tables  []Table
+	Sets    []QuerySet
+	Lookups []Lookup
 
 	// SchemaDirs hold the migrations sqlc and the migration scanner read.
 	SchemaDirs []string

@@ -1,0 +1,41 @@
+package approvals
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"example.test/auditapp/internal/domain"
+	auditmodels "example.test/auditapp/internal/models/audit"
+	models "example.test/auditapp/internal/models/approvals"
+	"example.test/auditapp/internal/scope"
+)
+
+// Approve approves one request and records the audit event in the same
+// transaction: both commit or neither does, for the verified tenant only.
+func Approve(
+	ctx context.Context,
+	e scope.Execution,
+	p ApprovePorts,
+	in models.ApproveRequest,
+) error {
+	if in.ID == "" {
+		return fmt.Errorf("%w: id", domain.ErrInvalidInput)
+	}
+
+	payload, err := json.Marshal(map[string]string{"request": in.ID})
+	if err != nil {
+		return err
+	}
+
+	return p.TxDB.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		if err := p.Requests.ApproveTx(ctx, tx, in); err != nil {
+			return err
+		}
+
+		return p.AuditEvents.AppendTx(ctx, tx, auditmodels.NewEvent{
+			Type:    "approval.approved",
+			Payload: payload,
+		})
+	})
+}
