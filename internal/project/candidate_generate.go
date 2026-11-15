@@ -115,6 +115,7 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		data.Contract = contract
 
 		data.ContractEffects = m.Effects
+
 		for _, item := range []struct {
 			path, name string
 		}{
@@ -147,6 +148,12 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 				"candidate_workflow.go",
 			},
 		} {
+
+			// Authored operations get their models from the seam generator.
+			if operation.isAuthored() && item.name == "candidate_models.go" {
+				continue
+			}
+
 			source, err := render(item.name, data)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", item.path, err)
@@ -178,7 +185,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		data.Contract = contracts[entry.Operation]
 		data.Resource = resources[data.Contract.Resource]
 
-		source, err := render("candidate_handler.go", data)
+		var source []byte
+
+		if authored, ok := m.Operation(entry.Operation); ok &&
+			authored.isAuthored() {
+			source, err = seamHandler(m, authored)
+		} else {
+			source, err = render("candidate_handler.go", data)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -186,6 +201,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		files["internal/handlers/"+entry.Group+"/"+strings.ToLower(
 			entry.Action,
 		)+".go"] = source
+	}
+
+	seamModels, err := candidateSeamModels(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range seamModels {
+		files[path] = source
 	}
 
 	for _, job := range m.Jobs {

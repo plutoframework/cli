@@ -307,6 +307,13 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 			d := dataFor(m, e)
 
 			request := "nil"
+			query := ""
+
+			if authored, ok := m.Operation(e.Operation); ok &&
+				authored.isAuthored() {
+				query = seamPathQuery(authored)
+			}
+
 			if d.Body {
 				request = e.Group + "." + e.Action + "Request{}"
 			}
@@ -318,7 +325,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 					"Permission:access.%sPermission,\nFeature:%q,\n"+
 					"Request:%s,\nResponse:%s.%sResponse{},\n"+
 					"SuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n"+
-					"}\n",
+					"%s}\n",
 				d.Symbol,
 				e.Group+"."+e.Action,
 				e.Name,
@@ -333,6 +340,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				e.Action,
 				e.Collection,
 				e.RequiresIdempotency(),
+				query,
 			)
 			fmt.Fprintf(&catalog, "%s,\n", d.Symbol)
 			fmt.Fprintf(

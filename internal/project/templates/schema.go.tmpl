@@ -34,6 +34,10 @@ func describe(
 		return map[string]any{"type": "string", "format": "date-time"}, nil
 	}
 
+	if value == reflect.TypeOf(json.RawMessage(nil)) {
+		return map[string]any{}, nil
+	}
+
 	marshaler := reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 	if value.Implements(
 		marshaler,
@@ -84,6 +88,10 @@ func describe(
 			property, err := describe(field.Type, seen)
 			if err != nil {
 				return nil, err
+			}
+
+			if field.Tag.Get("openapi") == "hex" {
+				property["pattern"] = "^([0-9a-f]{2})*$"
 			}
 
 			properties[name] = property

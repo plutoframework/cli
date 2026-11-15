@@ -239,6 +239,10 @@ func Document() ([]byte, error) {
 				})
 		}
 
+		for _, param := range endpoint.Query {
+			parameters = append(parameters, queryParameter(param))
+		}
+
 		if endpoint.Idempotent {
 			parameters = append(
 				parameters,
@@ -299,6 +303,35 @@ func Document() ([]byte, error) {
 	}
 
 	return encodeDocument(document)
+}
+
+func queryParameter(param paths.QueryParam) map[string]any {
+	schema := map[string]any{"type": "string"}
+
+	switch param.Type {
+	case "string":
+		schema["maxLength"] = param.Max
+	case "int64":
+		schema = map[string]any{"type": "integer", "minimum": 0}
+		if param.Max > 0 {
+			schema["maximum"] = param.Max
+		}
+	case "bool":
+		schema = map[string]any{"type": "boolean"}
+	case "time":
+		schema["format"] = "date-time"
+	}
+
+	parameter := map[string]any{
+		"name":   param.Name,
+		"in":     "query",
+		"schema": schema,
+	}
+	if param.After != "" {
+		parameter["x-after"] = param.After
+	}
+
+	return parameter
 }
 
 // encodeDocument indents nested JSON but keeps objects and arrays that fit in
