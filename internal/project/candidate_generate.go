@@ -23,6 +23,10 @@ func CandidateManagedPaths(m Manifest) (map[string]bool, error) {
 }
 
 func candidateManaged(m Manifest) (map[string][]byte, error) {
+	if err := refuseUngeneratedAuthored(m); err != nil {
+		return nil, err
+	}
+
 	files, err := managedPublished(m)
 	if err != nil {
 		return nil, err

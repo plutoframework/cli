@@ -97,6 +97,10 @@ func Vet(
 		return err
 	}
 
+	if err := refuseUngeneratedAuthored(m); err != nil {
+		return err
+	}
+
 	for _, diagnostic := range InspectArchitecture(root).Diagnostics {
 		if diagnostic.ID == "ARCH401" {
 			return fmt.Errorf(

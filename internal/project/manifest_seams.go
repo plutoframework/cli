@@ -496,8 +496,11 @@ func (o Operation) validateSeams(
 		}
 	}
 
-	if o.Body == BodyAuthored && len(o.Ports) == 0 && o.Resource == "" {
-		return fmt.Errorf("authored body requires ports or a resource")
+	if o.Body == BodyAuthored && o.Resource == "" {
+		return fmt.Errorf(
+			"authored body requires resource and resource_policy = " +
+				"\"tenant\"; the generated gate binds the resource",
+		)
 	}
 
 	for _, id := range o.Ports {
@@ -675,4 +678,21 @@ func splitQualified(id string) (string, string, bool) {
 
 	return group, name, ok && group != "" && name != "" &&
 		!strings.Contains(name, ".")
+}
+
+// refuseUngeneratedAuthored fails closed until the seam generators exist: an
+// authored-body operation must never get an endpoint without its gate.
+func refuseUngeneratedAuthored(m Manifest) error {
+	for _, operation := range m.Operations {
+		if operation.Body == BodyAuthored {
+			return fmt.Errorf(
+				"operation %s declares body = \"authored\", but seam "+
+					"generation is not implemented; refusing to generate "+
+					"or vet without its gate",
+				operation.ID(),
+			)
+		}
+	}
+
+	return nil
 }

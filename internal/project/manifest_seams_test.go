@@ -1,6 +1,8 @@
 package project
 
 import (
+	"context"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -314,7 +316,14 @@ func TestSeamManifestRejections(t *testing.T) {
 				list(m).Ports, list(m).Resource = nil, ""
 				list(m).ResourcePolicy = ""
 			},
-			"requires ports or a resource",
+			"requires resource",
+		},
+		"authored with ports but no resource": {
+			func(m *Manifest) {
+				list(m).Resource = ""
+				list(m).ResourcePolicy = ""
+			},
+			"requires resource",
 		},
 		"undeclared port": {
 			func(m *Manifest) {
@@ -442,6 +451,36 @@ func TestSeamQueryRequiresProtectedRead(t *testing.T) {
 
 	if err := m.Validate(); err == nil ||
 		!strings.Contains(err.Error(), "protected read") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAuthoredBodyFailsClosedBeforeGenerators(t *testing.T) {
+	m := seamFixture(t)
+
+	if _, err := Managed(m); err == nil ||
+		!strings.Contains(err.Error(), "seam generation is not implemented") {
+		t.Fatalf("Managed: %v", err)
+	}
+
+	if _, err := CandidateManagedPaths(m); err == nil {
+		t.Fatal("CandidateManagedPaths must refuse authored bodies")
+	}
+
+	if err := Vet(
+		context.Background(),
+		t.TempDir(),
+		m,
+		io.Discard,
+		io.Discard,
+	); err == nil {
+		t.Fatal("Vet must refuse authored bodies")
+	}
+}
+
+func TestRefuseUngeneratedAuthoredNamesOperation(t *testing.T) {
+	err := refuseUngeneratedAuthored(seamFixture(t))
+	if err == nil || !strings.Contains(err.Error(), "audit.List") {
 		t.Fatalf("got %v", err)
 	}
 }
