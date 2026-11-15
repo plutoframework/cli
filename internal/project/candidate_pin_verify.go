@@ -32,6 +32,7 @@ import (
 	jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 	rbac "github.com/plutoframework/pluto-rbac"
 	identity "github.com/plutoframework/pluto-rbac/identity"
+	"github.com/plutoframework/pluto-rbac/identity/identitytest"
 )
 
 var (
@@ -48,6 +49,9 @@ var (
 	_ = identity.New
 	_ = (*identity.Gate).Within
 	_ = (*identity.Gate).Use
+	_ = identitytest.New
+	_ identitytest.Options
+	_ = (*identitytest.Harness).Within
 	_ = idempotency.NewClaim
 	_ = state.New[string, string, struct{}]
 	_ = (*state.Machine[string, string, struct{}]).Evaluate
