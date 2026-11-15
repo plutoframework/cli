@@ -272,21 +272,29 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 	)
 
 	provisionAudit, err := os.ReadFile(
-		"testdata/candidate_provision_audit_runtime.go.tmpl",
+		"testdata/candidate_audit_events_runtime.go.tmpl",
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeSeam(
-		t, root, "internal/app/provision_audit_test.go", string(provisionAudit),
+		t, root, "internal/app/audit_events_test.go", string(provisionAudit),
 	)
 
 	output = external(
 		t, root, "go", "test", "-race", "-json", "-count=1",
-		"-run", "^TestProvisionAudit", "./internal/app",
+		"-run", "^(TestProvisionAudit|TestAuthEvents)", "./internal/app",
 	)
-	assertCandidateCaseNames(t, output, "TestProvisionAuditInTransaction")
+	assertCandidateCaseNames(
+		t, output,
+		"TestProvisionAuditInTransaction",
+		"TestAuthEventsLoginScopedToVerifiedOrgs",
+		"TestAuthEventsFailuresRecordNothing",
+		"TestAuthEventsLogout",
+		"TestAuthEventsFailClosed",
+		"TestAuthEventsMemberIndexBoundary",
+	)
 
 	assertSeamNegatives(t, root)
 	assertSystemNegatives(

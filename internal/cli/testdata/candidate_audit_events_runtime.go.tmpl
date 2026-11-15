@@ -1,0 +1,445 @@
+package app_test
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/plutoframework/pluto-auth/httpauth"
+)
+
+func (f *sysFixture) auditCount(
+	t *testing.T,
+	org, eventType string,
+) int {
+	t.Helper()
+
+	var count int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM audit_events WHERE org_id = $1 AND type = $2",
+		org,
+		eventType,
+	).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+
+	return count
+}
+
+// Provisioning appends its first audit row inside the provisioning
+// transaction: the row lands in the NEW organization, attributed to the
+// verified first admin, and a later failure rolls back org, admin and audit
+// row together.
+func TestProvisionAuditInTransaction(t *testing.T) {
+	f := sysSetup(t)
+	alice := f.enroll(t, "alice@example.test")
+
+	acme := f.provision(t, alice, "acme", 200)
+
+	if got := f.auditCount(t, acme.Data.ID, "org.provisioned"); got != 1 {
+		t.Fatalf("provision audit rows in the new org = %d, want 1", got)
+	}
+
+	var actor string
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT actor_id FROM audit_events WHERE org_id = $1",
+		acme.Data.ID,
+	).Scan(&actor); err != nil || actor != alice.id {
+		t.Fatalf("audit actor = %q (%v), want the verified subject", actor, err)
+	}
+
+	// A failure after the audit append rolls back everything.
+	f.provision(t, alice, "rollback", 500)
+
+	var orgs, events int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT (SELECT count(*) FROM orgs WHERE slug = 'rollback'), "+
+			"(SELECT count(*) FROM audit_events WHERE org_id <> $1)",
+		acme.Data.ID,
+	).Scan(&orgs, &events); err != nil || orgs != 0 || events != 0 {
+		t.Fatalf("rollback left rows: %d %d (%v)", orgs, events, err)
+	}
+
+	// Another tenant never sees this tenant's audit rows through RLS.
+	bob := f.enroll(t, "bob@example.test")
+	beta := f.provision(t, bob, "beta", 200)
+
+	if f.auditCount(t, beta.Data.ID, "org.provisioned") != 1 ||
+		f.auditCount(t, acme.Data.ID, "org.provisioned") != 1 {
+		t.Fatal("each organization must hold exactly its own provision row")
+	}
+}
+
+func (f *sysFixture) authEventRows(
+	t *testing.T,
+	org, eventType string,
+) []string {
+	t.Helper()
+
+	rows, err := f.admin.Query(
+		t.Context(),
+		"SELECT actor_id FROM audit_events WHERE org_id = $1 AND type = $2 "+
+			"ORDER BY seq",
+		org,
+		eventType,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer rows.Close()
+
+	var actors []string
+
+	for rows.Next() {
+		var actor string
+		if err := rows.Scan(&actor); err != nil {
+			t.Fatal(err)
+		}
+
+		actors = append(actors, actor)
+	}
+
+	return actors
+}
+
+func (f *sysFixture) totalAuthEvents(t *testing.T) int {
+	t.Helper()
+
+	var count int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM audit_events WHERE type LIKE 'auth.%'",
+	).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+
+	return count
+}
+
+const (
+	sysPassword = "synthetic long passphrase"
+	sysWrong    = "wrong passphrase value"
+	aliceMail   = "alice@example.test"
+	bobMail     = "bob@example.test"
+)
+
+// signin signs in and returns the response and the issued session, if any.
+func (f *sysFixture) signin(
+	t *testing.T,
+	email, password, tenantHeader string,
+) (*httptest.ResponseRecorder, string) {
+	t.Helper()
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/auth/signin",
+		strings.NewReader(
+			fmt.Sprintf(`{"email":%q,"password":%q}`, email, password),
+		),
+	)
+	request.Header.Set("Origin", sysOrigin)
+	request.Header.Set("Content-Type", "application/json")
+
+	if tenantHeader != "" {
+		request.Header.Set("X-Tenant-ID", tenantHeader)
+	}
+
+	response := httptest.NewRecorder()
+	f.app.Handler().ServeHTTP(response, request)
+
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == httpauth.CookieName && cookie.MaxAge >= 0 {
+			return response, cookie.Value
+		}
+	}
+
+	return response, ""
+}
+
+// wantActors fails unless the event rows of an organization are exactly the
+// given actors, in order.
+func (f *sysFixture) wantActors(
+	t *testing.T,
+	org, eventType string,
+	want ...string,
+) {
+	t.Helper()
+
+	if got := f.authEventRows(t, org, eventType); !sameStrings(got, want) {
+		t.Fatalf("%s rows in %s = %v, want %v", eventType, org, got, want)
+	}
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+
+	for index := range got {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Sign-in records auth.login in every organization the verified subject is an
+// active member of, attributed to the subject, and nowhere else: not in
+// another subject's organization, not from a presented tenant header, not for
+// a suspended membership, and not for a subject with no organization.
+func TestAuthEventsLoginScopedToVerifiedOrgs(t *testing.T) {
+	f := sysSetup(t)
+	alice := f.enroll(t, "alice@example.test")
+	bob := f.enroll(t, "bob@example.test")
+
+	// Neither subject has an organization yet: sign-in succeeds and nothing
+	// is recorded anywhere, even though the policy is closed.
+	if _, session := f.signin(t, aliceMail, sysPassword, ""); session == "" {
+		t.Fatal("sign-in without an organization must succeed")
+	}
+
+	if got := f.totalAuthEvents(t); got != 0 {
+		t.Fatalf("events recorded without an organization: %d", got)
+	}
+
+	acme := f.provision(t, alice, "acme", 200)
+	acme2 := f.provision(t, alice, "acmetwo", 200)
+	beta := f.provision(t, bob, "beta", 200)
+
+	// A presented tenant header (here a stranger's organization) is ignored:
+	// the organizations come from the verified memberships.
+	response, session := f.signin(t, aliceMail, sysPassword, beta.Data.ID)
+	if response.Code != 200 || session == "" {
+		t.Fatalf("sign-in failed: %d %s", response.Code, response.Body.String())
+	}
+
+	for _, org := range []string{acme.Data.ID, acme2.Data.ID} {
+		f.wantActors(t, org, "auth.login", alice.id)
+	}
+
+	if got := f.authEventRows(t, beta.Data.ID, "auth.login"); len(got) != 0 {
+		t.Fatalf("login leaked into another subject's organization: %v", got)
+	}
+
+	// The recorded session is live: the event ran through the real gate.
+	live := sysUser{id: alice.id, session: session}
+	f.expect(t, f.count(t, live, acme.Data.ID), 200)
+
+	// A suspended membership is not an organization of the subject.
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"UPDATE users SET state = 'suspended' WHERE org_id = $1 AND id = $2",
+		acme2.Data.ID,
+		alice.id,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.signin(t, aliceMail, sysPassword, "")
+
+	if got := f.authEventRows(t, acme.Data.ID, "auth.login"); len(got) != 2 {
+		t.Fatalf("active org login rows = %v, want 2", got)
+	}
+
+	if got := f.authEventRows(t, acme2.Data.ID, "auth.login"); len(got) != 1 {
+		t.Fatalf("suspended org recorded a login: %v", got)
+	}
+
+	// Bob's sign-in lands in his organization only.
+	f.signin(t, bobMail, sysPassword, acme.Data.ID)
+
+	f.wantActors(t, beta.Data.ID, "auth.login", bob.id)
+
+	if got := f.authEventRows(t, acme.Data.ID, "auth.login"); len(got) != 2 {
+		t.Fatalf("bob's sign-in reached another organization: %v", got)
+	}
+}
+
+// A failed sign-in is recorded nowhere and cannot tell a known account from
+// an unknown one.
+func TestAuthEventsFailuresRecordNothing(t *testing.T) {
+	f := sysSetup(t)
+	alice := f.enroll(t, "alice@example.test")
+	f.provision(t, alice, "acme", 200)
+
+	known, knownSession := f.signin(t, aliceMail, sysWrong, "")
+	unknown, unknownSession := f.signin(t, "nobody@example.test", sysWrong, "")
+
+	if knownSession != "" || unknownSession != "" {
+		t.Fatal("a failed sign-in issued a session")
+	}
+
+	if known.Code != 401 || known.Code != unknown.Code ||
+		known.Body.String() != unknown.Body.String() {
+		t.Fatalf(
+			"failure responses differ: %d %q vs %d %q",
+			known.Code,
+			known.Body.String(),
+			unknown.Code,
+			unknown.Body.String(),
+		)
+	}
+
+	if got := f.totalAuthEvents(t); got != 0 {
+		t.Fatalf("a failed sign-in was recorded: %d events", got)
+	}
+
+	// Sign-up, verification and recovery have no verified organization.
+	f.post(
+		t,
+		"/auth/enroll",
+		`{"email":"carol@example.test","password":"`+sysPassword+`"}`,
+		202,
+	)
+	f.post(t, "/auth/recovery", `{"email":"alice@example.test"}`, 202)
+
+	if got := f.totalAuthEvents(t); got != 0 {
+		t.Fatalf("sign-up or recovery was recorded: %d events", got)
+	}
+}
+
+func (f *sysFixture) logout(
+	t *testing.T,
+	session string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return f.call("POST", "/auth/logout", "", session, "")
+}
+
+// Sign-out is recorded before the session is revoked, and a session that is
+// forged or already revoked records nothing.
+func TestAuthEventsLogout(t *testing.T) {
+	f := sysSetup(t)
+	alice := f.enroll(t, "alice@example.test")
+	acme := f.provision(t, alice, "acme", 200)
+
+	f.expect(t, f.logout(t, "forged-session"), 401)
+	f.expect(t, f.logout(t, ""), 401)
+
+	if got := f.totalAuthEvents(t); got != 0 {
+		t.Fatalf("an unauthenticated logout was recorded: %d", got)
+	}
+
+	f.expect(t, f.logout(t, alice.session), 200)
+
+	f.wantActors(t, acme.Data.ID, "auth.logout", alice.id)
+
+	// The revoked session cannot record or reach the organization again.
+	f.expect(t, f.logout(t, alice.session), 401)
+	f.expect(t, f.count(t, alice, acme.Data.ID), 401)
+
+	if got := f.authEventRows(t, acme.Data.ID, "auth.logout"); len(got) != 1 {
+		t.Fatalf("a revoked session recorded again: %v", got)
+	}
+}
+
+// The declared policy is closed: when the record cannot be written, sign-in
+// issues no credential, and sign-out leaves the session in place.
+func TestAuthEventsFailClosed(t *testing.T) {
+	f := sysSetup(t)
+	alice := f.enroll(t, "alice@example.test")
+	acme := f.provision(t, alice, "acme", 200)
+
+	var role string
+	if err := f.runtime.QueryRow(
+		t.Context(), "SELECT current_user",
+	).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.admin.Exec(
+		t.Context(),
+		fmt.Sprintf(`REVOKE INSERT ON audit_events FROM %q`, role),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	response, session := f.signin(t, aliceMail, sysPassword, "")
+	if response.Code != 503 || session != "" ||
+		len(response.Result().Cookies()) != 0 {
+		t.Fatalf(
+			"closed sign-in delivered a credential: %d %v",
+			response.Code, response.Result().Cookies(),
+		)
+	}
+
+	f.expect(t, f.logout(t, alice.session), 503)
+	f.expect(t, f.count(t, alice, acme.Data.ID), 200)
+
+	if _, err := f.admin.Exec(
+		t.Context(),
+		fmt.Sprintf(`GRANT INSERT ON audit_events TO %q`, role),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.expect(t, f.logout(t, alice.session), 200)
+	f.expect(t, f.count(t, alice, acme.Data.ID), 401)
+}
+
+// The generated subject index resolves only the organizations of the subject
+// a live session verified, and nothing without that setting.
+func TestAuthEventsMemberIndexBoundary(t *testing.T) {
+	f := sysSetup(t)
+	alice := f.enroll(t, "alice@example.test")
+	bob := f.enroll(t, "bob@example.test")
+	f.provision(t, alice, "acme", 200)
+	f.provision(t, bob, "beta", 200)
+
+	count := func(subject string) int {
+		t.Helper()
+
+		tx, err := f.runtime.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		defer func() {
+			_ = tx.Rollback(t.Context())
+		}()
+
+		if subject != "" {
+			if _, err := tx.Exec(
+				t.Context(),
+				"SELECT set_config('app.auth_event_subject', $1, true)",
+				subject,
+			); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		var rows int
+		if err := tx.QueryRow(
+			t.Context(),
+			"SELECT count(*) FROM pluto_auth_event_members",
+		).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+
+		return rows
+	}
+
+	if got := count(""); got != 0 {
+		t.Fatalf("index readable without a subject: %d", got)
+	}
+
+	if got := count(alice.id); got != 1 {
+		t.Fatalf("alice resolves %d organizations, want 1", got)
+	}
+
+	if got := count("someone-else"); got != 0 {
+		t.Fatalf("unknown subject resolves %d organizations", got)
+	}
+}

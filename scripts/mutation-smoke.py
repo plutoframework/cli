@@ -412,6 +412,67 @@ mutations = [
     ),
 ]
 
+mutations.extend(
+    [
+        (
+            "auth events fail closed by default",
+            "internal/project/manifest_authevents.go",
+            "return e.OnError != AuthEventsBestEffort",
+            "return e.OnError == AuthEventsClosed",
+            "./internal/project#TestAuthEventsValidatesAndDefaultsClosed",
+        ),
+        (
+            "auth events operation unreachable from endpoints",
+            "internal/project/manifest_authevents.go",
+            "if endpoint.Operation == operation.ID() {",
+            "if endpoint.Operation == operation.ID() && false {",
+            "./internal/project#TestAuthEventsRejections",
+        ),
+        (
+            "auth events every role holds the permission",
+            "internal/project/manifest_authevents.go",
+            "if !holds(role.ID, map[string]bool{}) {",
+            "if false {",
+            "./internal/project#TestAuthEventsRejections",
+        ),
+        (
+            "auth events member index subject setting",
+            "internal/project/manifest_authevents.go",
+            'return "app.auth_event_subject"\n}',
+            'return "app.tenant_id"\n}',
+            "./internal/project#TestAuthEventsMemberIndexSQL",
+        ),
+        (
+            "auth events member index active predicate",
+            "internal/project/candidate_table_migrations.go",
+            'return " WHERE " + column + " IS TRUE"',
+            'return ""',
+            "./internal/project#TestAuthEventsMemberIndexSQL",
+        ),
+        (
+            "auth events tenants bound to the verified subject",
+            "internal/project/candidate_memberships_app.go",
+            "\"SELECT set_config('{{SETTING}}', $1, true)\",",
+            "\"SELECT set_config('{{SETTING}}x', $1, true)\",",
+            "./internal/project#TestAuthEventsManagedOutput",
+        ),
+        (
+            "auth events closed policy revokes the session",
+            "internal/project/templates/candidate_auth_events.go.tmpl",
+            "if authEventsClosed {\n\t\t\t\t_ = e.manager.Revoke(ctx, token)",
+            "if authEventsClosed {\n\t\t\t\t_ = token",
+            "./internal/project#TestAuthEventsManagedOutput",
+        ),
+        (
+            "auth events member index is read only for the runtime role",
+            "internal/project/candidate_runtime_role.go",
+            'privileges = "SELECT"\n',
+            'privileges = "SELECT, INSERT, UPDATE, DELETE"\n',
+            "./internal/project#TestRuntimeRoleGrantsMemberIndexReadOnly",
+        ),
+    ]
+)
+
 if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
     mutations.extend(
         [

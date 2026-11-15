@@ -63,7 +63,17 @@ Authored seams (candidate): declare, then write only authored role files.
   verified identity, no membership; generated code mints the tenant id). Pre-
   login lookup by slug uses `scope = "lookup"` with `[[lookups]]`.
 - Same-transaction writes across groups: the port declares `tx_methods` and
-  `tx_callers`; the caller operation lists the port.
+  `tx_callers`; the caller operation lists the port. A `scope = "provision"`
+  operation may list such a port too, so org, first admin and first audit row
+  share the provisioning transaction (`TxDB.Provision`).
+- Authentication events: `[auth.events] operation = "<group>.<Action>"` names
+  an authored write (input model exactly `event:string`, no response, no
+  endpoint/job/agent; every `[[roles]]` must hold its permission). Generated
+  glue runs it for sign-in, OIDC sign-in and sign-out in each org the verified
+  subject actively belongs to, through the normal gate, attributed to the
+  verified subject. `on_error` is `closed` (default: deny sign-in, revoke the
+  session; deny sign-out) or `best_effort`. Sign-up, verification, recovery,
+  failed sign-in and subjects with no org are never recorded in any org.
 - `[memberships]` binds roles to an app table; `active_column`/`active_values`
   deny suspended subjects. `[database] runtime_role` names the least-privilege
   role; a migration is proposed and startup refuses owner/BYPASSRLS roles.
