@@ -74,6 +74,7 @@ func addAuthoredRules(
 	scopeNamespace := module + "/" + scopeDir
 	bindOwners := []string{scopetestFile}
 	provisionOwners := []string{}
+	machineOwners := []string{}
 
 	for _, operation := range m.Operations {
 		if operation.Body != BodyAuthored {
@@ -90,6 +91,8 @@ func addAuthoredRules(
 
 		if operation.Scope == ScopeProvision {
 			provisionOwners = append(provisionOwners, workflow)
+		} else if operation.isMachine() {
+			machineOwners = append(machineOwners, workflow)
 		} else {
 			bindOwners = append(bindOwners, workflow)
 		}
@@ -123,6 +126,22 @@ func addAuthoredRules(
 		"BindProvisioning",
 		provisionOwners...,
 	)
+
+	if len(machineOwners) > 0 {
+		rules.addCapability(scopeNamespace, "BindMachine", machineOwners...)
+	}
+
+	if m.HasMachine() {
+		rules.managed[machinePortsFile] = true
+		rules.managed[machineStorageFile] = true
+		rules.managed[machineTransportFile] = true
+		rules.addCapability(
+			module+"/internal/ports/machineauth",
+			"NewVerified",
+			machineStorageFile,
+		)
+	}
+
 	rules.addCapability(
 		scopeNamespace,
 		"NewDB",
@@ -154,6 +173,7 @@ func addAuthoredRules(
 		"scopeTx",
 		"scopeProvision",
 		"scopeSubject",
+		"scopeMachine",
 	} {
 		if rules.globalPrivate[name] == nil {
 			rules.globalPrivate[name] = map[string]bool{}

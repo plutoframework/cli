@@ -17,6 +17,12 @@ type Endpoint struct {
 	Path          string
 	Authenticated bool
 	SessionOnly   bool
+{{- if .HasMachine}}
+
+	// Machine names the principal of a machine-authenticated endpoint: it
+	// carries no user session and no user permission.
+	Machine string
+{{- end}}
 	Permission    rbac.PermissionID
 	Feature       string
 	Request       any

@@ -241,7 +241,7 @@ func inspectAuthoredSQL(
 func sqlcheckLookups(m Manifest) []sqlcheck.Lookup {
 	var lookups []sqlcheck.Lookup
 
-	for _, lookup := range m.Lookups {
+	for _, lookup := range m.allLookups() {
 		lookups = append(lookups, sqlcheck.Lookup{
 			Table:   lookup.Table,
 			Key:     lookup.Key,

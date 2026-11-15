@@ -104,6 +104,8 @@ func systemHandler(m Manifest, operation Operation) ([]byte, error) {
 		data.Symbol = symbol(operation.Endpoint())
 
 		return render("candidate_provision_handler.go", data)
+	case ScopeEnroll:
+		return enrollHandler(m, operation)
 	case ScopeLookup:
 		data, err := lookupData(m, operation)
 		if err != nil {

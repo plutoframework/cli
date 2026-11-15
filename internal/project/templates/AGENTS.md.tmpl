@@ -71,6 +71,18 @@ Authored seams (candidate): declare, then write only authored role files.
   `feature_client_visible = true`). Entries inherit it; the flag is default-off,
   checked by the generated route gate before the handler and gate run (403
   `feature_disabled`), and never grants authorization. Not on `[[endpoints]]`.
+{{- if .HasMachine}}
+- Machine identity (gateways, agents): `[[principals]]` kind = "machine" binds a
+  table; `scope = "enroll"` is the generated public enrollment (single-use
+  hashed token, expiry, rate limit, binds the ed25519 key, tenant read from the
+  token row). `auth = "machine:<principal>"` operations are verified by
+  signature (`pluto-machine-v1`: method, path, query, body hash, timestamp,
+  nonce) and run as a scope.Execution whose tenant is the machine's and subject
+  its id. Machine permissions live on the principal, never on user roles.
+  Register machines in an authored write with `tx.IssueEnrollment(ctx,
+  principal, machineID)`; never accept a tenant or actor from machine input.
+  Revoke by changing the state column; the next request is denied.
+{{- end}}
 - Declaration changes: edit pluto.toml (or pluto add blueprint), then run
   `pluto generate`. Full reference: the CANDIDATE.md in the Pluto CLI docs.
 

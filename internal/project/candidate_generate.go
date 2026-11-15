@@ -130,6 +130,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		files[path] = source
 	}
 
+	machine, err := candidateMachineManaged(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range machine {
+		files[path] = source
+	}
+
 	for _, operation := range m.Operations {
 		if operation.outsideContracts() {
 			continue
@@ -216,6 +225,9 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		if system, ok := m.Operation(entry.Operation); ok &&
 			system.Scope != "" {
 			source, err = systemHandler(m, system)
+		} else if authored, ok := m.Operation(entry.Operation); ok &&
+			authored.isMachine() {
+			source, err = machineHandler(m, authored)
 		} else if authored, ok := m.Operation(entry.Operation); ok &&
 			authored.isAuthored() {
 			source, err = seamHandler(m, authored)

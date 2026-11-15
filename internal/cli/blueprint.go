@@ -30,6 +30,7 @@ type operationBlueprint struct {
 	Authored           *project.Authored           `toml:"authored"`
 	Memberships        *project.Memberships        `toml:"memberships"`
 	Lookups            []project.Lookup            `toml:"lookups"`
+	Principals         []project.Principal         `toml:"principals"`
 	Database           *blueprintDatabase          `toml:"database"`
 }
 
@@ -101,6 +102,8 @@ func readOperationBlueprint(path string) (operationBlueprint, error) {
 		blueprint.Models,
 	)+len(
 		blueprint.Lookups,
+	)+len(
+		blueprint.Principals,
 	) == 0 && blueprint.Authored == nil && blueprint.Memberships == nil &&
 		blueprint.Database == nil {
 		return blueprint, fmt.Errorf(
@@ -196,6 +199,9 @@ func addBlueprintCommand(options Options) *cobra.Command {
 			manifest.Lookups = append(
 				append([]project.Lookup(nil), manifest.Lookups...),
 				blueprint.Lookups...)
+			manifest.Principals = append(
+				append([]project.Principal(nil), manifest.Principals...),
+				blueprint.Principals...)
 
 			if blueprint.Authored != nil {
 				if manifest.Authored != nil {

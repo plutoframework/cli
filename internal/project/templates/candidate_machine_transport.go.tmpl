@@ -1,0 +1,67 @@
+package transport
+
+import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"net/http"
+	"strconv"
+	"time"
+
+	machineauth "{{.Module}}/internal/ports/machineauth"
+)
+
+// MachineRequestFrom reads the signed headers of a machine request; body is
+// the exact request body.
+func MachineRequestFrom(r *http.Request, body []byte) machineauth.Request {
+	return machineauth.Request{
+		Method:    r.Method,
+		Path:      r.URL.EscapedPath(),
+		Query:     r.URL.RawQuery,
+		Body:      body,
+		MachineID: r.Header.Get(machineauth.HeaderMachine),
+		Timestamp: r.Header.Get(machineauth.HeaderTimestamp),
+		Nonce:     r.Header.Get(machineauth.HeaderNonce),
+		Signature: r.Header.Get(machineauth.HeaderSignature),
+	}
+}
+
+// SignMachineRequest sets the four signature headers on r for the exact body
+// that will be sent. It exists for in-module clients and tests; any ed25519
+// client may build the same headers from machineauth.Canonical.
+func SignMachineRequest(
+	r *http.Request,
+	body []byte,
+	key ed25519.PrivateKey,
+	principal, machineID string,
+	now time.Time,
+) error {
+	var raw [24]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return err
+	}
+
+	nonce := base64.RawURLEncoding.EncodeToString(raw[:])
+	timestamp := now.Unix()
+
+	signature := ed25519.Sign(key, machineauth.Canonical(
+		principal,
+		machineID,
+		r.Method,
+		r.URL.EscapedPath(),
+		r.URL.RawQuery,
+		body,
+		timestamp,
+		nonce,
+	))
+
+	r.Header.Set(machineauth.HeaderMachine, machineID)
+	r.Header.Set(machineauth.HeaderTimestamp, strconv.FormatInt(timestamp, 10))
+	r.Header.Set(machineauth.HeaderNonce, nonce)
+	r.Header.Set(
+		machineauth.HeaderSignature,
+		base64.RawURLEncoding.EncodeToString(signature),
+	)
+
+	return nil
+}

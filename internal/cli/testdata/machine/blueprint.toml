@@ -1,0 +1,173 @@
+[[roles]]
+id = "admin"
+name = "Administrator"
+description = "Registers gateways."
+permissions = ["gateways.manage"]
+
+[[tables]]
+group = "gateways"
+name = "users"
+tenant_column = "org_id"
+row_security = true
+
+[[tables]]
+group = "gateways"
+name = "gateways"
+tenant_column = "org_id"
+row_security = true
+
+[[queries]]
+group = "gateways"
+files = ["db/queries/gateways/*.sql"]
+tables = ["users", "gateways"]
+
+[[principals]]
+id = "gateways.Gateway"
+kind = "machine"
+table = "gateways"
+id_column = "id"
+key_column = "public_key"
+state_column = "state"
+pending_value = "pending"
+active_value = "active"
+permissions = ["gateway.heartbeat", "gateway.status"]
+enroll_ttl = "1h"
+replay_window = "2m"
+
+[[ports]]
+id = "gateways.Registry"
+adapter = "gateways.Store"
+methods = [
+  "Create(scope.Execution, models.NewGateway) (models.CreatedGateway, error)",
+  "Beat(scope.Execution, models.Beat) (models.Ack, error)",
+  "Status(scope.Execution, models.StatusRequest) (models.GatewayStatus, error)",
+]
+
+[[models]]
+id = "gateways.NewGateway"
+fields = ["name:string"]
+
+[[models]]
+id = "gateways.CreatedGateway"
+fields = ["id:string", "token:string"]
+
+[[models]]
+id = "gateways.EnrollInput"
+fields = ["token:string", "public_key:string"]
+
+[[models]]
+id = "gateways.Enrolled"
+fields = ["machine_id:string"]
+
+[[models]]
+id = "gateways.Beat"
+fields = ["seq:int64"]
+
+[[models]]
+id = "gateways.Ack"
+fields = ["seq:int64"]
+
+[[models]]
+id = "gateways.GatewayStatus"
+fields = [
+  "id:string",
+  "name:string",
+  "state:string",
+  "last_seq:int64",
+  "echo:string",
+]
+
+[[operations]]
+group = "gateways"
+action = "Create"
+permission = "gateways.manage"
+write = true
+idempotency = "exempt"
+replay_reason = "An admin registers a gateway; each call mints a new one."
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.NewGateway"
+output = "gateways.CreatedGateway"
+
+[[operations]]
+group = "gateways"
+action = "Enroll"
+scope = "enroll"
+principal = "gateways.Gateway"
+public = true
+write = true
+idempotency = "exempt"
+replay_reason = "A single-use token is the replay protection."
+rate_limit = "12/1h"
+body = "system"
+response = "object"
+input = "gateways.EnrollInput"
+output = "gateways.Enrolled"
+
+[[operations]]
+group = "gateways"
+action = "Heartbeat"
+auth = "machine:gateways.Gateway"
+permission = "gateway.heartbeat"
+write = true
+idempotency = "exempt"
+replay_reason = "Signed nonces reject replays."
+body = "authored"
+resource = "gateways.heartbeat"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.Beat"
+output = "gateways.Ack"
+
+[[operations]]
+group = "gateways"
+action = "Status"
+auth = "machine:gateways.Gateway"
+permission = "gateway.status"
+idempotency = "none"
+body = "authored"
+resource = "gateways.status"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+output = "gateways.GatewayStatus"
+query = [{ name = "echo", type = "string", max = 64 }]
+
+[[endpoints]]
+group = "gateways"
+action = "Enroll"
+operation = "gateways.Enroll"
+method = "POST"
+path = "/api/gateways/enroll"
+name = "Enroll gateway"
+description = "Redeem a single-use enrollment token and bind the gateway key."
+
+[[endpoints]]
+group = "gateways"
+action = "Heartbeat"
+operation = "gateways.Heartbeat"
+method = "POST"
+path = "/api/gateway/heartbeat"
+name = "Gateway heartbeat"
+description = "A signed gateway reports liveness."
+
+[[endpoints]]
+group = "gateways"
+action = "Status"
+operation = "gateways.Status"
+method = "GET"
+path = "/api/gateway/status"
+name = "Gateway status"
+description = "A signed gateway reads its own record."
+
+[authored]
+
+[memberships]
+table = "gateways.users"
+tenant_column = "org_id"
+subject_column = "id"
+role_column = "role"

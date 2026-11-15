@@ -1,0 +1,79 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	commonDomain "{{.Module}}/internal/domain"
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+)
+
+// {{.Action}}Limiter is the shared, replica-wide attempt limiter. It fails
+// closed.
+type {{.Action}}Limiter interface {
+	Allow(context.Context, string) error
+}
+
+type {{.Action}}Boundary interface {
+	sealed{{.Action}}()
+	Execute(
+		context.Context,
+		string,
+		models.{{.Action}}Request) (models.{{.Action}}Data, error)
+}
+
+// {{.Action}} is the public, generated, rate-limited enrollment of a
+// {{.Authored.Principal}} machine. It redeems a single-use token, binds the
+// presented ed25519 public key and activates the machine. The tenant is
+// read from the token row, never from input, and there is no authored body.
+type {{.Action}} struct {
+	{{lowerFirst .Action}}Enroller machineauth.Enroller
+	{{lowerFirst .Action}}Limiter  {{.Action}}Limiter
+}
+
+func New{{.Action}}(
+	enroller machineauth.Enroller,
+	limiter {{.Action}}Limiter,
+) *{{.Action}} {
+	return &{{.Action}}{
+		{{lowerFirst .Action}}Enroller: enroller,
+		{{lowerFirst .Action}}Limiter:  limiter,
+	}
+}
+
+func (*{{.Action}}) sealed{{.Action}}() {}
+
+// Execute rate limits by the caller-supplied client key, never by the token,
+// so an attacker cannot reset the limit by varying the token.
+func (operation *{{.Action}}) Execute(
+	ctx context.Context,
+	clientKey string,
+	input models.{{.Action}}Request,
+) (models.{{.Action}}Data, error) {
+	var output models.{{.Action}}Data
+
+	if ctx == nil || operation == nil || clientKey == "" ||
+		operation.{{lowerFirst .Action}}Enroller == nil ||
+		operation.{{lowerFirst .Action}}Limiter == nil {
+		return output, commonDomain.ErrUnauthenticated
+	}
+
+	if err := operation.{{lowerFirst .Action}}Limiter.Allow(
+		ctx,
+		{{q .Authored.ID}}+":"+clientKey); err != nil {
+		return output, err
+	}
+
+	machineID, err := operation.{{lowerFirst .Action}}Enroller.Enroll(
+		ctx,
+		{{q .Authored.Principal}},
+		input.Token,
+		input.PublicKey)
+	if err != nil {
+		return output, err
+	}
+
+	output.MachineID = machineID
+
+	return output, nil
+}

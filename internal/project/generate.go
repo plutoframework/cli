@@ -43,6 +43,9 @@ type templateData struct {
 	Authored      authoredOp
 	AuthoredGroup authoredGroupView
 
+	// Machine identity view; see candidate_machine.go.
+	Machine machineView
+
 	// System lookup views; see candidate_system.go.
 	Lookup       Lookup
 	KeyGoName    string
@@ -381,6 +384,13 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				if authored.Scope == ScopeProvision {
 					query += "SessionOnly:true,\n"
 				}
+
+				if authored.isMachine() {
+					query += fmt.Sprintf(
+						"Machine:%q,\n",
+						authored.MachinePrincipal(),
+					)
+				}
 			}
 
 			if d.Body {
@@ -401,7 +411,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				e.Description,
 				e.Method,
 				e.Path,
-				!e.Public,
+				!e.Public && e.Machine == "",
 				d.Symbol,
 				e.Feature,
 				request,
