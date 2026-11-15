@@ -16,37 +16,47 @@ func policyWorkspace(root string) (*Workspace, *Plan) {
 	}
 
 	return &Workspace{
-		Root:     root,
-		Manifest: project.Manifest{Project: project.Project{Module: "ex.com/a"}},
-		plan:     plan,
+		Root: root,
+		Manifest: project.Manifest{
+			Project: project.Project{Module: "ex.com/a"},
+		},
+		plan: plan,
 	}, plan
 }
 
 func TestScaffoldTestPolicy(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
+
 		// Subject removed, replacement generated: delete and note.
 		"internal/gone/old_test.go": "package gone\n",
 		"internal/gone/old.go":      "package gone\n",
+
 		// Subject stays and imports resolve: keep.
 		"internal/kept/kept_test.go": "package kept\n\nimport _ \"ex.com/a/internal/dep\"\n",
 		"internal/kept/kept.go":      "package kept\n",
 		"internal/dep/dep.go":        "package dep\n",
+
 		// Import target removed, no replacement: manual.
 		"internal/broken/broken_test.go": "package broken\n\nimport _ \"ex.com/a/internal/vanish\"\n",
 		"internal/broken/broken.go":      "package broken\n",
 		"internal/vanish/vanish.go":      "package vanish\n",
+
 		// Edited: manual, as before.
 		"internal/edited/edited_test.go": "package edited\n\n// mine\n",
 		"internal/edited/edited.go":      "package edited\n",
 	})
 
 	previous := map[string][]byte{
-		"internal/gone/old_test.go":      []byte("package gone\n"),
-		"internal/gone/old.go":           []byte("package gone\n"),
-		"internal/kept/kept_test.go":     []byte("package kept\n\nimport _ \"ex.com/a/internal/dep\"\n"),
-		"internal/kept/kept.go":          []byte("package kept\n"),
-		"internal/broken/broken_test.go": []byte("package broken\n\nimport _ \"ex.com/a/internal/vanish\"\n"),
+		"internal/gone/old_test.go": []byte("package gone\n"),
+		"internal/gone/old.go":      []byte("package gone\n"),
+		"internal/kept/kept_test.go": []byte(
+			"package kept\n\nimport _ \"ex.com/a/internal/dep\"\n",
+		),
+		"internal/kept/kept.go": []byte("package kept\n"),
+		"internal/broken/broken_test.go": []byte(
+			"package broken\n\nimport _ \"ex.com/a/internal/vanish\"\n",
+		),
 		"internal/broken/broken.go":      []byte("package broken\n"),
 		"internal/vanish/vanish.go":      []byte("package vanish\n"),
 		"internal/edited/edited_test.go": []byte("package edited\n"),

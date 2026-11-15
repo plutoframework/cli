@@ -106,19 +106,24 @@ func TestFrameworkMigrationNumbersFollowTheManifest(t *testing.T) {
 }
 
 func TestFrameworkMigrationValidation(t *testing.T) {
-	for name, test := range map[string]struct {
+	attempts := func(number string) map[string]string {
+		return map[string]string{"credential_attempts": number}
+	}
+
+	type rejection struct {
 		framework map[string]string
 		want      string
-	}{
+	}
+
+	rejected := map[string]rejection{
 		"unknown":  {map[string]string{"nope": "009"}, "unknown framework"},
-		"format":   {map[string]string{"credential_attempts": "9"}, "three digit"},
-		"reserved": {map[string]string{"credential_attempts": "099"}, "002 to 098"},
-		"initial":  {map[string]string{"credential_attempts": "001"}, "002 to 098"},
-		"clash": {
-			map[string]string{"credential_attempts": "005"},
-			"used by both",
-		},
-	} {
+		"format":   {attempts("9"), "three digit"},
+		"reserved": {attempts("099"), "002 to 098"},
+		"initial":  {attempts("001"), "002 to 098"},
+		"clash":    {attempts("005"), "used by both"},
+	}
+
+	for name, test := range rejected {
 		t.Run(name, func(t *testing.T) {
 			m, _ := migrationFixture(t, nil)
 			m.Migrations.Framework = test.framework

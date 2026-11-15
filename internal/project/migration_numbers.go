@@ -25,7 +25,9 @@ type FrameworkMigration struct {
 const migrationDirectory = "db/migrations/"
 
 var (
-	migrationName   = regexp.MustCompile(`^db/migrations/(\d+)_([a-z0-9_]+)\.sql$`)
+	migrationName = regexp.MustCompile(
+		`^db/migrations/(\d+)_([a-z0-9_]+)\.sql$`,
+	)
 	migrationNumber = regexp.MustCompile(`^\d{3}$`)
 )
 
@@ -198,6 +200,10 @@ func applyFrameworkMigrations(m Manifest, files map[string][]byte) {
 // SameSQL compares migrations ignoring line-ending and trailing whitespace
 // differences.
 func SameSQL(a, b []byte) bool {
-	return string(bytes.TrimSpace(bytes.ReplaceAll(a, []byte("\r\n"), []byte("\n")))) ==
-		string(bytes.TrimSpace(bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))))
+	return string(
+		bytes.TrimSpace(bytes.ReplaceAll(a, []byte("\r\n"), []byte("\n"))),
+	) ==
+		string(
+			bytes.TrimSpace(bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))),
+		)
 }

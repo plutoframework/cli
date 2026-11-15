@@ -41,7 +41,11 @@ func scaffoldTests(
 		subjectGone := subjectWasGenerated && !subjectStays && current == nil
 
 		if subjectGone {
-			if replacement := replacementTest(directory, name, next); replacement != "" {
+			if replacement := replacementTest(
+				directory,
+				name,
+				next,
+			); replacement != "" {
 				if err := w.Delete(name); err != nil {
 					return err
 				}
@@ -148,7 +152,9 @@ func testResolves(w *Workspace, name, directory string) (bool, error) {
 			continue
 		}
 
-		if ok, err := hasSource(strings.TrimPrefix(value, module+"/")); err != nil ||
+		if ok, err := hasSource(
+			strings.TrimPrefix(value, module+"/"),
+		); err != nil ||
 			!ok {
 			return false, err
 		}

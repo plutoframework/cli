@@ -137,7 +137,10 @@ func TestMigrateMatchesIdenticalMigrationByContent(t *testing.T) {
 		"db/migrations/012_local_credentials.sql": body,
 	})
 
-	if err := removeFile(root, "db/migrations/004_local_credentials.sql"); err != nil {
+	if err := removeFile(
+		root,
+		"db/migrations/004_local_credentials.sql",
+	); err != nil {
 		t.Fatal(err)
 	}
 

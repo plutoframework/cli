@@ -104,6 +104,7 @@ func reconcile(
 			})
 		case !exists:
 		case pristine && strings.HasSuffix(name, "_test.go"):
+
 			// Decided once every other file has settled; see scaffoldTests.
 			deferred = append(deferred, name)
 		case pristine:
