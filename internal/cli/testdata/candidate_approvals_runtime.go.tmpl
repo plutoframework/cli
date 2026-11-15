@@ -1,0 +1,190 @@
+package app_test
+
+import (
+	"context"
+	"testing"
+
+	"example.test/auditapp/internal/access"
+	approvals "example.test/auditapp/internal/models/approvals"
+)
+
+func (f *auditFixture) approve(
+	user auditUser,
+	tenant, id string,
+) error {
+	return f.app.WithSession(
+		context.Background(),
+		user.session,
+		tenant,
+		func(ctx context.Context, caller access.Caller) error {
+			return f.app.Operations.ApprovalsApprove.Execute(
+				ctx,
+				caller,
+				approvals.ApproveRequest{ID: id},
+			)
+		},
+	)
+}
+
+func (f *auditFixture) status(t *testing.T, org, id string) string {
+	t.Helper()
+
+	var status string
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		`SELECT status FROM approval_requests WHERE org_id = $1 AND id = $2`,
+		org, id,
+	).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+
+	return status
+}
+
+func (f *auditFixture) approvedEvents(t *testing.T, org string) int {
+	t.Helper()
+
+	var count int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		`SELECT count(*) FROM audit_events
+		 WHERE org_id = $1 AND type = 'approval.approved'`,
+		org,
+	).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+
+	return count
+}
+
+// An approval and its audit event, written by another group's adapter, share
+// one transaction: both commit, both roll back, and only the verified tenant
+// is ever touched.
+func TestApprovalsTxEndToEnd(t *testing.T) {
+	f := auditSetup(t)
+
+	alice := f.enroll(t, "alice@example.test")
+	bob := f.enroll(t, "bob@example.test")
+	carol := f.enroll(t, "carol@example.test")
+	mallory := f.enroll(t, "mallory@example.test")
+
+	f.member(t, alice, "north", "approver")
+	f.member(t, bob, "north", "auditor")
+	f.member(t, carol, "south", "approver")
+
+	for _, request := range [][2]string{
+		{"north", "r1"}, {"north", "r2"}, {"north", "r3"}, {"south", "s1"},
+	} {
+		if _, err := f.admin.Exec(
+			t.Context(),
+			`INSERT INTO approval_requests (org_id, id) VALUES ($1, $2)`,
+			request[0], request[1],
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The approver never held audit.write: the write is allowed only because
+	// the audit port declares approvals.Approve in tx_callers.
+	if err := f.approve(alice, "north", "r1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if f.status(t, "north", "r1") != "approved" ||
+		f.approvedEvents(t, "north") != 1 {
+		t.Fatal("approval and audit event did not commit together")
+	}
+
+	var actor string
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		`SELECT actor_id FROM audit_events WHERE org_id = 'north'`,
+	).Scan(&actor); err != nil || actor != alice.id {
+		t.Fatalf("audit actor = %q want %q (%v)", actor, alice.id, err)
+	}
+
+	// A repeated approval conflicts and leaves no second event.
+	if err := f.approve(alice, "north", "r1"); err == nil {
+		t.Fatal("repeat approval accepted")
+	}
+
+	if f.approvedEvents(t, "north") != 1 {
+		t.Fatal("failed business write left an audit event")
+	}
+
+	// Callers without the permission, without membership or in another
+	// tenant are denied before either write.
+	for name, run := range map[string]func() error{
+		"auditor":    func() error {
+			return f.approve(bob, "north", "r2")
+		},
+		"non-member": func() error {
+			return f.approve(mallory, "north", "r2")
+		},
+		"wrong tenant": func() error {
+			return f.approve(alice, "south", "s1")
+		},
+		"other tenant's request": func() error {
+			return f.approve(alice, "north", "s1")
+		},
+	} {
+		if err := run(); err == nil {
+			t.Fatalf("%s approval was not denied", name)
+		}
+	}
+
+	if f.status(t, "north", "r2") != "pending" ||
+		f.status(t, "south", "s1") != "pending" ||
+		f.approvedEvents(t, "south") != 0 ||
+		f.approvedEvents(t, "north") != 1 {
+		t.Fatal("a denied approval changed data")
+	}
+
+	// A failing audit write rolls the approval back with it.
+	for _, statement := range []string{
+		`CREATE FUNCTION fail_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+		 BEGIN RAISE EXCEPTION 'audit unavailable'; END $$`,
+		`CREATE TRIGGER fail_audit BEFORE INSERT ON audit_events
+		 FOR EACH ROW EXECUTE FUNCTION fail_audit()`,
+	} {
+		if _, err := f.admin.Exec(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := f.approve(alice, "north", "r2"); err == nil {
+		t.Fatal("approval succeeded although the audit write failed")
+	}
+
+	if f.status(t, "north", "r2") != "pending" ||
+		f.approvedEvents(t, "north") != 1 {
+		t.Fatal("approval survived a failed audit write")
+	}
+
+	if _, err := f.admin.Exec(
+		t.Context(), `DROP TRIGGER fail_audit ON audit_events`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.approve(alice, "north", "r2"); err != nil {
+		t.Fatal(err)
+	}
+
+	if f.status(t, "north", "r2") != "approved" ||
+		f.approvedEvents(t, "north") != 2 {
+		t.Fatal("approval did not commit after the audit store recovered")
+	}
+
+	// The other tenant's approver is unaffected and writes only its own rows.
+	if err := f.approve(carol, "south", "s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if f.approvedEvents(t, "south") != 1 || f.approvedEvents(t, "north") != 2 {
+		t.Fatal("approval events crossed tenants")
+	}
+}

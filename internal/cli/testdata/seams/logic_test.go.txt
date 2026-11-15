@@ -34,6 +34,14 @@ func (e *events) Append(
 	return nil
 }
 
+func (e *events) AppendTx(
+	context.Context,
+	scope.Tx,
+	models.NewEvent,
+) error {
+	return nil
+}
+
 func (e *events) Query(
 	_ context.Context,
 	execution scope.Execution,

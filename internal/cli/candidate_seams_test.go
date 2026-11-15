@@ -101,6 +101,7 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		"db/migrations/011_audit_events.sql",
 	)
 	seamFile(t, root, "events.sql", "db/queries/audit/events.sql")
+	seamFile(t, root, "approvals.sql", "db/queries/approvals/requests.sql")
 	seamFile(t, root, "blueprint.toml", "audit-blueprint.toml")
 
 	mustInvoke(t, root, "--no-input", "add", "blueprint", "--file",
@@ -108,9 +109,12 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 
 	for _, path := range []string{
 		"db/migrations/012_rls_users.sql",
-		"db/migrations/013_rls_audit_events.sql",
+		"db/migrations/013_rls_approval_requests.sql",
+		"db/migrations/014_rls_audit_events.sql",
 		"internal/adapters/audit/event_store.go",
 		"internal/logic/audit/list.go",
+		"internal/adapters/approvals/request_store.go",
+		"internal/logic/approvals/approve.go",
 	} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Fatalf("blueprint did not create %s: %v", path, err)
@@ -127,6 +131,18 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		root,
 		"event_store.go.txt",
 		"internal/adapters/audit/event_store.go",
+	)
+	seamFile(
+		t,
+		root,
+		"approvals_request_store.go.txt",
+		"internal/adapters/approvals/request_store.go",
+	)
+	seamFile(
+		t,
+		root,
+		"approvals_approve.go.txt",
+		"internal/logic/approvals/approve.go",
 	)
 	seamFile(t, root, "logic_test.go.txt", "internal/logic/audit/logic_test.go")
 
@@ -153,11 +169,25 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 
 	writeSeam(t, root, "internal/app/audit_runtime_test.go", string(source))
 
+	approvals, err := os.ReadFile(
+		"testdata/candidate_approvals_runtime.go.tmpl",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(
+		t, root, "internal/app/approvals_runtime_test.go", string(approvals),
+	)
+
 	output := external(
 		t, root, "go", "test", "-race", "-json", "-count=1",
-		"-run", "^TestAuditSeamEndToEnd$", "./internal/app",
+		"-run", "^(TestAuditSeamEndToEnd|TestApprovalsTxEndToEnd)$",
+		"./internal/app",
 	)
-	assertCandidateCaseNames(t, output, "TestAuditSeamEndToEnd")
+	assertCandidateCaseNames(
+		t, output, "TestAuditSeamEndToEnd", "TestApprovalsTxEndToEnd",
+	)
 
 	assertSeamNegatives(t, root)
 }
@@ -347,6 +377,33 @@ func assertSeamNegatives(t *testing.T, root string) {
 			},
 		},
 		{
+			name:  "adapter reaches another group's port",
+			check: "ARCH610",
+			path:  "internal/adapters/approvals/audit_port.go",
+			mutate: func(string) string {
+				return "package approvals\n\nimport _ \"" + module +
+					"internal/ports/audit\"\n"
+			},
+		},
+		{
+			name:  "logic of a group without a tx port reads another's models",
+			check: "ARCH610",
+			path:  "internal/logic/audit/approvals_models.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport _ \"" + module +
+					"internal/models/approvals\"\n"
+			},
+		},
+		{
+			name:  "logic reaches another group's logic",
+			check: "ARCH610",
+			path:  "internal/logic/approvals/audit_logic.go",
+			mutate: func(string) string {
+				return "package approvals\n\nimport _ \"" + module +
+					"internal/logic/audit\"\n"
+			},
+		},
+		{
 			name:  "query without tenant argument",
 			check: "ARCH612",
 			path:  "db/queries/audit/events.sql",
@@ -370,7 +427,7 @@ func assertSeamNegatives(t *testing.T, root string) {
 		{
 			name:  "missing row-level security migration",
 			check: "ARCH612",
-			path:  "db/migrations/013_rls_audit_events.sql",
+			path:  "db/migrations/014_rls_audit_events.sql",
 			mutate: func(string) string {
 				return "-- removed\n"
 			},

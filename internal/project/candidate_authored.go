@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -20,6 +21,18 @@ const (
 // authoredPort is one declared port an authored operation consumes.
 type authoredPort struct {
 	Field string
+
+	// Type is the port type in the group's contract: the full interface for
+	// an own-group port, the narrow transactional one for another group's.
+	Type string
+
+	// Alias is the import alias of the owning ports package.
+	Alias string
+}
+
+// foreignPortField names a cross-group port in the operation's Ports struct.
+func foreignPortField(id string) string {
+	return adapterField(Port{ID: id})
 }
 
 // authoredOp is the template view of one body = "authored" operation.
@@ -34,6 +47,10 @@ type authoredOp struct {
 	// must bind from verified scope: a page read exposed as an endpoint.
 	PagedRequest bool
 	Ports        []authoredPort
+
+	// Transactional is set when the operation writes through another group's
+	// tx methods and therefore receives a scope.DB to open its transaction.
+	Transactional bool
 }
 
 // Returns is the Go result list of the authored body, gate and workflow.
@@ -49,6 +66,10 @@ type authoredGroupView struct {
 	Ops            []authoredOp
 	UsesPorts      bool
 	UsesPagination bool
+
+	// ForeignGroups are the other groups whose ports packages the contract
+	// imports for cross-group transactional writes.
+	ForeignGroups []string
 }
 
 func modelName(id string) string {
@@ -93,7 +114,22 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 	}
 
 	for _, id := range operation.Ports {
-		view.Ports = append(view.Ports, authoredPort{Field: modelName(id)})
+		if foreignPort(operation.Group, id) {
+			owner, name, _ := splitQualified(id)
+			view.Transactional = true
+			view.Ports = append(view.Ports, authoredPort{
+				Field: foreignPortField(id),
+				Type:  owner + "ports." + name + "Tx",
+				Alias: owner + "ports",
+			})
+
+			continue
+		}
+
+		view.Ports = append(view.Ports, authoredPort{
+			Field: modelName(id),
+			Type:  "ports." + modelName(id),
+		})
 	}
 
 	return view, nil
@@ -190,7 +226,12 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 		}
 
 		group.Ops = append(group.Ops, view)
-		group.UsesPorts = group.UsesPorts || len(view.Ports) > 0
+		for _, port := range view.Ports {
+			group.UsesPorts = group.UsesPorts || port.Alias == ""
+		}
+
+		group.addForeign(operation)
+
 		group.UsesPagination = group.UsesPagination || view.Pagination
 
 		opData := dataFor(m, operation.Endpoint())
@@ -285,4 +326,18 @@ func allAuthored(operations []Operation) bool {
 	}
 
 	return len(operations) > 0
+}
+
+func (g *authoredGroupView) addForeign(operation Operation) {
+	for _, id := range operation.Ports {
+		if !foreignPort(operation.Group, id) {
+			continue
+		}
+
+		owner, _, _ := splitQualified(id)
+		if !slices.Contains(g.ForeignGroups, owner) {
+			g.ForeignGroups = append(g.ForeignGroups, owner)
+			sort.Strings(g.ForeignGroups)
+		}
+	}
 }

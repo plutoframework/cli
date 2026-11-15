@@ -334,6 +334,27 @@ mutations = [
         "./internal/project#TestAuthoredRoleViolations",
     ),
     (
+        "tx write caller allowlist",
+        "internal/project/manifest_txwrite.go",
+        "!slices.Contains(port.TxCallers, o.ID()) {",
+        "false {",
+        "./internal/project#TestTxWriteManifestRejections",
+    ),
+    (
+        "tx write caller must be a write",
+        "internal/project/manifest_txwrite.go",
+        "if !o.Write {",
+        "if false {",
+        "./internal/project#TestTxWriteManifestRejections",
+    ),
+    (
+        "tx write narrow port",
+        "internal/project/candidate_adapters.go",
+        "if slices.Contains(port.TxMethods, method.Name) {",
+        "if true {",
+        "./internal/project#TestTxWriteGeneratesNarrowPortAndWiring",
+    ),
+    (
         "table row-level security migration",
         "internal/project/candidate_table_migrations.go",
         "ALTER TABLE %[1]s FORCE ROW LEVEL SECURITY;\n",
@@ -370,6 +391,13 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 'request.Header.Set("Idempotency-Key", command.Key())',
                 'request.Header.Set("X-Idempotency-Key", command.Key())',
                 "TestCandidateGeneratedConsumer",
+            ),
+            (
+                "tx write foreign logic imports",
+                "internal/project/candidate_authored_rules.go",
+                "if ok && r.foreignPorts[role.group][owner] {",
+                "if ok {",
+                "TestCandidateAuthoredSeamEndToEnd",
             ),
             (
                 "authored page cursor binding",

@@ -43,6 +43,23 @@ func addAuthoredRules(
 	}
 
 	rules.dependencies = nil
+	rules.foreignPorts = map[string]map[string]bool{}
+
+	for _, operation := range m.Operations {
+		for _, id := range operation.Ports {
+			if !operation.isAuthored() || !foreignPort(operation.Group, id) {
+				continue
+			}
+
+			owner, _, _ := splitQualified(id)
+
+			if rules.foreignPorts[operation.Group] == nil {
+				rules.foreignPorts[operation.Group] = map[string]bool{}
+			}
+
+			rules.foreignPorts[operation.Group][owner] = true
+		}
+	}
 
 	if m.Authored != nil {
 		for _, dependency := range m.Authored.Dependencies {
@@ -122,6 +139,7 @@ func addAuthoredRules(
 		"scopeTenant",
 		"scopeDBPool",
 		"scopeTx",
+		"scopeSubject",
 	} {
 		if rules.globalPrivate[name] == nil {
 			rules.globalPrivate[name] = map[string]bool{}
@@ -216,6 +234,19 @@ func (r candidateRules) roleModuleImportAllowed(
 	own := func(directory string) bool {
 		return relative == directory+role.group
 	}
+
+	// Another group's ports package and its plain data models are visible to
+	// the logic of an operation that declares one of its tx ports.
+	foreign := func() bool {
+		for _, prefix := range []string{"internal/ports/", "internal/models/"} {
+			owner, ok := strings.CutPrefix(relative, prefix)
+			if ok && r.foreignPorts[role.group][owner] {
+				return true
+			}
+		}
+
+		return false
+	}
 	anyRules := strings.HasPrefix(relative, rolesRulesDir) &&
 		!strings.Contains(strings.TrimPrefix(relative, rolesRulesDir), "/")
 
@@ -224,7 +255,7 @@ func (r candidateRules) roleModuleImportAllowed(
 		return anyRules
 	case roleLogic:
 		return anyRules || own("internal/models/") ||
-			own("internal/ports/") || relative == scopeDir ||
+			own("internal/ports/") || foreign() || relative == scopeDir ||
 			relative == "internal/domain"
 	default:
 		return own(rolesRulesDir) || own("internal/models/") ||

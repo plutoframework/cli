@@ -7,6 +7,9 @@ import (
 {{- if .AuthoredGroup.UsesPorts}}
 	ports "{{.Module}}/internal/ports/{{.Group}}"
 {{- end}}
+{{- range .AuthoredGroup.ForeignGroups}}
+	{{.}}ports "{{$.Module}}/internal/ports/{{.}}"
+{{- end}}
 	"{{.Module}}/internal/scope"
 {{- if .AuthoredGroup.UsesPagination}}
 	"github.com/plutoframework/pluto-core/pagination"
@@ -22,7 +25,13 @@ import (
 // composition constructs them.
 type {{.Action}}Ports struct {
 {{- range .Ports}}
-	{{.Field}} ports.{{.Field}}
+	{{.Field}} {{.Type}}
+{{- end}}
+{{- if .Transactional}}
+
+	// TxDB opens the one transaction a cross-group write shares. It
+	// rechecks this operation's gate and binds the verified tenant.
+	TxDB scope.DB
 {{- end}}
 }
 {{end}}
