@@ -115,5 +115,93 @@ func gatewayApp(t *testing.T) string {
 
 func TestCandidateGatewayEndToEnd(t *testing.T) {
 	root := gatewayApp(t)
-	t.Log(root)
+
+	for fixture, target := range map[string]string{
+		"candidate_machine_helpers.go.tmpl": "internal/app/gateway_helpers_test.go",
+		"candidate_gateway_runtime.go.tmpl": "internal/app/gateway_runtime_test.go",
+	} {
+		source, err := os.ReadFile(filepath.Join("testdata", fixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		writeSeam(t, root, target, string(source))
+	}
+
+	pattern := "^TestGateway"
+	if only := os.Getenv("PLUTO_CLI_GATEWAY_RUN"); only != "" {
+		pattern = only
+	}
+
+	output := external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", pattern, "./internal/app",
+	)
+	assertCandidateCaseNames(
+		t,
+		output,
+		"TestGatewayWriteEndpoint",
+		"TestGatewayIdempotentWrite",
+		"TestGatewayRotateAndRevoke",
+		"TestGatewayEnrollmentAudited",
+		"TestGatewayMachineRateLimit",
+		"TestGatewayMachinePagination",
+		"TestGatewayMachineStream",
+		"TestGatewayStreamFlag",
+		"TestGatewayMarkStale",
+	)
+
+	assertGatewayNegatives(t, root, "example.test/gwapp/")
+}
+
+// assertGatewayNegatives mutates one file, expects the canonical inspection to
+// report the named check, then restores it.
+func assertGatewayNegatives(t *testing.T, root, module string) {
+	t.Helper()
+
+	appendTo := func(extra string) func(string) string {
+		return func(original string) string {
+			return original + "\n" + extra
+		}
+	}
+
+	query := "db/queries/gateways/gateways.sql"
+
+	runSystemNegatives(t, root, []seamNegative{
+		{
+			name:  "authored query sets the machine state",
+			check: "ARCH612",
+			path:  query,
+			mutate: appendTo("-- name: Revive :exec\n" +
+				"UPDATE gateways SET state = 'active'\n" +
+				"WHERE org_id = @org_id AND id = @id;\n"),
+		},
+		{
+			name:  "authored query sets the machine key",
+			check: "ARCH612",
+			path:  query,
+			mutate: appendTo("-- name: Rekey :exec\n" +
+				"UPDATE gateways SET public_key = @public_key\n" +
+				"WHERE org_id = @org_id AND id = @id;\n"),
+		},
+		{
+			name:  "authored insert names the machine state",
+			check: "ARCH612",
+			path:  query,
+			mutate: appendTo("-- name: Forge :one\n" +
+				"INSERT INTO gateways (org_id, id, name, state)\n" +
+				"VALUES (@org_id, gen_random_uuid()::text, @name, 'active')\n" +
+				"RETURNING id;\n"),
+		},
+		{
+			name:  "authored code imports the machine runtime",
+			check: "ARCH610",
+			path:  "internal/logic/gateways/verify.go",
+			mutate: func(string) string {
+				return "package gateways\n\nimport \"" + module +
+					"internal/storage/machineauth\"\n\n" +
+					"var _ = machineauth.NewVerifier\n"
+			},
+		},
+	})
 }

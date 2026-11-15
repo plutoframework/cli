@@ -33,6 +33,7 @@ import (
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
 {{- if .HasMachine}}
 
+	commonDomain "{{.Module}}/internal/domain"
 	machineauth "{{.Module}}/internal/ports/machineauth"
 	machinestore "{{.Module}}/internal/storage/machineauth"
 {{- end}}
@@ -513,18 +514,21 @@ func (t Tx) IssueEnrollment(
 // RevokeMachine moves a pending or active machine of this transaction's
 // tenant to the revoked state: its next request is denied. Authored SQL may
 // not write the key or state columns; this is the revocation path.
-func (t Tx) RevokeMachine(ctx context.Context, principal, machineID string) error {
+func (t Tx) RevokeMachine(
+	ctx context.Context,
+	principal, machineID string,
+) error {
 	if t.scopeTx == nil || t.scopeTenant.scopeTenant == "" {
 		return ErrNoTenant
 	}
 
-	return machinestore.RevokeMachine(
+	return machineState(machinestore.RevokeMachine(
 		ctx,
 		t.scopeTx,
 		t.scopeTenant.scopeTenant,
 		principal,
 		machineID,
-	)
+	))
 }
 
 // RotateMachine clears the machine's key, which stops it authenticating at
@@ -538,12 +542,27 @@ func (t Tx) RotateMachine(
 		return "", time.Time{}, ErrNoTenant
 	}
 
-	return machinestore.RotateMachine(
+	token, expires, err := machinestore.RotateMachine(
 		ctx,
 		t.scopeTx,
 		t.scopeTenant.scopeTenant,
 		principal,
 		machineID,
 	)
+
+	return token, expires, machineState(err)
+}
+
+// ErrMachineState reports a revoke or rotate of a machine that does not exist
+// in this tenant or is not pending or active. It is a conflict, so a caller
+// cannot tell an unknown machine from another tenant's.
+var ErrMachineState = fmt.Errorf("%w: machine state", commonDomain.ErrConflict)
+
+func machineState(err error) error {
+	if errors.Is(err, machineauth.ErrInvalidMachine) {
+		return ErrMachineState
+	}
+
+	return err
 }
 {{end}}
