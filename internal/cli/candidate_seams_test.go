@@ -140,18 +140,32 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 
 	// Scaffolds are authored starting points; replace them with real bodies.
 	for fixture, target := range map[string]string{
-		"rules.go.txt":        "internal/rules/orgs/rules.go",
-		"provision.go.txt":    "internal/logic/orgs/provision.go",
-		"count.go.txt":        "internal/logic/orgs/count.go",
-		"tenant_store.go.txt": "internal/adapters/orgs/tenant_store.go",
+		"rules.go.txt": "internal/rules/orgs/rules.go",
+		"count.go.txt": "internal/logic/orgs/count.go",
 	} {
 		systemFileAs(t, root, "example.test/auditapp", fixture, target)
 	}
+
+	// Provisioning also appends the first audit row in its own transaction.
+	seamFile(t, root, "provision.go.txt", "internal/logic/orgs/provision.go")
+	seamFile(
+		t,
+		root,
+		"tenant_store.go.txt",
+		"internal/adapters/orgs/tenant_store.go",
+	)
 
 	seamFile(t, root, "rules.go.txt", "internal/rules/audit/rules.go")
 	seamFile(t, root, "list.go.txt", "internal/logic/audit/list.go")
 	seamFile(t, root, "append.go.txt", "internal/logic/audit/append.go")
 	seamFile(t, root, "verify.go.txt", "internal/logic/audit/verify.go")
+	seamFile(t, root, "watch.go.txt", "internal/logic/audit/watch.go")
+	seamFile(
+		t,
+		root,
+		"record_auth_event.go.txt",
+		"internal/logic/audit/recordauthevent.go",
+	)
 	seamFile(
 		t,
 		root,
@@ -215,6 +229,19 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		t, output, "TestAuditSeamEndToEnd", "TestApprovalsTxEndToEnd",
 	)
 
+	flags, err := os.ReadFile("testdata/candidate_audit_features.go.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(t, root, "internal/app/audit_features_test.go", string(flags))
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestAuditFeatureFlags$", "./internal/app",
+	)
+	assertCandidateCaseNames(t, output, "TestAuditFeatureFlags")
+
 	members, err := os.ReadFile("testdata/candidate_audit_members.go.tmpl")
 	if err != nil {
 		t.Fatal(err)
@@ -256,6 +283,67 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		"TestSystemLookup",
 		"TestSystemLookupRateLimit",
 		"TestSystemRowLevelBoundaries",
+	)
+
+	systemFlags, err := os.ReadFile(
+		"testdata/candidate_system_features.go.tmpl",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	provisionAudit, err := os.ReadFile(
+		"testdata/candidate_audit_events_runtime.go.tmpl",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stream, err := os.ReadFile("testdata/candidate_audit_stream.go.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(
+		t, root, "internal/app/system_features_test.go", string(systemFlags),
+	)
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestSystemFeatureFlag$", "./internal/app",
+	)
+	assertCandidateCaseNames(t, output, "TestSystemFeatureFlag")
+
+	writeSeam(t, root, "internal/app/audit_stream_test.go", string(stream))
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestAuditStream", "./internal/app",
+	)
+	assertCandidateCaseNames(
+		t, output,
+		"TestAuditStreamReplayAndResume",
+		"TestAuditStreamDeniedBeforeUpgrade",
+		"TestAuditStreamClosesOnRevocation",
+		"TestAuditStreamLimits",
+	)
+
+	writeSeam(
+		t, root, "internal/app/audit_events_test.go", string(provisionAudit),
+	)
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^(TestProvisionAudit|TestAuthEvents)", "./internal/app",
+	)
+	assertCandidateCaseNames(
+		t, output,
+		"TestProvisionAuditInTransaction",
+		"TestAuthEventsLoginScopedToVerifiedOrgs",
+		"TestAuthEventsFailuresRecordNothing",
+		"TestAuthEventsLogout",
+		"TestAuthEventsFailClosed",
+		"TestAuthEventsMemberIndexBoundary",
 	)
 
 	assertSeamNegatives(t, root)
@@ -510,6 +598,58 @@ func assertSeamNegatives(t *testing.T, root string) {
 			mutate: appendTo(
 				"-- name: Leak :many\nSELECT id FROM users LIMIT 1;\n",
 			),
+		},
+		{
+			name:  "websocket library in logic",
+			check: "ARCH610",
+			path:  "internal/logic/audit/socket.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport _ \"github.com/coder/websocket\"\n"
+			},
+		},
+		{
+			name:  "stream runtime outside its workflow",
+			check: "ARCH603",
+			path:  "internal/logic/audit/run.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport \"" + module +
+					"internal/scope\"\n\nvar _ = scope.RunStream[int, int]\n"
+			},
+		},
+		{
+			name:  "wire built outside its handler",
+			check: "ARCH603",
+			path:  "internal/logic/audit/wire.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport \"" + module +
+					"internal/scope\"\n\nvar _ = scope.NewWire\n"
+			},
+		},
+		{
+			name:  "stream runtime edited by hand",
+			check: "ARCH202",
+			path:  "internal/scope/stream_gen.go",
+			mutate: func(original string) string {
+				return strings.Replace(
+					original,
+					"s.scopeSocketConn.SetReadLimit(bytes)",
+					"s.scopeSocketConn.SetReadLimit(-1)",
+					1,
+				)
+			},
+		},
+		{
+			name:  "stream handler edited by hand",
+			check: "ARCH202",
+			path:  "internal/handlers/audit/watch.go",
+			mutate: func(original string) string {
+				return strings.Replace(
+					original,
+					"operation.Prepare(",
+					"operation.Skip(",
+					1,
+				)
+			},
 		},
 		{
 			name:  "missing row-level security migration",

@@ -43,12 +43,21 @@ type templateData struct {
 	Authored      authoredOp
 	AuthoredGroup authoredGroupView
 
+	// Machine identity view; see candidate_machine.go.
+	Machine machineView
+
 	// System lookup views; see candidate_system.go.
 	Lookup       Lookup
 	KeyGoName    string
 	LookupQuery  string
 	LookupBind   string
 	LookupFields []string
+
+	// Auth event hook constants; see manifest_authevents.go.
+	LoginKind     string
+	OIDCLoginKind string
+	LogoutKind    string
+	MaxTenants    int
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {
@@ -84,7 +93,11 @@ func dataFor(m Manifest, e Endpoint) templateData {
 		Params:           params,
 		Body: e.Method == "POST" || e.Method == "PUT" ||
 			e.Method == "PATCH",
-		TestPath: testPath,
+		TestPath:      testPath,
+		LoginKind:     AuthEventLogin,
+		OIDCLoginKind: AuthEventOIDCLogin,
+		LogoutKind:    AuthEventLogout,
+		MaxTenants:    maxAuthEventTenants,
 	}
 }
 
@@ -381,10 +394,30 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				if authored.Scope == ScopeProvision {
 					query += "SessionOnly:true,\n"
 				}
+
+				if authored.isMachine() {
+					query += fmt.Sprintf(
+						"Machine:%q,\n",
+						authored.MachinePrincipal(),
+					)
+				}
 			}
 
-			if d.Body {
+			if d.Body || authoredWriteBody(m, e) {
 				request = e.Group + "." + e.Action + "Request{}"
+			}
+
+			response := e.Group + "." + e.Action + "Response{}"
+
+			if streamed, ok := m.Operation(e.Operation); ok &&
+				streamed.isStream() {
+				spec, err := streamPathSpec(m, streamed, e)
+				if err != nil {
+					return nil, err
+				}
+
+				query += spec
+				response = "nil"
 			}
 
 			fmt.Fprintf(
@@ -392,7 +425,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\n"+
 					"Method:%q,\nPath:%q,\nAuthenticated:%t,\n"+
 					"Permission:access.%sPermission,\nFeature:%q,\n"+
-					"Request:%s,\nResponse:%s.%sResponse{},\n"+
+					"Request:%s,\nResponse:%s,\n"+
 					"SuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n"+
 					"%s}\n",
 				d.Symbol,
@@ -401,12 +434,11 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				e.Description,
 				e.Method,
 				e.Path,
-				!e.Public,
+				!e.Public && e.Machine == "",
 				d.Symbol,
 				e.Feature,
 				request,
-				e.Group,
-				e.Action,
+				response,
 				e.Collection,
 				e.RequiresIdempotency(),
 				query,

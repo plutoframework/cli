@@ -169,3 +169,31 @@ func TestRuntimeRoleGuardGeneratedAndWired(t *testing.T) {
 		}
 	}
 }
+
+// The auth event member index is a view the runtime role may only read.
+func TestRuntimeRoleGrantsMemberIndexReadOnly(t *testing.T) {
+	m, root := runtimeRoleFixture(t)
+	m.Auth = &AuthSection{Events: &AuthEvents{
+		Operation: "audit.RecordAuthEvent",
+	}}
+
+	proposals, err := ProposeRuntimeRoleMigration(root, m, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sql string
+	for _, value := range proposals {
+		sql = string(value)
+	}
+
+	if !strings.Contains(
+		sql, "GRANT SELECT ON pluto_auth_event_members TO app_runtime;",
+	) {
+		t.Fatalf("member index view is not granted read-only:\n%s", sql)
+	}
+
+	if strings.Contains(sql, "UPDATE, DELETE ON pluto_auth_event_members") {
+		t.Fatalf("member index view over-granted:\n%s", sql)
+	}
+}

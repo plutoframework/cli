@@ -6,6 +6,10 @@ package scopetest
 
 import (
 	"context"
+{{- if .HasStream}}
+	"encoding/json"
+	"time"
+{{- end}}
 
 	"{{.Module}}/internal/scope"
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
@@ -50,3 +54,91 @@ func (h *Harness) Within(
 func (h *Harness) DB(pool *pgxpool.Pool) scope.DB {
 	return scope.NewDB(pool)
 }
+{{if .HasStream}}
+// Peer is the client end of an in-memory stream: Send writes a client message
+// and Receive reads the next server message.
+type Peer[In, Out any] struct {
+	inner *scope.MemoryPeer
+}
+
+// Send marshals and delivers one client message.
+func (p Peer[In, Out]) Send(ctx context.Context, message In) error {
+	data, err := json.Marshal(message)
+	if err != nil {
+		return err
+	}
+
+	return p.inner.Send(ctx, data)
+}
+
+// SendRaw delivers raw bytes, for tests of malformed client input.
+func (p Peer[In, Out]) SendRaw(ctx context.Context, data []byte) error {
+	return p.inner.Send(ctx, data)
+}
+
+// Receive returns the next server message, or scope.ErrStreamClosed once the
+// stream has ended and its queue is drained.
+func (p Peer[In, Out]) Receive(ctx context.Context) (Out, error) {
+	var message Out
+
+	data, err := p.inner.Receive(ctx)
+	if err != nil {
+		return message, err
+	}
+
+	return message, json.Unmarshal(data, &message)
+}
+
+// Close ends the stream from the client side.
+func (p Peer[In, Out]) Close() {
+	p.inner.Close()
+}
+
+// RunStream runs body under a real gate Execution with an in-memory stream,
+// the same scope.RunStream production uses: size limits, strict decoding,
+// close codes and the periodic gate recheck all apply. drive plays the client
+// concurrently and the client side closes when it returns. The result is the
+// body's error.
+func RunStream[In, Out any](
+	ctx context.Context,
+	h *Harness,
+	subject, tenant, resource string,
+	drive func(context.Context, Peer[In, Out]),
+	body func(context.Context, scope.Execution, scope.Stream[In, Out]) error,
+) error {
+	wire, peer := scope.NewMemoryWire()
+
+	var zero In
+
+	_, pushOnly := any(zero).(scope.NoMessage)
+
+	go func() {
+		defer peer.Close()
+
+		drive(ctx, Peer[In, Out]{inner: peer})
+	}()
+
+	return h.Within(
+		ctx,
+		subject,
+		tenant,
+		resource,
+		func(ctx context.Context, execution scope.Execution) error {
+			return scope.RunStream(
+				ctx,
+				wire,
+				execution,
+				scope.StreamLimits{
+					MaxMessageBytes: 64 * 1024,
+					Write:           5 * time.Second,
+					Ping:            30 * time.Second,
+					Idle:            60 * time.Second,
+					Recheck:         200 * time.Millisecond,
+				},
+				!pushOnly,
+				func(ctx context.Context, stream scope.Stream[In, Out]) error {
+					return body(ctx, execution, stream)
+				})
+		})
+}
+{{end}}

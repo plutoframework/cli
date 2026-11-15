@@ -38,6 +38,8 @@ type Manifest struct {
 	Authored           *Authored           `toml:"authored,omitempty"`
 	Memberships        *Memberships        `toml:"memberships,omitempty"`
 	Lookups            []Lookup            `toml:"lookups,omitempty"`
+	Principals         []Principal         `toml:"principals,omitempty"`
+	Auth               *AuthSection        `toml:"auth,omitempty"`
 	Migrations         Migrations          `toml:"migrations,omitempty"`
 
 	// Kind is empty for Go applications and KindFrontend for a frontend that
@@ -87,8 +89,17 @@ type Endpoint struct {
 	Feature        string `toml:"feature,omitempty"`
 	ClientVisible  bool   `toml:"feature_client_visible"`
 
+	// Transport is "websocket" for a stream operation; Origins lists the
+	// browser host patterns allowed to open it. See manifest_stream.go.
+	Transport string   `toml:"transport,omitempty"`
+	Origins   []string `toml:"origins,omitempty"`
+
 	// Scope is copied from the referenced operation; see manifest_system.go.
 	Scope string `toml:"-"`
+
+	// Machine is the principal of a machine-authenticated operation, copied
+	// from the operation; see manifest_machine.go.
+	Machine string `toml:"-"`
 }
 
 var (
@@ -276,6 +287,10 @@ func (e Endpoint) RequiresIdempotency() bool {
 }
 
 func (e Endpoint) Validate(multi bool) error {
+	if err := e.validateWebSocket(); err != nil {
+		return err
+	}
+
 	if e.Collection && e.Method != "GET" {
 		return fmt.Errorf("collection requires GET")
 	}

@@ -1,0 +1,19 @@
+package gateways
+
+import "time"
+
+// StaleAfter is how long a gateway may stay silent before it is offline.
+const StaleAfter = 2 * time.Second
+
+// ValidName reports an acceptable gateway name.
+func ValidName(name string) bool { return name != "" && len(name) <= 80 }
+
+// ValidAuthEvent reports a recordable authentication event kind.
+func ValidAuthEvent(kind string) bool {
+	switch kind {
+	case "login", "logout", "oidc_login", "machine_enroll":
+		return true
+	default:
+		return false
+	}
+}

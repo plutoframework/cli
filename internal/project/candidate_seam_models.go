@@ -51,6 +51,12 @@ type SeamOperation struct {
 	Input      string
 	Collection bool
 	Endpoint   bool
+
+	// WriteBody marks an authored write exposed over HTTP: the request is
+	// the declared input model decoded from a strict JSON body, and
+	// Idempotent adds the generated Idempotency-Key claim.
+	WriteBody  bool
+	Idempotent bool
 	Query      []SeamQueryParam
 	Strconv    bool
 	Time       bool
@@ -269,28 +275,36 @@ func seamOperation(m Manifest, o Operation) (SeamOperation, error) {
 		}
 	}
 
-	if o.Response == ResponseStream {
-		return out, fmt.Errorf(
-			"operation %s: stream responses are a later phase",
-			o.ID(),
-		)
-	}
-
 	// A provision endpoint decodes a JSON body into its declared input model;
 	// it has no query parser.
-	if o.Scope == ScopeProvision {
+	if o.Scope == ScopeProvision || o.Scope == ScopeEnroll ||
+		o.isMachine() && o.Write && !o.isStream() {
 		out.Endpoint = false
 	}
 
-	if out.Endpoint && (o.Write || out.Input != "") {
+	if out.Endpoint && o.isAuthoredWriteBody() {
+		out.Endpoint = false
+		out.WriteBody = true
+		out.Idempotent = o.Idempotency == "required"
+
+		if out.Input == "" || o.Response != ResponseObject || o.Collection {
+			return out, fmt.Errorf(
+				"operation %s: an authored write endpoint requires an "+
+					"input model and response = \"object\"",
+				o.ID(),
+			)
+		}
+	}
+
+	if out.Endpoint && !o.isStream() && (o.Write || out.Input != "") {
 		return out, fmt.Errorf(
-			"operation %s: authored endpoints must be reads without input "+
-				"models; expose writes through generated bodies",
+			"operation %s: authored read endpoints take query parameters, "+
+				"not input models",
 			o.ID(),
 		)
 	}
 
-	if out.Endpoint && o.Response == "" {
+	if (out.Endpoint || out.WriteBody) && o.Response == "" {
 		return out, fmt.Errorf(
 			"operation %s: an authored endpoint requires a response",
 			o.ID(),
@@ -394,7 +408,19 @@ func seamHandler(m Manifest, operation Operation) ([]byte, error) {
 		return nil, err
 	}
 
+	if spec.WriteBody {
+		return seamTemplate("candidate_seam_write_handler.go", spec)
+	}
+
 	return seamTemplate("candidate_seam_handler.go", spec)
+}
+
+// isAuthoredWriteBody reports an authored write on the verified user path:
+// not provision, enroll, machine, stream or per-tenant. Its HTTP entry
+// decodes a JSON body into the declared input model.
+func (o Operation) isAuthoredWriteBody() bool {
+	return o.isAuthored() && o.Write && o.Scope == "" && !o.isMachine() &&
+		!o.isStream()
 }
 
 // seamPathQuery renders the paths.Endpoint Query field for an authored read.
@@ -421,4 +447,36 @@ func seamPathQuery(o Operation) string {
 	out.WriteString("},\n")
 
 	return out.String()
+}
+
+// hasEndpoint reports whether an HTTP entry exposes the operation.
+func (m Manifest) hasEndpoint(operation Operation) bool {
+	for _, entry := range m.Endpoints {
+		if entry.Operation == operation.ID() {
+			return true
+		}
+	}
+
+	return false
+}
+
+// authoredWriteBody reports an HTTP entry of an authored write: even a
+// DELETE carries its declared input model as the JSON body.
+func authoredWriteBody(m Manifest, entry Endpoint) bool {
+	operation, ok := m.Operation(entry.Operation)
+
+	return ok && operation.isAuthoredWriteBody()
+}
+
+// hasIdempotentWrites reports authored HTTP writes that take the generated
+// Idempotency-Key claim, so the runtime must build the durable handler.
+func (m Manifest) hasIdempotentWrites() bool {
+	for _, operation := range m.Operations {
+		if operation.isAuthoredWriteBody() &&
+			operation.Idempotency == "required" && m.hasEndpoint(operation) {
+			return true
+		}
+	}
+
+	return false
 }

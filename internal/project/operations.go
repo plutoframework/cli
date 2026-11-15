@@ -29,10 +29,31 @@ type Operation struct {
 	Input          string           `toml:"input,omitempty"`
 	Query          []OperationQuery `toml:"query,omitempty"`
 
+	// Stream bounds a response = "stream" operation; see manifest_stream.go.
+	Stream *StreamLimits `toml:"stream,omitempty"`
+
 	// Tenant-less system operations; see manifest_system.go.
 	Scope     string `toml:"scope,omitempty"`
 	Lookup    string `toml:"lookup,omitempty"`
 	RateLimit string `toml:"rate_limit,omitempty"`
+
+	// Feature gates every entry of this operation behind a default-off flag.
+	// The flag never grants authorization; see feature_gate.go.
+	Feature       string `toml:"feature,omitempty"`
+	ClientVisible bool   `toml:"feature_client_visible,omitempty"`
+
+	// Machine identity; see manifest_machine.go. Auth is
+	// "machine:<principal>" and Principal names the principal an enroll
+	// operation activates.
+	Auth      string `toml:"auth,omitempty"`
+	Principal string `toml:"principal,omitempty"`
+
+	// Tenant-iterating jobs (scope = "each_tenant"); see manifest_tenantjobs.go.
+	Schedule    string `toml:"schedule,omitempty"`
+	ServiceRole string `toml:"service_role,omitempty"`
+	Timeout     string `toml:"timeout,omitempty"`
+	Concurrency int    `toml:"concurrency,omitempty"`
+	MaxAttempts int    `toml:"max_attempts,omitempty"`
 }
 
 func (o Operation) ID() string {
@@ -45,12 +66,20 @@ func (o Operation) Endpoint() Endpoint {
 		method = "POST"
 	}
 
+	permission, scope, machine := o.Permission, o.Scope, ""
+	if o.isMachine() {
+
+		// Machine permissions never enter the user permission catalog.
+		permission, scope, machine = "", ScopeMachine, o.MachinePrincipal()
+	}
+
 	return Endpoint{
 		Group:       o.Group,
 		Action:      o.Action,
-		Permission:  o.Permission,
+		Permission:  permission,
 		Public:      o.Public,
-		Scope:       o.Scope,
+		Scope:       scope,
+		Machine:     machine,
 		Collection:  o.Collection,
 		Method:      method,
 		Path:        "/operation",
@@ -92,7 +121,10 @@ func (m Manifest) OperationEndpoint(entry Endpoint) (Endpoint, error) {
 		)
 	}
 
-	if operation.Write && !entry.isWrite() {
+	// A websocket stream is always opened with GET; the operation's own
+	// write flag still governs what its body may change.
+	if operation.Write && !entry.isWrite() &&
+		entry.Transport != TransportWebSocket {
 		return entry, fmt.Errorf(
 			"write operation %s cannot be exposed through a read-only HTTP "+
 				"method",
@@ -100,9 +132,15 @@ func (m Manifest) OperationEndpoint(entry Endpoint) (Endpoint, error) {
 		)
 	}
 
-	entry.Permission = operation.Permission
+	entry.Permission = operation.Endpoint().Permission
 	entry.Public = operation.Public
-	entry.Scope = operation.Scope
+	entry.Scope = operation.Endpoint().Scope
+	entry.Machine = operation.Endpoint().Machine
+
+	if operation.Feature != "" || operation.ClientVisible {
+		entry.Feature = operation.Feature
+		entry.ClientVisible = operation.ClientVisible
+	}
 
 	entry.Collection = operation.Collection
 	if operation.Write {
@@ -164,7 +202,8 @@ func OperationFiles(
 }
 
 func (operation Operation) Validate(multi bool) error {
-	if operation.Public && operation.Write {
+	if operation.Public && operation.Write &&
+		operation.Scope != ScopeEnroll {
 		return fmt.Errorf(
 			"public write operations require a separately supported " +
 				"authority contract",

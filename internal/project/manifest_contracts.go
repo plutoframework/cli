@@ -236,11 +236,11 @@ func ValidateManifestContracts(m Manifest) error {
 
 	for _, endpoint := range m.Endpoints {
 		contract := contracts[endpoint.Operation]
-		if endpoint.Feature != "" || endpoint.ClientVisible {
-			return fmt.Errorf(
-				"candidate feature flags require an operation-owned shared " +
-					"gate; route-only flags are unsupported",
-			)
+		if err := checkOperationOwnedFeature(
+			endpoint,
+			operations[endpoint.Operation],
+		); err != nil {
+			return err
 		}
 
 		if contract.Kind == "effect" {

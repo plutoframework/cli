@@ -1,0 +1,597 @@
+package scope
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"sync"
+	"time"
+
+	commonDomain "{{.Module}}/internal/domain"
+{{- if .HasMachine}}
+	machineauth "{{.Module}}/internal/ports/machineauth"
+{{- end}}
+	auth "github.com/plutoframework/pluto-auth"
+
+	"github.com/coder/websocket"
+)
+
+// This file is the streaming half of the scope package. It owns the only
+// WebSocket connection handling in the application: authored bodies receive a
+// typed Stream of declared models and never a connection, a reader or a
+// writer. Generated handlers build a Wire from an accepted upgrade, generated
+// workflows hand it to RunStream inside the operation's gate, and RunStream
+// keeps the connection honest until the body returns.
+
+// ErrStreamClosed reports that the stream ended: the peer closed it, the
+// server closed it or the context was cancelled. A body treats it as the
+// normal end of its receive loop.
+var ErrStreamClosed = errors.New("scope: stream closed")
+
+// ErrStreamMessage reports an inbound message that is not exactly one JSON
+// object of the declared model, or an outbound one over the size limit.
+var ErrStreamMessage = errors.New("scope: invalid stream message")
+
+// ErrNoInbound reports Receive on a stream that declares no input model.
+var ErrNoInbound = errors.New("scope: stream declares no input model")
+
+// NoMessage is the inbound type of a push-only stream. A peer that sends any
+// data message on such a stream is disconnected.
+type NoMessage struct{}
+
+// StreamLimits are the generated, manifest-declared bounds of one stream.
+type StreamLimits struct {
+	MaxMessageBytes int64
+	Write           time.Duration
+	Ping            time.Duration
+	Idle            time.Duration
+	Recheck         time.Duration
+}
+
+const inboundBuffer = 16
+
+// streamTransport is the unexported seam between the stream runtime and a
+// connection: a WebSocket in production, an in-memory pair in scopetest.
+type streamTransport interface {
+	limit(bytes int64)
+	read(ctx context.Context) ([]byte, error)
+	write(ctx context.Context, message []byte) error
+	ping(ctx context.Context) error
+	close(code int, reason string)
+}
+
+// Wire is an accepted connection waiting for its gated stream. Only generated
+// handlers construct one; the zero value denies.
+type Wire struct {
+	scopeWireTransport streamTransport
+}
+
+// NewWire is a capability: only generated handlers may call it.
+func NewWire(conn *websocket.Conn) Wire {
+	if conn == nil {
+		return Wire{}
+	}
+
+	return Wire{scopeWireTransport: socket{scopeSocketConn: conn}}
+}
+
+type socket struct {
+	scopeSocketConn *websocket.Conn
+}
+
+func (s socket) limit(bytes int64) {
+	s.scopeSocketConn.SetReadLimit(bytes)
+}
+
+func (s socket) read(ctx context.Context) ([]byte, error) {
+	kind, data, err := s.scopeSocketConn.Read(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if kind != websocket.MessageText {
+		return nil, errBinary
+	}
+
+	return data, nil
+}
+
+func (s socket) write(ctx context.Context, message []byte) error {
+	return s.scopeSocketConn.Write(ctx, websocket.MessageText, message)
+}
+
+func (s socket) ping(ctx context.Context) error {
+	return s.scopeSocketConn.Ping(ctx)
+}
+
+func (s socket) close(code int, reason string) {
+	_ = s.scopeSocketConn.Close(websocket.StatusCode(code), reason)
+}
+
+var errBinary = errors.New("scope: binary stream message")
+
+// Close codes, from RFC 6455.
+const (
+	closeNormal   = 1000
+	closeGoing    = 1001
+	closeProtocol = 1003
+	closeInvalid  = 1007
+	closePolicy   = 1008
+	closeTooBig   = 1009
+	closeInternal = 1011
+)
+
+type streamState struct {
+	scopeStreamTransport streamTransport
+	scopeStreamLimits    StreamLimits
+	scopeStreamInbound   chan []byte
+	scopeStreamEnabled   bool
+	scopeStreamWrite     sync.Mutex
+	scopeStreamCancel    context.CancelCauseFunc
+	scopeStreamOnce      sync.Once
+	scopeStreamCode      int
+	scopeStreamReason    string
+}
+
+// Stream is the typed, bidirectional channel of one gated stream. Send and
+// Receive are the only operations; In is the client's declared model and Out
+// the server's. A zero Stream denies.
+type Stream[In, Out any] struct {
+	scopeStream *streamState
+}
+
+// Send writes one message to the peer. It blocks while the peer is slow and
+// fails, closing the stream, when the peer does not accept the message within
+// the write timeout, so a slow consumer can never grow server memory.
+func (s Stream[In, Out]) Send(ctx context.Context, message Out) error {
+	state := s.scopeStream
+	if state == nil || ctx == nil {
+		return ErrStreamClosed
+	}
+
+	data, err := json.Marshal(message)
+	if err != nil || int64(len(data)) > state.scopeStreamLimits.MaxMessageBytes {
+		return ErrStreamMessage
+	}
+
+	if err := ctx.Err(); err != nil {
+		return ErrStreamClosed
+	}
+
+	state.scopeStreamWrite.Lock()
+	defer state.scopeStreamWrite.Unlock()
+
+	writeCtx, cancel := context.WithTimeout(
+		ctx,
+		state.scopeStreamLimits.Write,
+	)
+	defer cancel()
+
+	if err := state.scopeStreamTransport.write(writeCtx, data); err != nil {
+		state.terminate(closeGoing, "write failed", ErrStreamClosed)
+
+		return ErrStreamClosed
+	}
+
+	return nil
+}
+
+// Receive blocks for the next client message, decoded strictly into In:
+// unknown fields, trailing data and non-object payloads are rejected and
+// close the stream. It returns ErrStreamClosed once the stream ends.
+func (s Stream[In, Out]) Receive(ctx context.Context) (In, error) {
+	var message In
+
+	state := s.scopeStream
+	if state == nil || ctx == nil {
+		return message, ErrStreamClosed
+	}
+
+	if !state.scopeStreamEnabled {
+		return message, ErrNoInbound
+	}
+
+	data, open := state.next(ctx)
+	if !open {
+		return message, ErrStreamClosed
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+
+	decodeErr := decoder.Decode(&message)
+	trailing := decoder.Decode(&json.RawMessage{})
+
+	if decodeErr != nil || !errors.Is(trailing, io.EOF) ||
+		!bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+		state.terminate(closeInvalid, "invalid_message", ErrStreamMessage)
+
+		var zero In
+
+		return zero, ErrStreamMessage
+	}
+
+	return message, nil
+}
+
+// next returns the next queued client message. Messages that arrived before
+// the stream ended are delivered first; only an empty queue observes the end.
+func (state *streamState) next(ctx context.Context) ([]byte, bool) {
+	select {
+	case data, open := <-state.scopeStreamInbound:
+		return data, open
+	default:
+	}
+
+	select {
+	case data, open := <-state.scopeStreamInbound:
+		return data, open
+	case <-ctx.Done():
+		return nil, false
+	}
+}
+
+// terminate records the first failure, cancels the stream context and sends
+// the close frame. Later calls are no-ops, so the first cause decides.
+func (state *streamState) terminate(code int, reason string, cause error) {
+	state.scopeStreamOnce.Do(func() {
+		state.scopeStreamCode = code
+		state.scopeStreamReason = reason
+		state.scopeStreamCancel(cause)
+		state.scopeStreamTransport.close(code, reason)
+	})
+}
+
+// RunStream is a capability: only generated workflows may call it. It runs
+// the body with a typed Stream and keeps the connection bounded: a reader
+// enforces the message limit and the declared input, a pinger closes a peer
+// that stops answering, and a rechecker re-verifies the live gate (session,
+// membership, permission and resource) every Recheck interval, closing the
+// stream the moment any of them is revoked. The body's error, never its text,
+// decides the close code.
+func RunStream[In, Out any](
+	ctx context.Context,
+	wire Wire,
+	e Execution,
+	limits StreamLimits,
+	inbound bool,
+	run func(context.Context, Stream[In, Out]) error,
+) error {
+	if e.scopeExecution == nil || e.scopeGate == nil {
+		return ErrNoTenant
+	}
+
+	return runStream(
+		ctx,
+		wire,
+		limits,
+		inbound,
+		func(ctx context.Context) error {
+			return e.scopeGate.Use(
+				ctx,
+				e.scopeExecution,
+				e.scopeExecution.TenantID(),
+				e.scopeResource,
+				func(context.Context) error { return nil },
+			)
+		},
+		run,
+	)
+}
+{{- if .HasMachine}}
+
+// RunMachineStream is RunStream for a machine caller. The recheck, supplied
+// by the generated workflow, confirms the machine is still active with the
+// verified key every Recheck interval; the stream closes when it fails.
+func RunMachineStream[In, Out any](
+	ctx context.Context,
+	wire Wire,
+	e Execution,
+	recheck func(context.Context) error,
+	limits StreamLimits,
+	inbound bool,
+	run func(context.Context, Stream[In, Out]) error,
+) error {
+	if e.scopeMachine == nil || recheck == nil {
+		return ErrNoTenant
+	}
+
+	return runStream(ctx, wire, limits, inbound, recheck, run)
+}
+{{- end}}
+
+func runStream[In, Out any](
+	ctx context.Context,
+	wire Wire,
+	limits StreamLimits,
+	inbound bool,
+	recheck func(context.Context) error,
+	run func(context.Context, Stream[In, Out]) error,
+) error {
+	if wire.scopeWireTransport == nil || run == nil || ctx == nil ||
+		limits.MaxMessageBytes <= 0 || limits.Ping <= 0 ||
+		limits.Idle <= limits.Ping || limits.Recheck <= 0 ||
+		limits.Write <= 0 {
+		return ErrNoTenant
+	}
+
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
+	state := &streamState{
+		scopeStreamTransport: wire.scopeWireTransport,
+		scopeStreamLimits:    limits,
+		scopeStreamInbound:   make(chan []byte, inboundBuffer),
+		scopeStreamEnabled:   inbound,
+		scopeStreamCancel:    cancel,
+	}
+	state.scopeStreamTransport.limit(limits.MaxMessageBytes)
+
+	var workers sync.WaitGroup
+
+	workers.Add(3)
+
+	go func() {
+		defer workers.Done()
+
+		state.read(ctx)
+	}()
+
+	go func() {
+		defer workers.Done()
+
+		state.keepAlive(ctx)
+	}()
+
+	go func() {
+		defer workers.Done()
+
+		state.recheck(ctx, recheck)
+	}()
+
+	err := run(ctx, Stream[In, Out]{scopeStream: state})
+
+	code, reason := closeStatus(err, context.Cause(ctx))
+	state.terminate(code, reason, ErrStreamClosed)
+	workers.Wait()
+
+	if err == nil {
+		return nil
+	}
+
+	return err
+}
+
+// closeStatus maps how a stream ended to a close code and a fixed reason.
+// Error text never reaches the peer.
+func closeStatus(err, cause error) (int, string) {
+	if err == nil {
+		if cause == nil || errors.Is(cause, context.Canceled) {
+			return closeNormal, "done"
+		}
+
+		err = cause
+	}
+
+	switch {
+	case errors.Is(err, ErrStreamClosed):
+		return closeNormal, "done"
+	case errors.Is(err, ErrStreamMessage), errors.Is(err, commonDomain.ErrInvalidInput):
+		return closeInvalid, "invalid_message"
+	case errors.Is(err, commonDomain.ErrUnauthenticated),
+		errors.Is(err, auth.ErrUnauthenticated),
+{{- if .HasMachine}}
+		errors.Is(err, machineauth.ErrUnauthenticated),
+{{- end}}
+		errors.Is(err, commonDomain.ErrForbidden):
+		return closePolicy, "unauthorized"
+	case errors.Is(err, context.Canceled),
+		errors.Is(err, context.DeadlineExceeded):
+		return closeGoing, "going away"
+	default:
+		return closeInternal, "internal_error"
+	}
+}
+
+// read is the only reader of the connection. It feeds the bounded inbound
+// queue while the body consumes it and keeps answering control frames.
+func (state *streamState) read(ctx context.Context) {
+	defer close(state.scopeStreamInbound)
+
+	for {
+		data, err := state.scopeStreamTransport.read(ctx)
+		if err != nil {
+			state.readFailed(ctx, err)
+
+			return
+		}
+
+		if !state.scopeStreamEnabled {
+			state.terminate(closePolicy, "unexpected message", ErrStreamMessage)
+
+			return
+		}
+
+		select {
+		case state.scopeStreamInbound <- data:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (state *streamState) readFailed(ctx context.Context, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	switch {
+	case errors.Is(err, errBinary):
+		state.terminate(closeProtocol, "text only", ErrStreamMessage)
+	case errors.Is(err, websocket.ErrMessageTooBig),
+		websocket.CloseStatus(err) == websocket.StatusMessageTooBig:
+		state.terminate(closeTooBig, "message too big", ErrStreamMessage)
+	case websocket.CloseStatus(err) != -1:
+		state.terminate(closeNormal, "done", ErrStreamClosed)
+	default:
+		state.terminate(closeGoing, "read failed", ErrStreamClosed)
+	}
+}
+
+// keepAlive pings the peer and closes it when it stops answering.
+func (state *streamState) keepAlive(ctx context.Context) {
+	ticker := time.NewTicker(state.scopeStreamLimits.Ping)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		pingCtx, cancel := context.WithTimeout(
+			ctx,
+			state.scopeStreamLimits.Idle,
+		)
+		err := state.scopeStreamTransport.ping(pingCtx)
+
+		cancel()
+
+		if err != nil {
+			if ctx.Err() == nil {
+				state.terminate(closeGoing, "idle timeout", ErrStreamClosed)
+			}
+
+			return
+		}
+	}
+}
+
+// recheck re-verifies the live gate for the lifetime of the stream. Any
+// failure, including a transient one, closes the stream: authority is never
+// assumed to persist.
+func (state *streamState) recheck(
+	ctx context.Context,
+	check func(context.Context) error,
+) {
+	ticker := time.NewTicker(state.scopeStreamLimits.Recheck)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		err := check(ctx)
+		if err == nil {
+			continue
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		code, reason := closeStatus(err, nil)
+		state.terminate(code, reason, err)
+
+		return
+	}
+}
+{{if .Candidate}}
+// MemoryPeer is the remote end of an in-memory stream used by scopetest.
+type MemoryPeer struct {
+	scopePeerToServer chan []byte
+	scopePeerToClient chan []byte
+	scopePeerClosed   chan struct{}
+	scopePeerOnce     sync.Once
+}
+
+type memory struct {
+	scopeMemoryPeer *MemoryPeer
+}
+
+// NewMemoryWire is a capability: only the scope test harness may call it. It
+// returns a Wire backed by memory and the peer that drives it.
+func NewMemoryWire() (Wire, *MemoryPeer) {
+	peer := &MemoryPeer{
+		scopePeerToServer: make(chan []byte, inboundBuffer),
+		scopePeerToClient: make(chan []byte, inboundBuffer),
+		scopePeerClosed:   make(chan struct{}),
+	}
+
+	return Wire{scopeWireTransport: memory{scopeMemoryPeer: peer}}, peer
+}
+
+// Send delivers one raw client message to the server side.
+func (p *MemoryPeer) Send(ctx context.Context, message []byte) error {
+	select {
+	case p.scopePeerToServer <- message:
+		return nil
+	case <-p.scopePeerClosed:
+		return ErrStreamClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Receive returns the next raw server message or ErrStreamClosed.
+func (p *MemoryPeer) Receive(ctx context.Context) ([]byte, error) {
+	select {
+	case message := <-p.scopePeerToClient:
+		return message, nil
+	case <-p.scopePeerClosed:
+		select {
+		case message := <-p.scopePeerToClient:
+			return message, nil
+		default:
+			return nil, ErrStreamClosed
+		}
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Close ends the stream from the client side.
+func (p *MemoryPeer) Close() {
+	p.scopePeerOnce.Do(func() { close(p.scopePeerClosed) })
+}
+
+func (memory) limit(int64) {}
+
+func (m memory) read(ctx context.Context) ([]byte, error) {
+	select {
+	case message := <-m.scopeMemoryPeer.scopePeerToServer:
+		return message, nil
+	default:
+	}
+
+	select {
+	case message := <-m.scopeMemoryPeer.scopePeerToServer:
+		return message, nil
+	case <-m.scopeMemoryPeer.scopePeerClosed:
+		return nil, ErrStreamClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (m memory) write(ctx context.Context, message []byte) error {
+	select {
+	case m.scopeMemoryPeer.scopePeerToClient <- message:
+		return nil
+	case <-m.scopeMemoryPeer.scopePeerClosed:
+		return ErrStreamClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (memory) ping(context.Context) error { return nil }
+
+func (m memory) close(int, string) { m.scopeMemoryPeer.Close() }
+{{end}}

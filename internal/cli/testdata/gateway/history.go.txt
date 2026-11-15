@@ -1,0 +1,20 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+
+	"github.com/plutoframework/pluto-core/pagination"
+)
+
+// History returns one page of the verified machine's own heartbeats.
+func History(
+	ctx context.Context,
+	e scope.Execution,
+	ports HistoryPorts,
+	in models.HistoryRequest,
+) (pagination.Page[models.BeatRow], error) {
+	return ports.Registry.History(ctx, e, in)
+}

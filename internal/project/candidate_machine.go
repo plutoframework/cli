@@ -1,0 +1,244 @@
+package project
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Generated output of machine identity: the shared runtime package, its
+// migration, the enrollment operation and the machine-authenticated
+// operations' gates, workflows and handlers.
+
+const (
+	machinePortsFile     = "internal/ports/machineauth/machineauth_gen.go"
+	machineStorageFile   = "internal/storage/machineauth/machineauth_gen.go"
+	machineTransportFile = "internal/transport/machineauth_gen.go"
+	machineMigrationFile = "db/migrations/101_machine_identity.sql"
+)
+
+// machineView is the template view of the declared principals.
+type machineView struct {
+	Principals []machinePrincipalView
+}
+
+type machinePrincipalView struct {
+	ID         string
+	Bind       string
+	Query      string
+	Recheck    string
+	IssueCheck string
+	Activate   string
+	Revoke     string
+	Reset      string
+	Pending    string
+	Active     string
+	Revoked    string
+	Limit      int
+	Window     int64
+	TTL        int64
+}
+
+func machineData(m Manifest) (machineView, error) {
+	var view machineView
+
+	for _, principal := range m.Principals {
+		var table Table
+
+		for _, candidate := range m.Tables {
+			if candidate.Group == principal.Group() &&
+				candidate.Name == principal.Table {
+				table = candidate
+			}
+		}
+
+		lookup := principal.Lookup(table.TenantColumn)
+		id := quoteIdent(principal.IDColumn)
+		key := quoteIdent(principal.KeyColumn)
+		state := quoteIdent(principal.StateColumn)
+		from := quoteIdent(principal.Table)
+
+		view.Principals = append(view.Principals, machinePrincipalView{
+			ID:   principal.ID,
+			Bind: "SELECT set_config('" + lookup.Setting() + "', $1, true)",
+			Query: "SELECT " + id + "::text, " +
+				quoteIdent(table.TenantColumn) + "::text, " + key +
+				"::text, " + state + "::text FROM " +
+				quoteIdent(lookup.ViewName()) + " WHERE " + id +
+				"::text = $1 LIMIT 2",
+			Recheck: "SELECT 1 FROM " + from + " WHERE " + id +
+				"::text = $1 AND " + state + "::text = $2 AND " + key +
+				"::text = $3",
+			IssueCheck: "SELECT 1 FROM " + from + " WHERE " + id +
+				"::text = $1 AND " + state + "::text = $2",
+			Activate: "UPDATE " + from + " SET " + key + " = $1, " + state +
+				" = $2 WHERE " + id + "::text = $3 AND " + state +
+				"::text = $4",
+			Revoke: "UPDATE " + from + " SET " + state + " = $1 WHERE " + id +
+				"::text = $2 AND " + state + "::text IN ($3, $4)",
+			Reset: "UPDATE " + from + " SET " + key + " = NULL, " + state +
+				" = $1 WHERE " + id + "::text = $2 AND " + state +
+				"::text IN ($3, $4)",
+			Pending: principal.PendingValue,
+			Active:  principal.ActiveValue,
+			Revoked: principal.Revoked(),
+			Limit:   principal.Limit(),
+			Window:  principal.Window().Nanoseconds(),
+			TTL:     principal.TTL().Nanoseconds(),
+		})
+	}
+
+	return view, nil
+}
+
+// candidateMachineManaged renders the machine runtime package, its
+// migration and the enrollment operations' generated halves.
+func candidateMachineManaged(m Manifest) (map[string][]byte, error) {
+	files := map[string][]byte{}
+	if !m.HasMachine() {
+		return files, nil
+	}
+
+	view, err := machineData(m)
+	if err != nil {
+		return nil, err
+	}
+
+	data := dataFor(m, Endpoint{})
+	data.Machine = view
+
+	for path, name := range map[string]string{
+		machinePortsFile:     "candidate_machine_ports.go",
+		machineStorageFile:   "candidate_machine.go",
+		machineTransportFile: "candidate_machine_transport.go",
+	} {
+		source, err := render(name, data)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+
+		files[path] = source
+	}
+
+	files[machineMigrationFile] = []byte(machineMigrationSQL(m))
+
+	for _, operation := range m.Operations {
+		if operation.Scope != ScopeEnroll {
+			continue
+		}
+
+		opData := dataFor(m, operation.Endpoint())
+		opData.Authored = authoredOp{
+			ID:        operation.ID(),
+			Action:    operation.Action,
+			Principal: operation.Principal,
+		}
+
+		path := "internal/operations/" + operation.Group + "/" +
+			lowerAction(operation.Action) + "_gate_gen.go"
+
+		source, err := render("candidate_enroll_gate.go", opData)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+
+		files[path] = source
+	}
+
+	return files, nil
+}
+
+// machineHandler renders the HTTP handler of a machine-authenticated
+// operation.
+func machineHandler(m Manifest, operation Operation) ([]byte, error) {
+	spec, err := seamOperation(m, operation)
+	if err != nil {
+		return nil, err
+	}
+
+	return seamTemplate("candidate_machine_handler.go", spec)
+}
+
+// enrollHandler renders the HTTP handler of an enrollment operation.
+func enrollHandler(m Manifest, operation Operation) ([]byte, error) {
+	data := dataFor(m, operation.Endpoint())
+	data.Symbol = symbol(operation.Endpoint())
+
+	return render("candidate_enroll_handler.go", data)
+}
+
+// machineMigrationSQL creates the framework tables of machine identity:
+// enrollment tokens (hashed) and request nonces. Both are tenant scoped under
+// forced row-level security. The enrollment table additionally admits one
+// SELECT keyed to the hash of the presented token, which is how a token is
+// resolved before its tenant is known.
+func machineMigrationSQL(m Manifest) string {
+	var sql strings.Builder
+
+	sql.WriteString(`-- Generated by pluto: machine identity tables.
+-- Enrollment tokens are stored only as SHA-256 hashes. Every row is tenant
+-- scoped under forced row-level security; the one pre-tenant read is the
+-- token lookup policy and view below.
+CREATE TABLE IF NOT EXISTS pluto_machine_enrollments (
+    token_hash text PRIMARY KEY,
+    principal text NOT NULL,
+    tenant_id text NOT NULL,
+    machine_id text NOT NULL,
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS pluto_machine_enrollments_machine
+    ON pluto_machine_enrollments (tenant_id, principal, machine_id);
+ALTER TABLE pluto_machine_enrollments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pluto_machine_enrollments FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS pluto_tenant_isolation ON pluto_machine_enrollments;
+CREATE POLICY pluto_tenant_isolation ON pluto_machine_enrollments
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+DROP POLICY IF EXISTS pluto_machine_enrollment_lookup
+    ON pluto_machine_enrollments;
+CREATE POLICY pluto_machine_enrollment_lookup ON pluto_machine_enrollments
+    FOR SELECT
+    USING (token_hash = current_setting('app.machine_enrollment', true));
+CREATE OR REPLACE VIEW pluto_machine_enrollment_lookup
+    WITH (security_invoker = true) AS
+    SELECT token_hash, principal, tenant_id, machine_id, expires_at, used_at
+    FROM pluto_machine_enrollments;
+
+CREATE TABLE IF NOT EXISTS pluto_machine_nonces (
+    principal text NOT NULL,
+    machine_id text NOT NULL,
+    nonce text NOT NULL,
+    tenant_id text NOT NULL,
+    expires_at timestamptz NOT NULL,
+    PRIMARY KEY (principal, machine_id, nonce)
+);
+CREATE INDEX IF NOT EXISTS pluto_machine_nonces_expiry
+    ON pluto_machine_nonces (tenant_id, expires_at);
+ALTER TABLE pluto_machine_nonces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pluto_machine_nonces FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS pluto_tenant_isolation ON pluto_machine_nonces;
+CREATE POLICY pluto_tenant_isolation ON pluto_machine_nonces
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+`)
+
+	if role := m.Database.RuntimeRole; role != "" {
+		fmt.Fprintf(
+			&sql,
+			`
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = '%[1]s') THEN
+        GRANT SELECT, INSERT, UPDATE, DELETE
+            ON pluto_machine_enrollments, pluto_machine_nonces TO %[1]s;
+        GRANT SELECT ON pluto_machine_enrollment_lookup TO %[1]s;
+    END IF;
+END
+$$;
+`,
+			role,
+		)
+	}
+
+	return sql.String()
+}

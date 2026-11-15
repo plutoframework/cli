@@ -1,0 +1,66 @@
+package {{.Group}}
+
+import (
+	"context"
+{{- if .Authored.PagedRequest}}
+	"fmt"
+	"strconv"
+{{- end}}
+
+{{- if .Authored.PagedRequest}}
+	commonDomain "{{.Module}}/internal/domain"
+{{- end}}
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/scope"
+{{- if .Authored.Pagination}}
+	"github.com/plutoframework/pluto-core/pagination"
+{{- end}}
+)
+
+// execute is the only caller of the authored body. It binds the verified
+// machine to this operation's fixed resource: every data access the body
+// makes rechecks that the machine is still active with the verified key.
+{{- if .Authored.PagedRequest}}
+//
+// A page request's keyset binding is derived here from the verified machine,
+// its tenant, the resource and the canonical filters, never from the caller.
+{{- end}}
+func (operation *{{.Action}}) execute(
+	ctx context.Context,
+	verified machineauth.Verified,
+	request models.{{.Action}}Request,
+) ({{.Authored.Returns}}) {
+{{- if .Authored.PagedRequest}}
+	query := request.Values()
+	if request.Limit > 0 {
+		query.Set("limit", strconv.Itoa(request.Limit))
+	}
+
+	if request.Cursor != "" {
+		query.Set("cursor", request.Cursor)
+	}
+
+	page, err := pagination.Parse(
+		query,
+		pagination.Binding(
+			query,
+			{{q .Authored.Resource}},
+			{{q .Authored.ID}},
+			verified.MachineID(),
+			verified.TenantID()))
+	if err != nil {
+		var zero {{.Authored.Result}}
+
+		return zero, fmt.Errorf("%w: %w", commonDomain.ErrInvalidInput, err)
+	}
+
+	request.Page = page
+{{end}}
+	return logic.{{.Action}}(
+		ctx,
+		scope.BindMachine(verified, {{q .Authored.Resource}}),
+		operation.{{lowerFirst .Action}}Ports,
+		request)
+}

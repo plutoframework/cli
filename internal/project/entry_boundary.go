@@ -176,6 +176,8 @@ func inspectEntryBoundaries(
 							"gen.go" ||
 
 							relative == "internal/access/caller_gen.go")))
+			allowedWorker = allowedWorker ||
+				managed[relative] && m.tenantJobFile(relative)
 			allowedTool := managed[relative] &&
 				strings.HasPrefix(relative, "internal/agents/")
 

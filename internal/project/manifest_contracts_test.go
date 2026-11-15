@@ -226,7 +226,7 @@ func TestManifestContractsRejectIndependentAuthorityDrift(t *testing.T) {
 		},
 		{
 			"route-only feature",
-			"operation-owned shared gate",
+			"declared on the operation",
 			func(m *Manifest) {
 				m.Endpoints[0].Feature = "invoice.approve"
 			},

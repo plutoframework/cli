@@ -97,10 +97,6 @@ func Vet(
 		return err
 	}
 
-	if err := refuseUngeneratedAuthored(m); err != nil {
-		return err
-	}
-
 	for _, diagnostic := range InspectArchitecture(root).Diagnostics {
 		if diagnostic.ID == "ARCH401" {
 			return fmt.Errorf(
@@ -259,6 +255,12 @@ func Contracts(root string, m Manifest) error {
 					m.Frontend.Directory,
 					"package-lock.json",
 				) {
+				return nil
+			}
+
+			// The generated contract grows with the endpoint count and is
+			// regenerated, never edited, so it has no line ceiling.
+			if relative == filepath.Join("openapi", "openapi.json") {
 				return nil
 			}
 

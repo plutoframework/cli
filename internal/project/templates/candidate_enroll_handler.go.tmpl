@@ -1,0 +1,58 @@
+package {{.Group}}
+
+import (
+	"errors"
+	"net"
+	"net/http"
+
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	operations "{{.Module}}/internal/operations/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/transport"
+	"github.com/plutoframework/pluto-auth/methods/password"
+)
+
+type {{.Action}}Operations = operations.{{.Action}}Boundary
+
+// Register{{.Action}} serves a public, rate-limited enrollment. The limit key
+// is the remote address; deploy behind a proxy that sets it correctly.
+func Register{{.Action}}(
+	reg transport.Registrar,
+	operation {{.Action}}Operations,
+	bodyLimit int64,
+) {
+	reg.Handle(
+		paths.{{.Symbol}},
+		func(w http.ResponseWriter, r *http.Request) {
+			var input models.{{.Action}}Request
+			if !transport.Decode(w, r, &input, bodyLimit) {
+				return
+			}
+
+			client, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+			if splitErr != nil {
+				client = r.RemoteAddr
+			}
+
+			output, err := operation.Execute(r.Context(), client, input)
+			if err != nil {
+				switch {
+				case errors.Is(err, password.ErrLimited):
+					transport.Error(w, r, 429, "rate_limited")
+				case errors.Is(err, machineauth.ErrInvalidEnrollment):
+					transport.Error(w, r, 401, "invalid_enrollment")
+				default:
+					transport.OperationError(w, r, err)
+				}
+
+				return
+			}
+
+			transport.JSON(
+				w,
+				paths.{{.Symbol}}.SuccessStatus,
+				models.{{.Action}}Response{Data: output},
+			)
+		})
+}

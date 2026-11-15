@@ -62,6 +62,14 @@ func candidateAppMemberships(m Manifest) ([]byte, error) {
 	)
 	source = strings.ReplaceAll(source, "{{ACTIVE_ARGS}}", activeArgs)
 
+	if index, ok := m.MemberIndexOf(); ok {
+		source += strings.NewReplacer(
+			"{{SETTING}}", index.Setting(),
+			"{{VIEW}}", index.ViewName(),
+			"{{LIMIT}}", strconv.Itoa(maxAuthEventTenants+1),
+		).Replace(candidateAuthEventTenantsSource)
+	}
+
 	return []byte(source + "\nconst membershipQuery = " +
 		strconv.Quote(query) + "\n" + activeDecl), nil
 }
@@ -154,6 +162,68 @@ func (m *Memberships) VerifyMembership(
 ) error {
 	_, err := m.Resolve(ctx, subject, tenant)
 	return err
+}
+`
+
+// candidateAuthEventTenantsSource lists the organizations of a subject the
+// caller has already verified through a live session. The subject setting is
+// transaction local and read by the generated policy only.
+const candidateAuthEventTenantsSource = `
+// Tenants resolves the organizations of one subject, which the caller must
+// have verified through a live session first. It reads only the generated
+// view of active memberships and returns at most {{LIMIT}} rows; the hook
+// treats more than its bound as a failure instead of truncating silently.
+func (m *Memberships) Tenants(
+	ctx context.Context,
+	subject string,
+) ([]string, error) {
+	if m == nil || m.pool == nil || subject == "" {
+		return nil, domain.ErrUnauthenticated
+	}
+
+	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return nil, domain.ErrForbidden
+	}
+
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(
+		ctx,
+		"SELECT set_config('{{SETTING}}', $1, true)",
+		subject,
+	); err != nil {
+		return nil, domain.ErrForbidden
+	}
+
+	rows, err := tx.Query(
+		ctx,
+		"SELECT tenant_id FROM {{VIEW}} ORDER BY tenant_id LIMIT {{LIMIT}}",
+	)
+	if err != nil {
+		return nil, domain.ErrForbidden
+	}
+
+	defer rows.Close()
+
+	var tenants []string
+
+	for rows.Next() {
+		var tenant string
+		if err := rows.Scan(&tenant); err != nil {
+			return nil, domain.ErrForbidden
+		}
+
+		tenants = append(tenants, tenant)
+	}
+
+	if rows.Err() != nil {
+		return nil, domain.ErrForbidden
+	}
+
+	return tenants, nil
 }
 `
 

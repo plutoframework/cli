@@ -17,13 +17,32 @@ type Endpoint struct {
 	Path          string
 	Authenticated bool
 	SessionOnly   bool
+{{- if .HasMachine}}
+
+	// Machine names the principal of a machine-authenticated endpoint: it
+	// carries no user session and no user permission.
+	Machine string
+{{- end}}
 	Permission    rbac.PermissionID
 	Feature       string
 	Request       any
 	Response      any
 	SuccessStatus int
 	Query         []QueryParam
+{{- if .HasStream}}
+	Stream        *StreamSpec
+{{- end}}
 }
+{{if .HasStream}}
+// StreamSpec describes a WebSocket endpoint: the JSON message models in each
+// direction and the generated limits the stream runtime enforces.
+type StreamSpec struct {
+	Server          any
+	Client          any
+	MaxMessageBytes int
+	Origins         []string
+}
+{{end}}
 
 // QueryParam is one declared typed query parameter of an authored read.
 type QueryParam struct {

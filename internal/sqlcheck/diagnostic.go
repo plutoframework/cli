@@ -34,6 +34,10 @@ type Table struct {
 	// TenantColumn is its own identifier. Only provisioning query sets may
 	// INSERT into it.
 	TenantRoot bool
+
+	// Protected lists credential and state columns only generated code may
+	// write: authored INSERT and UPDATE statements may not name them.
+	Protected []string
 }
 
 // Lookup is one declared tenant-root lookup by unique key. Its migration
@@ -43,6 +47,12 @@ type Lookup struct {
 	Key     string
 	Policy  string
 	Setting string
+
+	// Enumerate marks the generated tenant index: its policy admits every
+	// row of the tenant root to SELECT while the transaction-local setting
+	// equals 'on', so only generated code that exposes the tenant column
+	// alone may set it.
+	Enumerate bool
 }
 
 // QuerySet is a declared set of authored sqlc query files.

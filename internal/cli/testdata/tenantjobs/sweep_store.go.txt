@@ -1,0 +1,30 @@
+package orgs
+
+import (
+	"context"
+
+	"example.test/tenantjobs/internal/scope"
+	queries "example.test/tenantjobs/internal/storage/queries/orgs"
+)
+
+// SweepStore is the authored sweep adapter.
+type SweepStore struct{ db scope.DB }
+
+func NewSweepStore(db scope.DB) *SweepStore { return &SweepStore{db: db} }
+
+// Record appends one sweep row for the execution's tenant.
+func (s *SweepStore) Record(
+	ctx context.Context,
+	e scope.Execution,
+) error {
+	return s.db.Write(
+		ctx,
+		e,
+		func(ctx context.Context, tx scope.Tx) error {
+			return queriesOf(tx).RecordSweep(ctx, queries.RecordSweepParams{
+				OrgID:   tx.Tenant(),
+				Subject: tx.SubjectID(),
+			})
+		},
+	)
+}

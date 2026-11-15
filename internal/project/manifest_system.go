@@ -31,6 +31,10 @@ type Lookup struct {
 	Table   string   `toml:"table"`
 	Key     string   `toml:"key"`
 	Columns []string `toml:"columns"`
+
+	// castText compares the key as text, for non-text key columns. It is
+	// set only on lookups derived from machine principals.
+	castText bool
 }
 
 // Group is the owning group of the lookup.
@@ -43,6 +47,15 @@ func (l Lookup) Group() string {
 // Name is the exported name part of the lookup id.
 func (l Lookup) Name() string {
 	return modelName(l.ID)
+}
+
+// cast is the SQL suffix comparing the key as text when required.
+func (l Lookup) cast() string {
+	if l.castText {
+		return "::text"
+	}
+
+	return ""
 }
 
 // Setting is the transaction-local setting that selects the one visible row.
@@ -104,13 +117,14 @@ func (d templateData) HasProvision() bool {
 // usesSeamWire reports operations whose wire models and query parser come
 // from the seam generator: authored bodies and generated system lookups.
 func (o Operation) usesSeamWire() bool {
-	return o.Body == BodyAuthored || o.Body == BodySystem
+	return (o.Body == BodyAuthored || o.Body == BodySystem) &&
+		o.Scope != ScopeEachTenant
 }
 
 // outsideContracts reports operations that have no resource behavior
 // contract: authored and system bodies are governed by their own seams.
 func (o Operation) outsideContracts() bool {
-	return o.usesSeamWire()
+	return o.Body == BodyAuthored || o.Body == BodySystem
 }
 
 func validateTenantRoots(tables []Table) error {
@@ -199,6 +213,10 @@ func validateSystem(
 		return err
 	}
 
+	if err := validateEachTenantJobs(m); err != nil {
+		return err
+	}
+
 	if m.hasScope(ScopeProvision) || m.hasScope(ScopeLookup) {
 		if _, ok := m.TenantRoot(); !ok {
 			return fmt.Errorf(
@@ -273,8 +291,10 @@ var lookupOutputTypes = map[string]bool{
 	"string": true, "int64": true, "bool": true, "time": true,
 }
 
-// validateSystemSeams checks one scope = "provision" or "lookup" operation.
+// validateSystemSeams checks one scope = "provision", "lookup" or "enroll"
+// operation.
 func (o Operation) validateSystemSeams(
+	m Manifest,
 	ports map[string]Port,
 	models map[string]Model,
 ) error {
@@ -300,8 +320,14 @@ func (o Operation) validateSystemSeams(
 		return o.validateProvision(ports, models)
 	case ScopeLookup:
 		return o.validateLookup(models)
+	case ScopeEnroll:
+		if err := o.validateEnroll(m); err != nil {
+			return err
+		}
+
+		return o.validateModelRefs(models)
 	default:
-		return fmt.Errorf("scope must be provision or lookup")
+		return fmt.Errorf("scope must be provision, lookup or enroll")
 	}
 }
 
@@ -334,8 +360,10 @@ func (o Operation) validateProvision(
 			return fmt.Errorf("references undeclared port %s", id)
 		}
 
-		if group, _, _ := splitQualified(id); group != o.Group {
-			return fmt.Errorf("port %s belongs to another group", id)
+		// Another group's port is admitted only through its declared tx
+		// methods, which join the provisioning transaction.
+		if err := o.checkPortGroup(ports[id]); err != nil {
+			return err
 		}
 	}
 

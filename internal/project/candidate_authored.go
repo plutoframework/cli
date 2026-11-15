@@ -16,6 +16,10 @@ const (
 	scopeDir         = "internal/scope"
 	scopeFile        = scopeDir + "/scope_gen.go"
 	scopetestFile    = scopeDir + "/scopetest/scopetest_gen.go"
+	scopeStreamFile  = scopeDir + "/stream_gen.go"
+
+	// tenantIndexFile is the generated enumeration of the tenant root table.
+	tenantIndexFile = "internal/storage/tenantindex/index_gen.go"
 )
 
 // authoredPort is one declared port an authored operation consumes.
@@ -47,6 +51,10 @@ type authoredOp struct {
 	// scope.Provisioning instead of a scope.Execution.
 	Provision bool
 
+	// Principal is the machine principal of a machine-authenticated body or
+	// an enrollment operation.
+	Principal string
+
 	// PagedRequest is set when the request model carries a Page the workflow
 	// must bind from verified scope: a page read exposed as an endpoint.
 	PagedRequest bool
@@ -55,6 +63,33 @@ type authoredOp struct {
 	// Transactional is set when the operation writes through another group's
 	// tx methods and therefore receives a scope.DB to open its transaction.
 	Transactional bool
+
+	// Stream describes a response = "stream" body: the typed channel it
+	// receives and the limits the generated workflow enforces.
+	IsStream  bool
+	Stream    StreamLimits
+	Inbound   bool
+	StreamIn  string
+	StreamOut string
+
+	// MachineEvent adds ExecuteMachine to the declared [auth.events]
+	// operation so a machine enrollment can be recorded in its tenant.
+	MachineEvent bool
+
+	// EachTenant marks a scope = "each_tenant" body: it has no request, and
+	// receives the scope.Execution of one enumerated tenant.
+	EachTenant bool
+	Job        tenantJobView
+}
+
+// tenantJobView carries the declared limits of one tenant job into its
+// generated gate.
+type tenantJobView struct {
+	Kind        string
+	Interval    int64
+	Timeout     int64
+	Concurrency int
+	Attempts    int
 }
 
 // Returns is the Go result list of the authored body, gate and workflow.
@@ -70,6 +105,10 @@ type authoredGroupView struct {
 	Ops            []authoredOp
 	UsesPorts      bool
 	UsesPagination bool
+
+	// UsesModels is false when every operation is a tenant job, which has
+	// no request model and may live in a group with no models package.
+	UsesModels bool
 
 	// ForeignGroups are the other groups whose ports packages the contract
 	// imports for cross-group transactional writes.
@@ -88,6 +127,20 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 		Action:    operation.Action,
 		Resource:  operation.Resource,
 		Provision: operation.Scope == ScopeProvision,
+		Principal: operation.MachinePrincipal(),
+
+		MachineEvent: m.HasMachine() && m.IsAuthEventOperation(operation),
+	}
+
+	if operation.Scope == ScopeEachTenant {
+		view.EachTenant = true
+		view.Job = tenantJobView{
+			Kind:        operation.JobKind(),
+			Interval:    int64(operation.Interval()),
+			Timeout:     int64(operation.TenantTimeout()),
+			Concurrency: operation.TenantConcurrency(),
+			Attempts:    operation.TenantAttempts(),
+		}
 	}
 
 	switch operation.Response {
@@ -104,16 +157,24 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 	case ResponseObject:
 		view.Result = "models." + modelName(operation.Output)
 	case ResponseStream:
-		return view, fmt.Errorf(
-			"operation %s: stream responses are a later phase",
-			operation.ID(),
-		)
+		view.IsStream = true
+		view.Stream = operation.StreamSettings()
+		view.Inbound = operation.Input != ""
+		view.StreamIn = "scope.NoMessage"
+		view.StreamOut = "models." + modelName(operation.Item)
+
+		if view.Inbound {
+			view.StreamIn = "models." + modelName(operation.Input)
+		}
 	}
 
-	if operation.Write && operation.Idempotency == "required" {
+	if operation.Write && operation.Idempotency == "required" &&
+		(!operation.isAuthoredWriteBody() || !m.hasEndpoint(operation)) {
 		return view, fmt.Errorf(
-			"operation %s: authored write bodies support idempotency = "+
-				"\"exempt\" with a replay_reason only",
+			"operation %s: idempotency = \"required\" needs an HTTP "+
+				"endpoint (the generated Idempotency-Key claim); internal "+
+				"authored writes use idempotency = \"exempt\" with a "+
+				"replay_reason",
 			operation.ID(),
 		)
 	}
@@ -200,10 +261,16 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 
 	data := dataFor(m, Endpoint{})
 
-	for path, name := range map[string]string{
+	scopeFiles := map[string]string{
 		scopeFile:     "candidate_scope.go",
 		scopetestFile: "candidate_scopetest.go",
-	} {
+	}
+
+	if m.hasStreams() {
+		scopeFiles[scopeStreamFile] = "candidate_stream_scope.go"
+	}
+
+	for path, name := range scopeFiles {
 		source, err := render(name, data)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
@@ -231,6 +298,8 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 		}
 
 		group.Ops = append(group.Ops, view)
+		group.UsesModels = group.UsesModels || !view.EachTenant
+
 		for _, port := range view.Ports {
 			group.UsesPorts = group.UsesPorts || port.Alias == ""
 		}
@@ -257,6 +326,34 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 			}
 		}
 
+		if operation.isMachine() {
+			layout = map[string]string{
+				"_gate_gen.go":     "candidate_machine_gate.go",
+				"_workflow_gen.go": "candidate_machine_workflow.go",
+			}
+		}
+
+		if view.IsStream {
+			layout = map[string]string{
+				"_gate_gen.go":     "candidate_stream_gate.go",
+				"_workflow_gen.go": "candidate_stream_workflow.go",
+			}
+
+			if operation.isMachine() {
+				layout = map[string]string{
+					"_gate_gen.go":     "candidate_machine_stream_gate.go",
+					"_workflow_gen.go": "candidate_machine_stream_workflow.go",
+				}
+			}
+		}
+
+		if operation.Scope == ScopeEachTenant {
+			layout = map[string]string{
+				"_gate_gen.go":     "candidate_tenantjob_gate.go",
+				"_workflow_gen.go": "candidate_tenantjob_workflow.go",
+			}
+		}
+
 		for suffix, name := range layout {
 			source, err := render(name, opData)
 			if err != nil {
@@ -265,6 +362,15 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 
 			files[base+suffix] = source
 		}
+	}
+
+	if m.hasEachTenant() {
+		source, err := render("candidate_tenant_index.go", data)
+		if err != nil {
+			return nil, err
+		}
+
+		files[tenantIndexFile] = source
 	}
 
 	for name, group := range groups {

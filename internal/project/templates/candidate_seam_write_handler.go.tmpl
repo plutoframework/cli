@@ -1,0 +1,129 @@
+package {{.Group}}
+
+import (
+	"bytes"
+	"errors"
+	"io"
+	"net/http"
+
+	"{{.Module}}/internal/access"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	operations "{{.Module}}/internal/operations/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/transport"
+{{- if .Idempotent}}
+	"github.com/plutoframework/pluto-core/idempotency"
+{{- end}}
+)
+
+type {{.Action}}Operations = operations.{{.Action}}Boundary
+
+// Register{{.Action}} serves an authored write. The caller is verified first;
+// the body is size limited and strictly decoded into the declared input model
+// (unknown fields, trailing data and non-object JSON are rejected); the
+// generated gate authorizes the exact request before the authored body runs.
+{{- if .Idempotent}}
+//
+// The Idempotency-Key claim is taken only after that authorization, so an
+// unauthorized caller never creates or replays a claim.
+{{- end}}
+func Register{{.Action}}(
+	reg transport.Registrar,
+	operation {{.Action}}Operations,
+	bodyLimit int64,
+) {
+	reg.Handle(
+		paths.{{.Symbol}},
+		func(w http.ResponseWriter, r *http.Request) {
+			caller, err := access.CallerFromHTTP(
+				r.Context(),
+				r.Header.Get("X-Tenant-ID"))
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
+			if err != nil {
+				var tooLarge *http.MaxBytesError
+				if errors.As(err, &tooLarge) {
+					transport.Error(w, r, 413, "body_too_large")
+
+					return
+				}
+
+				transport.Error(w, r, 400, "invalid_body")
+
+				return
+			}
+
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+
+			var input models.{{.Action}}Request
+			if !transport.Decode(w, r, &input, bodyLimit) {
+				return
+			}
+{{- if .Idempotent}}
+
+			if reg.Idempotency == nil {
+				transport.Error(w, r, 503, "idempotency_unavailable")
+
+				return
+			}
+
+			intent, err := operation.Prepare(r.Context(), caller, input)
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			actor, err := operation.AuthorizeIntent(r.Context(), intent)
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+
+			reg.Idempotency.Serve(
+				w,
+				r,
+				idempotency.Scope{
+					Subject:   actor.SubjectID,
+					Tenant:    actor.TenantID,
+					Operation: paths.{{.Symbol}}.ID,
+				},
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					output, err := operation.ExecutePrepared(r.Context(), intent)
+					if err != nil {
+						transport.OperationError(w, r, err)
+
+						return
+					}
+
+					transport.JSON(
+						w,
+						paths.{{.Symbol}}.SuccessStatus,
+						models.{{.Action}}Response{Data: output},
+					)
+				}))
+{{- else}}
+
+			output, err := operation.Execute(r.Context(), caller, input)
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			transport.JSON(
+				w,
+				paths.{{.Symbol}}.SuccessStatus,
+				models.{{.Action}}Response{Data: output},
+			)
+{{- end}}
+		})
+}

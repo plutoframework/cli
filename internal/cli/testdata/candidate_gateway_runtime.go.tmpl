@@ -1,0 +1,648 @@
+package app_test
+
+import (
+	"context"
+	"crypto/ed25519"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"example.test/gwapp/internal/app"
+
+	"github.com/coder/websocket"
+	"github.com/plutoframework/pluto-auth/httpauth"
+)
+
+const flagOn = "GWAPP_FEATURE_GATEWAYS"
+
+// send is call with extra headers, as an authenticated tenant member.
+func (f *gwFixture) send(
+	method, path, body, cookie, tenant string,
+	headers map[string]string,
+) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Origin", gwOrigin)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Tenant-ID", tenant)
+
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+
+	if cookie != "" {
+		request.AddCookie(
+			&http.Cookie{Name: httpauth.CookieName, Value: cookie},
+		)
+	}
+
+	return f.serve(request)
+}
+
+type gwAnswer struct {
+	Data struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+		Name  string `json:"name"`
+		State string `json:"state"`
+	} `json:"data"`
+}
+
+func answer(t *testing.T, response *httptest.ResponseRecorder) gwAnswer {
+	t.Helper()
+
+	var out gwAnswer
+	if err := json.Unmarshal(response.Body.Bytes(), &out); err != nil {
+		t.Fatalf("answer %s: %v", response.Body.String(), err)
+	}
+
+	return out
+}
+
+// An authored write endpoint: default-off flag first, then the caller's
+// session, membership and permission, then a strict JSON body; nothing
+// changes unless every gate passes.
+func TestGatewayWriteEndpoint(t *testing.T) {
+	off := gwSetup(t)
+	orgOff := off.org(t, "off@example.test")
+
+	denied := off.send(
+		"POST", "/api/gateways", `{"name":"edge"}`,
+		orgOff.admin.session, orgOff.tenant, nil,
+	)
+	off.expect(t, denied, 403)
+
+	if !strings.Contains(denied.Body.String(), "feature_disabled") ||
+		off.scalar(t, "SELECT count(*) FROM gateways") != "0" {
+		t.Fatalf("a disabled flag must stop the write: %s",
+			denied.Body.String())
+	}
+
+	f := gwSetupEnv(t, map[string]string{flagOn: "true"})
+	org := f.org(t, "admin@example.test")
+	other := f.org(t, "other@example.test")
+	create := func(body, cookie, tenant string) *httptest.ResponseRecorder {
+		return f.send("POST", "/api/gateways", body, cookie, tenant, nil)
+	}
+
+	// Anonymous, foreign-tenant and malformed requests change nothing.
+	f.expect(t, create(`{"name":"edge"}`, "", org.tenant), 401)
+	f.expect(t, create(`{"name":"edge"}`, other.admin.session, org.tenant), 401)
+
+	for name, body := range map[string]string{
+		"unknown field": `{"name":"edge","org_id":"x"}`,
+		"trailing json": `{"name":"edge"}{}`,
+		"not an object": `["edge"]`,
+		"wrong type":    `{"name":7}`,
+		"empty":         ``,
+		"invalid name":  `{"name":""}`,
+	} {
+		response := create(body, org.admin.session, org.tenant)
+		if response.Code != 400 {
+			t.Fatalf("%s: status=%d %s", name, response.Code,
+				response.Body.String())
+		}
+	}
+
+	big := fmt.Sprintf(`{"name":%q}`, strings.Repeat("a", 32*1024))
+	f.expect(t, create(big, org.admin.session, org.tenant), 413)
+
+	if f.scalar(t, "SELECT count(*) FROM gateways") != "0" {
+		t.Fatal("a rejected request created a gateway")
+	}
+
+	// A viewer holds no permission: the gate refuses before the body runs.
+	viewer := f.enroll(t, "viewer@example.test")
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"INSERT INTO users (org_id, id, role) VALUES ($1, $2, 'viewer')",
+		org.tenant, viewer.id,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.expect(t, create(`{"name":"edge"}`, viewer.session, org.tenant), 403)
+
+	created := create(`{"name":"edge"}`, org.admin.session, org.tenant)
+	f.expect(t, created, 200)
+
+	gateway := answer(t, created).Data
+	if gateway.Token == "" ||
+		f.scalar(t, "SELECT state FROM gateways WHERE id = $1",
+			gateway.ID) != "pending" ||
+		f.scalar(t, "SELECT org_id FROM gateways WHERE id = $1",
+			gateway.ID) != org.tenant ||
+		f.scalar(t, "SELECT coalesce(public_key, 'none') FROM gateways "+
+			"WHERE id = $1", gateway.ID) != "none" {
+		t.Fatalf("unexpected gateway %+v", gateway)
+	}
+}
+
+// Rename requires idempotency: a replay of one key and body runs once and
+// returns the first response, other bodies under the key conflict, and an
+// unauthorized caller never takes a claim.
+func TestGatewayIdempotentWrite(t *testing.T) {
+	f := gwSetupEnv(t, map[string]string{flagOn: "true"})
+	org := f.org(t, "idem@example.test")
+	other := f.org(t, "idem-other@example.test")
+	created := f.create(t, org, "edge")
+
+	rename := func(
+		name, key, cookie, tenant string,
+	) *httptest.ResponseRecorder {
+		headers := map[string]string{}
+		if key != "" {
+			headers["Idempotency-Key"] = key
+		}
+
+		return f.send(
+			"PATCH", "/api/gateways",
+			fmt.Sprintf(`{"id":%q,"name":%q}`, created.ID, name),
+			cookie, tenant, headers,
+		)
+	}
+
+	f.expect(t, rename("one", "", org.admin.session, org.tenant), 400)
+
+	// Not a member of the tenant: refused before any claim is stored.
+	f.expect(t, rename("x", "key-denied-0001", other.admin.session,
+		org.tenant), 401)
+
+	if f.scalar(t, "SELECT count(*) FROM pluto_idempotency") != "0" {
+		t.Fatal("an unauthorized request stored an idempotency claim")
+	}
+
+	first := rename("one", "key-rename-0001", org.admin.session, org.tenant)
+	f.expect(t, first, 200)
+
+	if answer(t, first).Data.Name != "one" {
+		t.Fatalf("unexpected first response %s", first.Body.String())
+	}
+
+	// The replay returns the stored response without running the body.
+	if _, err := f.admin.Exec(
+		t.Context(), "UPDATE gateways SET name = 'edited' WHERE id = $1",
+		created.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	replay := rename("one", "key-rename-0001", org.admin.session, org.tenant)
+	f.expect(t, replay, 200)
+
+	if replay.Body.String() != first.Body.String() ||
+		f.scalar(t, "SELECT name FROM gateways WHERE id = $1",
+			created.ID) != "edited" {
+		t.Fatal("a replay ran the body again")
+	}
+
+	f.expect(t, rename("two", "key-rename-0001", org.admin.session,
+		org.tenant), 409)
+}
+
+// Rotation and revocation are generated: the machine stops authenticating at
+// once, and authored SQL could never have written the state or key.
+func TestGatewayRotateAndRevoke(t *testing.T) {
+	f := gwSetupEnv(t, map[string]string{flagOn: "true"})
+	org := f.org(t, "rotate@example.test")
+	id, key := f.active(t, org, "edge")
+
+	f.expect(t, f.heartbeat(t, key, id, 1), 200)
+
+	rotated := f.send(
+		"POST", "/api/gateways/rotate", fmt.Sprintf(`{"id":%q}`, id),
+		org.admin.session, org.tenant, nil,
+	)
+	f.expect(t, rotated, 200)
+
+	// The old key is dead the moment the key column is cleared.
+	f.expect(t, f.heartbeat(t, key, id, 2), 401)
+
+	fresh, public := gwKey(t)
+	f.expect(t, f.enrollGateway(answer(t, rotated).Data.Token, public), 200)
+	f.expect(t, f.heartbeat(t, fresh, id, 3), 200)
+
+	revoked := f.send(
+		"DELETE", "/api/gateways", fmt.Sprintf(`{"id":%q}`, id),
+		org.admin.session, org.tenant, nil,
+	)
+	f.expect(t, revoked, 200)
+	f.expect(t, f.heartbeat(t, fresh, id, 4), 401)
+
+	if f.scalar(t, "SELECT state FROM gateways WHERE id = $1", id) !=
+		"revoked" {
+		t.Fatal("revocation did not record the revoked state")
+	}
+
+	// A revoked machine cannot be revoked again, rotated back in or
+	// revoked by another tenant's admin.
+	f.expect(t, f.send(
+		"DELETE", "/api/gateways", fmt.Sprintf(`{"id":%q}`, id),
+		org.admin.session, org.tenant, nil,
+	), 409)
+	f.expect(t, f.send(
+		"POST", "/api/gateways/rotate", fmt.Sprintf(`{"id":%q}`, id),
+		org.admin.session, org.tenant, nil,
+	), 409)
+
+	other := f.org(t, "rotate-other@example.test")
+	otherID, _ := f.active(t, other, "theirs")
+
+	f.expect(t, f.send(
+		"DELETE", "/api/gateways", fmt.Sprintf(`{"id":%q}`, otherID),
+		org.admin.session, org.tenant, nil,
+	), 409)
+
+	if f.scalar(t, "SELECT state FROM gateways WHERE id = $1", otherID) !=
+		"active" {
+		t.Fatal("an admin revoked another tenant's gateway")
+	}
+}
+
+// Enrollment is recorded in the machine's tenant through the auth event
+// hook, attributed to the machine. Under the closed policy a failed record
+// withdraws the enrollment.
+func TestGatewayEnrollmentAudited(t *testing.T) {
+	f := gwSetupEnv(t, map[string]string{flagOn: "true"})
+	org := f.org(t, "audit@example.test")
+
+	id, key := f.active(t, org, "edge")
+	f.expect(t, f.heartbeat(t, key, id, 1), 200)
+
+	if f.scalar(t, "SELECT count(*) FROM audit_events WHERE org_id = $1 "+
+		"AND actor_id = $2 AND type = 'auth.machine_enroll'",
+		org.tenant, id) != "1" {
+		t.Fatal("enrollment was not recorded in the machine's tenant")
+	}
+
+	// A user sign-in is recorded in the user's organization.
+	f.post(t, "/auth/signin",
+		`{"email":"audit@example.test","password":"synthetic long passphrase"}`,
+		200)
+
+	if f.scalar(t, "SELECT count(*) FROM audit_events WHERE org_id = $1 "+
+		"AND actor_id = $2 AND type = 'auth.login'",
+		org.tenant, org.admin.id) != "1" {
+		t.Fatal("sign-in was not recorded")
+	}
+
+	// The audit write fails: the enrollment is withdrawn, not left active.
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"ALTER TABLE audit_events ADD CONSTRAINT refuse CHECK (false) "+
+			"NOT VALID",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	created := f.create(t, org, "unaudited")
+	private, public := gwKey(t)
+
+	response := f.enrollGateway(created.Token, public)
+	if response.Code == 200 {
+		t.Fatalf("enrollment succeeded without its record: %s",
+			response.Body.String())
+	}
+
+	if f.scalar(t, "SELECT state FROM gateways WHERE id = $1",
+		created.ID) != "revoked" {
+		t.Fatal("a failed audit record left the machine enrolled")
+	}
+
+	f.expect(t, f.heartbeat(t, private, created.ID, 1), 401)
+}
+
+// A verified machine has a request budget shared by every replica. Failed
+// signatures never spend it, and one machine's budget never limits another.
+func TestGatewayMachineRateLimit(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "limit@example.test")
+	id, key := f.active(t, org, "noisy")
+	quiet, quietKey := f.active(t, org, "quiet")
+
+	wrong, _ := gwKey(t)
+	for range 5 {
+		f.expect(t, f.heartbeat(t, wrong, id, 1), 401)
+	}
+
+	// The enrollment-time budget is 40 verified requests per nonce lifetime.
+	for seq := 1; seq <= 40; seq++ {
+		if response := f.heartbeat(t, key, id, seq); response.Code != 200 {
+			t.Fatalf("request %d: %d %s", seq, response.Code,
+				response.Body.String())
+		}
+	}
+
+	limited := f.heartbeat(t, key, id, 41)
+	f.expect(t, limited, 429)
+
+	if !strings.Contains(limited.Body.String(), "rate_limited") ||
+		f.scalar(t, "SELECT last_seq FROM gateways WHERE id = $1", id) != "40" {
+		t.Fatalf("limited request ran: %s", limited.Body.String())
+	}
+
+	f.expect(t, f.heartbeat(t, quietKey, quiet, 1), 200)
+}
+
+type gwPage struct {
+	Data []struct {
+		Seq int64 `json:"seq"`
+	} `json:"data"`
+	Page struct {
+		HasMore    bool   `json:"has_more"`
+		NextCursor string `json:"next_cursor"`
+	} `json:"page"`
+}
+
+// A machine pages through its own history with a cursor bound to the
+// verified machine: another machine cannot replay it.
+func TestGatewayMachinePagination(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "page@example.test")
+	id, key := f.active(t, org, "edge")
+	otherID, otherKey := f.active(t, org, "sibling")
+
+	for seq := 1; seq <= 5; seq++ {
+		f.expect(t, f.heartbeat(t, key, id, seq), 200)
+	}
+
+	f.expect(t, f.heartbeat(t, otherKey, otherID, 99), 200)
+
+	read := func(
+		k ed25519.PrivateKey, machine, query string,
+	) *httptest.ResponseRecorder {
+		return f.serve(signed(
+			t, "GET", "/api/gateway/beats"+query, "", k, machine, time.Now(),
+		))
+	}
+
+	var seen []int64
+
+	cursor := ""
+
+	for range 5 {
+		query := "?limit=2"
+		if cursor != "" {
+			query += "&cursor=" + cursor
+		}
+
+		response := read(key, id, query)
+		f.expect(t, response, 200)
+
+		var page gwPage
+		if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, item := range page.Data {
+			seen = append(seen, item.Seq)
+		}
+
+		if !page.Page.HasMore {
+			break
+		}
+
+		cursor = page.Page.NextCursor
+	}
+
+	if fmt.Sprint(seen) != "[1 2 3 4 5]" {
+		t.Fatalf("paging saw %v", seen)
+	}
+
+	// The cursor belongs to the machine that received it.
+	first := read(key, id, "?limit=2")
+
+	var page gwPage
+	if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+
+	f.expect(t, read(otherKey, otherID, "?limit=2&cursor="+
+		page.Page.NextCursor), 400)
+	f.expect(t, read(key, id, "?limit=2&bogus=1"), 400)
+}
+
+type gwStream struct {
+	server *httptest.Server
+	f      *gwFixture
+}
+
+func (s gwStream) dial(
+	t *testing.T,
+	key ed25519.PrivateKey,
+	id string,
+	at time.Time,
+	origin string,
+) (*websocket.Conn, *http.Response, error) {
+	t.Helper()
+
+	signedRequest := signed(
+		t, "GET", "/api/gateway/channel", "", key, id, at,
+	)
+	header := http.Header{}
+
+	for _, name := range []string{
+		"X-Pluto-Machine-Id", "X-Pluto-Timestamp", "X-Pluto-Nonce",
+		"X-Pluto-Signature",
+	} {
+		header.Set(name, signedRequest.Header.Get(name))
+	}
+
+	if origin != "" {
+		header.Set("Origin", origin)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	url := "ws" + strings.TrimPrefix(s.server.URL, "http") +
+		"/api/gateway/channel"
+
+	return websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: header})
+}
+
+// The job channel is bound to the machine principal: the signed upgrade is
+// verified once, every message runs as the machine in its tenant, and the
+// stream closes when the machine is revoked.
+func TestGatewayMachineStream(t *testing.T) {
+	f := gwSetupEnv(t, map[string]string{flagOn: "true"})
+	server := httptest.NewServer(f.app.Handler())
+	t.Cleanup(server.Close)
+
+	stream := gwStream{server: server, f: f}
+	org := f.org(t, "stream@example.test")
+	id, key := f.active(t, org, "edge")
+
+	// Unsigned, forged, stale and replayed upgrades never get a connection.
+	wrong, _ := gwKey(t)
+
+	_, forged, err := stream.dial(t, wrong, id, time.Now(), "")
+	if err == nil || forged == nil || forged.StatusCode != 401 {
+		t.Fatalf("forged upgrade: %v %v", forged, err)
+	}
+
+	if _, response, err := stream.dial(
+		t, key, id, time.Now().Add(-time.Hour), "",
+	); err == nil || response == nil || response.StatusCode != 401 {
+		t.Fatalf("stale upgrade: %v %v", response, err)
+	}
+
+	if _, response, err := stream.dial(
+		t, key, id, time.Now(), "https://evil.example",
+	); err == nil || response == nil || response.StatusCode != 403 {
+		t.Fatalf("browser origin upgrade: %v %v", response, err)
+	}
+
+	conn, _, err := stream.dial(t, key, id, time.Now(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = conn.CloseNow()
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	beat := []byte(`{"seq":7}`)
+	if err := conn.Write(ctx, websocket.MessageText, beat); err != nil {
+		t.Fatal(err)
+	}
+
+	_, data, err := conn.Read(ctx)
+	if err != nil || string(data) != `{"seq":7}` {
+		t.Fatalf("ack %q %v", data, err)
+	}
+
+	if f.scalar(t, "SELECT last_seq FROM gateways WHERE id = $1", id) != "7" ||
+		f.scalar(t, "SELECT count(*) FROM gateway_beats WHERE org_id = $1 "+
+			"AND gateway_id = $2", org.tenant, id) != "1" {
+		t.Fatal("the stream did not act as the verified machine")
+	}
+
+	// Revocation closes the open connection within the recheck interval.
+	f.expect(t, f.send(
+		"DELETE", "/api/gateways", fmt.Sprintf(`{"id":%q}`, id),
+		org.admin.session, org.tenant, nil,
+	), 200)
+
+	for {
+		if _, _, err := conn.Read(ctx); err != nil {
+			if ctx.Err() != nil {
+				t.Fatal("the stream outlived the revoked machine")
+			}
+
+			// The server sends 1008; a peer that has already seen the
+			// connection torn down may report no close frame at all.
+			if status := websocket.CloseStatus(err); status != -1 &&
+				status != websocket.StatusPolicyViolation {
+				t.Fatalf("close status %d: %v", status, err)
+			}
+
+			break
+		}
+	}
+}
+
+// The channel sits behind the default-off flag like every gateway endpoint.
+func TestGatewayStreamFlag(t *testing.T) {
+	f := gwSetup(t)
+	server := httptest.NewServer(f.app.Handler())
+	t.Cleanup(server.Close)
+
+	org := f.org(t, "flag@example.test")
+	id, key := f.active(t, org, "edge")
+
+	if _, response, err := (gwStream{server: server, f: f}).dial(
+		t, key, id, time.Now(), "",
+	); err == nil || response == nil || response.StatusCode != 403 {
+		t.Fatalf("disabled channel: %v %v", response, err)
+	}
+}
+
+// The per-tenant job runs in every tenant under the declared service role,
+// each execution bound to its own tenant, and marks only silent gateways.
+func TestGatewayMarkStale(t *testing.T) {
+	f := gwSetup(t)
+	service := f.enroll(t, "service@example.test")
+	one := f.org(t, "one@example.test")
+	two := f.org(t, "two@example.test")
+	three := f.org(t, "three@example.test")
+
+	for _, org := range []gwOrg{one, two, three} {
+		if _, err := f.admin.Exec(
+			t.Context(),
+			"INSERT INTO orgs (id, slug, name) VALUES ($1, $1, $1)",
+			org.tenant,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	silentOne, keyOne := f.active(t, one, "silent")
+	freshOne, keyFresh := f.active(t, one, "fresh")
+	silentTwo, keyTwo := f.active(t, two, "silent")
+	silentThree, keyThree := f.active(t, three, "silent")
+
+	f.expect(t, f.heartbeat(t, keyOne, silentOne, 1), 200)
+	f.expect(t, f.heartbeat(t, keyTwo, silentTwo, 1), 200)
+	f.expect(t, f.heartbeat(t, keyThree, silentThree, 1), 200)
+
+	time.Sleep(3 * time.Second)
+
+	f.expect(t, f.heartbeat(t, keyFresh, freshOne, 1), 200)
+
+	worker, err := f.app.Worker(
+		app.CandidateWorkerCredentials{GatewaysMarkStale: service.session},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	go func() {
+		_ = worker.Run(ctx)
+	}()
+
+	if err := f.app.Operations.GatewaysMarkStale.Enqueue(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	online := func(id string) string {
+		return f.scalar(t, "SELECT online FROM gateways WHERE id = $1", id)
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+
+	for online(silentOne) != "false" || online(silentTwo) != "false" {
+		if time.Now().After(deadline) {
+			t.Fatal("the job did not mark silent gateways offline")
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if online(freshOne) != "true" {
+		t.Fatal("a gateway that just reported was marked offline")
+	}
+
+	for online(silentThree) != "false" {
+		if time.Now().After(deadline) {
+			t.Fatal("the job skipped a tenant")
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Every tenant was swept in its own execution: a gateway is only ever
+	// marked in its own tenant, and the beat of one never saved another.
+	if f.scalar(t, "SELECT count(*) FROM gateways WHERE online") != "1" {
+		t.Fatal("the job changed more than the silent gateways")
+	}
+}

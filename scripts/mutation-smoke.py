@@ -358,21 +358,14 @@ mutations = [
         "tx write caller allowlist",
         "internal/project/manifest_txwrite.go",
         "!slices.Contains(port.TxCallers, o.ID()) {",
-        "false {",
-        "./internal/project#TestTxWriteManifestRejections",
-    ),
-    (
-        "tx write caller must be a write",
-        "internal/project/manifest_txwrite.go",
-        "if !o.Write {",
-        "if false {",
+        "!slices.Contains(port.TxCallers, o.ID()) && false {",
         "./internal/project#TestTxWriteManifestRejections",
     ),
     (
         "tx write narrow port",
         "internal/project/candidate_adapters.go",
         "if slices.Contains(port.TxMethods, method.Name) {",
-        "if true {",
+        "if slices.Contains(port.TxMethods, method.Name) || true {",
         "./internal/project#TestTxWriteGeneratesNarrowPortAndWiring",
     ),
     (
@@ -404,13 +397,299 @@ mutations = [
         "./internal/project#TestRuntimeRoleGuardGeneratedAndWired",
     ),
     (
+        "operation feature reaches its entries",
+        "internal/project/operations.go",
+        "if operation.Feature != \"\" || operation.ClientVisible {",
+        "if false {",
+        "./internal/project#TestOperationOwnedFeatureReachesEntries",
+    ),
+    (
+        "entry cannot change operation feature",
+        "internal/project/feature_gate.go",
+        "if entry.Feature == \"\" && !entry.ClientVisible {",
+        "if true {",
+        "./internal/project#TestEntryCannotChangeOperationFeature",
+    ),
+    (
+        "stream websocket endpoint shape",
+        "internal/project/manifest_stream.go",
+        'if e.Method != "GET" || e.Collection || e.Public {',
+        "if false {",
+        "./internal/project#TestStreamManifestRejectsBadDeclarations",
+    ),
+    (
+        "stream exposed only through websocket",
+        "internal/project/manifest_stream.go",
+        "case !websocket && operation.isStream():",
+        "case false && operation.isStream():",
+        "./internal/project#TestStreamManifestRejectsBadDeclarations",
+    ),
+    (
+        "websocket library is never an authored dependency",
+        "internal/project/manifest_stream.go",
+        "if dependency.Module == library ||",
+        "if false ||",
+        "./internal/project#TestStreamManifestRejectsBadDeclarations",
+    ),
+    (
+        "stream constructor ownership",
+        "internal/project/candidate_authored_rules.go",
+        'rules.addCapability(namespace, "RunStream", workflows...)',
+        'rules.addCapability(namespace, "RunStreamDisabled", workflows...)',
+        "./internal/project#TestStreamCapabilitiesStayWithGeneratedCode",
+    ),
+    (
+        "stream gate recheck",
+        "internal/project/templates/candidate_stream_scope.go.tmpl",
+        "return e.scopeGate.Use(",
+        "return e.scopeGate.Disabled(",
+        "./internal/project#TestStreamManagedFiles",
+    ),
+    (
+        "stream read limit",
+        "internal/project/templates/candidate_stream_scope.go.tmpl",
+        "s.scopeSocketConn.SetReadLimit(bytes)",
+        "s.scopeSocketConn.SetReadLimit(-1)",
+        "./internal/project#TestStreamManagedFiles",
+    ),
+    (
+        "stream strict inbound decoding",
+        "internal/project/templates/candidate_stream_scope.go.tmpl",
+        "decoder.DisallowUnknownFields()",
+        "decoder.UseNumber()",
+        "./internal/project#TestStreamManagedFiles",
+    ),
+    (
+        "stream origin verification",
+        "internal/project/templates/candidate_stream_handler.go.tmpl",
+        "OriginPatterns: {{.Action}}Origins,",
+        "InsecureSkipVerify: true,",
+        "./internal/project#TestStreamManagedFiles",
+    ),
+    (
+        "tenant index policy is an exact switch",
+        "internal/sqlcheck/migrations_policy.go",
+        "tokens[0].Text == \"'on'\"",
+        "tokens[0].Text != \"\"",
+        "./internal/sqlcheck#TestCheckMigrationsTenantIndexPolicy",
+    ),
+    (
+        "tenant job service role grants its permission",
+        "internal/project/manifest_tenantjobs.go",
+        "!ok || !containsString(role.Permissions, operation.Permission) {",
+        "!ok || !containsString(role.Permissions, operation.Permission) &&\n"
+        "\t\t\tfalse {",
+        "./internal/project#TestTenantJobManifestRejections",
+    ),
+    (
+        "tenant job has no http entry",
+        "internal/project/manifest_tenantjobs.go",
+        "if endpoint.Operation == operation.ID() {",
+        "if endpoint.Operation == operation.ID() && false {",
+        "./internal/project#TestTenantJobManifestRejections",
+    ),
+    (
+        "tenant job delivery rechecks the tenant",
+        "internal/project/templates/candidate_tenantjob_gate.go.tmpl",
+        "if !found {",
+        "if false {",
+        "./internal/project#TestTenantJobManagedOutput",
+    ),
+    (
+        "transactional enqueue accepts declared kinds only",
+        "internal/project/templates/candidate_scope.go.tmpl",
+        "if !declared {",
+        "if false {",
+        "./internal/project#TestScopeEnqueueIsBoundToDeclaredKinds",
+    ),
+    (
+        "tenant job exemption is path specific",
+        "internal/project/primitive_boundaries.go",
+        "!effectsDeclared && !tenantJobFiles[file.path] {",
+        "!effectsDeclared && false {",
+        "./internal/project#TestTenantJobExemptionIsPathSpecific",
+    ),
+    (
         "runtime role reserved names",
         "internal/project/manifest_seams.go",
         'role == "postgres" || role == "public" ||',
         'role == "disabled" || role == "public" ||',
         "./internal/project#TestSeamManifestRejections",
     ),
+    (
+        "machine permissions separate from user roles",
+        "internal/project/manifest_machine.go",
+        "\t\tif user[permission] {",
+        "\t\tif false && user[permission] {",
+        "./internal/project#TestMachineManifestRejections",
+    ),
+    (
+        "machine operation permission grant",
+        "internal/project/manifest_machine.go",
+        "if !slices.Contains(principal.Permissions, o.Permission) {",
+        "if false && !slices.Contains(principal.Permissions, o.Permission) {",
+        "./internal/project#TestMachineManifestRejections",
+    ),
+    (
+        "machine permission outside the user catalog",
+        "internal/project/operations.go",
+        'permission, scope, machine = "", ScopeMachine, o.MachinePrincipal()',
+        "permission, scope, machine = o.Permission, ScopeMachine, "
+        "o.MachinePrincipal()",
+        "./internal/project#TestMachineManifestValidatesAndRoundTrips",
+    ),
+    (
+        "machine enrollment model shape",
+        "internal/project/manifest_machine.go",
+        "if !slices.Equal(model.Fields, fields) {",
+        "if false {",
+        "./internal/project#TestMachineManifestRejections",
+    ),
+    (
+        "machine endpoint exposure",
+        "internal/project/manifest_machine.go",
+        "\t\tif count != 1 {",
+        "\t\tif count > 1 {",
+        "./internal/project#TestMachineManifestRejections",
+    ),
+    (
+        "machine lookup text comparison",
+        "internal/project/manifest_system.go",
+        'return "::text"',
+        'return ""',
+        "./internal/project#TestMachineLookupMigrationShape",
+    ),
+    (
+        "machine nonce replay protection",
+        "internal/project/templates/candidate_machine.go.tmpl",
+        "ON CONFLICT DO NOTHING",
+        "ON CONFLICT (principal, machine_id, nonce) DO UPDATE SET "
+        "nonce = EXCLUDED.nonce",
+        "./internal/project#TestMachineManagedRender",
+    ),
 ]
+
+mutations.extend(
+    [
+        (
+            "auth events fail closed by default",
+            "internal/project/manifest_authevents.go",
+            "return e.OnError != AuthEventsBestEffort",
+            "return e.OnError == AuthEventsClosed",
+            "./internal/project#TestAuthEventsValidatesAndDefaultsClosed",
+        ),
+        (
+            "auth events operation unreachable from endpoints",
+            "internal/project/manifest_authevents.go",
+            "if endpoint.Operation == operation.ID() {",
+            "if endpoint.Operation == operation.ID() && false {",
+            "./internal/project#TestAuthEventsRejections",
+        ),
+        (
+            "auth events every role holds the permission",
+            "internal/project/manifest_authevents.go",
+            "if !holds(role.ID, map[string]bool{}) {",
+            "if false {",
+            "./internal/project#TestAuthEventsRejections",
+        ),
+        (
+            "auth events member index subject setting",
+            "internal/project/manifest_authevents.go",
+            'return "app.auth_event_subject"\n}',
+            'return "app.tenant_id"\n}',
+            "./internal/project#TestAuthEventsMemberIndexSQL",
+        ),
+        (
+            "auth events member index active predicate",
+            "internal/project/candidate_table_migrations.go",
+            'return " WHERE " + column + " IS TRUE"',
+            'return ""',
+            "./internal/project#TestAuthEventsMemberIndexSQL",
+        ),
+        (
+            "auth events tenants bound to the verified subject",
+            "internal/project/candidate_memberships_app.go",
+            "\"SELECT set_config('{{SETTING}}', $1, true)\",",
+            "\"SELECT set_config('{{SETTING}}x', $1, true)\",",
+            "./internal/project#TestAuthEventsManagedOutput",
+        ),
+        (
+            "auth events closed policy revokes the session",
+            "internal/project/templates/candidate_auth_events.go.tmpl",
+            "if authEventsClosed {\n\t\t\t\t_ = e.manager.Revoke(ctx, token)",
+            "if authEventsClosed {\n\t\t\t\t_ = token",
+            "./internal/project#TestAuthEventsManagedOutput",
+        ),
+        (
+            "auth events member index is read only for the runtime role",
+            "internal/project/candidate_runtime_role.go",
+            'privileges = "SELECT"\n',
+            'privileges = "SELECT, INSERT, UPDATE, DELETE"\n',
+            "./internal/project#TestRuntimeRoleGrantsMemberIndexReadOnly",
+        ),
+    ]
+)
+
+mutations.extend(
+    [
+        (
+            "protected columns rejected on update",
+            "internal/sqlcheck/query.go",
+            'named := stmt.Kind == "update" && setsColumn(stmt.Set, column)',
+            'named := false && setsColumn(stmt.Set, column)',
+            "./internal/sqlcheck#TestAnalyzeQueryProtectedColumns",
+        ),
+        (
+            "protected columns rejected on insert",
+            "internal/sqlcheck/query.go",
+            "named = named || tableKey(inserted) == tableKey(column)",
+            "named = named || (false && tableKey(inserted) == tableKey(column))",
+            "./internal/sqlcheck#TestAnalyzeQueryProtectedColumns",
+        ),
+        (
+            "machine credential columns protected",
+            "internal/project/manifest_machine.go",
+            "principal.KeyColumn,\n\t\t\t\tprincipal.StateColumn,\n",
+            "principal.KeyColumn,\n",
+            "./internal/project#TestMachineProtectedColumnsReachSQLCheck",
+        ),
+        (
+            "authored write endpoint needs an input model",
+            "internal/project/candidate_seam_models.go",
+            'if out.Input == "" || o.Response != ResponseObject || o.Collection {',
+            'if false {',
+            "./internal/project#TestAuthoredWriteEndpointRejections",
+        ),
+        (
+            "authored write claims idempotency after the gate",
+            "internal/project/templates/candidate_seam_write_handler.go.tmpl",
+            "reg.Idempotency.Serve(",
+            "reg.Idempotency.Do(",
+            "./internal/project#TestAuthoredWriteEndpointIdempotent",
+        ),
+        (
+            "authored write body strictly decoded",
+            "internal/project/templates/candidate_seam_write_handler.go.tmpl",
+            "transport.Decode(w, r, &input, bodyLimit)",
+            "json.NewDecoder(r.Body).Decode(&input)",
+            "./internal/project#TestAuthoredWriteEndpointExempt",
+        ),
+        (
+            "unexposed authored write cannot claim idempotency",
+            "internal/project/candidate_authored.go",
+            "(!operation.isAuthoredWriteBody() || !m.hasEndpoint(operation)) {",
+            "(false) {",
+            "./internal/project#TestInternalAuthoredWriteCannotRequireIdempotency",
+        ),
+        (
+            "machine stream rechecks the machine",
+            "internal/project/templates/candidate_machine_stream_workflow.go.tmpl",
+            "Verifier.Recheck(ctx, verified)",
+            "Verifier.Check(ctx, verified)",
+            "./internal/project#TestMachinePageAndStreamAreGenerated",
+        ),
+    ]
+)
 
 if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
     mutations.extend(
@@ -445,7 +724,7 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "tx write foreign logic imports",
                 "internal/project/candidate_authored_rules.go",
                 "if ok && r.foreignPorts[role.group][owner] {",
-                "if ok {",
+                "if ok && (r.foreignPorts[role.group][owner] || true) {",
                 "TestCandidateAuthoredSeamEndToEnd",
             ),
             (
@@ -465,8 +744,8 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
             (
                 "scope transaction always rolls back",
                 "internal/project/templates/candidate_scope.go.tmpl",
-                "defer func() {\n\t\t_ = tx.Rollback(context.WithoutCancel(ctx))\n\t}()",
-                "defer func() {\n\t}()",
+                "// run, releases the transaction.\n\tdefer func() {\n\t\t_ = tx.Rollback(context.WithoutCancel(ctx))\n\t}()",
+                "// run, releases the transaction.\n\tdefer func() {\n\t}()",
                 "./internal/project#TestScopeAlwaysRollsBack",
             ),
             (
@@ -484,10 +763,59 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "TestCandidateSystemSeamEndToEnd",
             ),
             (
+                "tenant index enumeration switch",
+                "internal/project/templates/candidate_tenant_index.go.tmpl",
+                "set_config('app.tenant_index', 'on', true)",
+                "set_config('app.tenant_index_off', 'on', true)",
+                "TestCandidateTenantJobsEndToEnd",
+            ),
+            (
+                "tenant job service role resolver",
+                "internal/project/candidate_tenantjob_runtime.go",
+                "return []rbac.RoleID{rbac.RoleID(%[2]s)}, nil",
+                "return []rbac.RoleID{}, nil",
+                "TestCandidateTenantJobsEndToEnd",
+            ),
+            (
+                "machine request budget",
+                "internal/project/templates/candidate_machine.go.tmpl",
+                "if recent >= cfg.limit {",
+                "if false {",
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "machine revoke only pending or active",
+                "internal/project/candidate_machine.go",
+                '"::text = $2 AND " + state + "::text IN ($3, $4)",\n\t\t\tReset:',
+                '"::text = $2",\n\t\t\tReset:',
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "failed enrollment audit withdraws the machine",
+                "internal/project/templates/candidate_enroll_gate.go.tmpl",
+                "context.WithoutCancel(ctx),\n\t\t\tverified)",
+                "context.WithoutCancel(ctx),\n\t\t\tmachineauth.Verified{})",
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "machine stream closes on revocation",
+                "internal/project/templates/candidate_machine_stream_workflow.go.tmpl",
+                "return operation.{{lowerFirst .Action}}Verifier.Recheck(ctx, verified)",
+                "return nil",
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "machine page cursor binds the machine",
+                "internal/project/templates/candidate_machine_workflow.go.tmpl",
+                "verified.MachineID(),\n\t\t\tverified.TenantID()))",
+                '"",\n\t\t\tverified.TenantID()))',
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
                 "authored tenant transaction binding",
                 "internal/project/templates/candidate_scope.go.tmpl",
-                "\"SELECT set_config('app.tenant_id', $1, true)\",",
-                "\"SELECT set_config('app.tenant_id_unbound', $1, true)\",",
+                "\t}()\n\n\tif _, err = tx.Exec(\n\t\tctx,\n\t\t\"SELECT set_config('app.tenant_id', $1, true)\",\n\t\ttenant.scopeTenant,\n\t); err != nil {\n\t\treturn err\n\t}\n\n\tif err = run(",
+                "\t}()\n\n\tif _, err = tx.Exec(\n\t\tctx,\n\t\t\"SELECT set_config('app.tenant_id_unbound', $1, true)\",\n\t\ttenant.scopeTenant,\n\t); err != nil {\n\t\treturn err\n\t}\n\n\tif err = run(",
                 "TestCandidateAuthoredSeamEndToEnd",
             ),
         ]
@@ -514,6 +842,10 @@ required_assertions = {
     ),
 }
 
+only = os.environ.get("PLUTO_MUTATION_ONLY", "")
+if only:
+    mutations = [item for item in mutations if only in item[0]]
+
 results = []
 for name, relative, old, new, test in mutations:
     with tempfile.TemporaryDirectory(prefix="pluto-mutation-") as temporary:
@@ -539,7 +871,7 @@ for name, relative, old, new, test in mutations:
                 cwd=checkout,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=400,
                 env={**os.environ, "GOWORK": "off"},
             )
             output = run.stdout + run.stderr

@@ -418,3 +418,51 @@ func TestAnalyzeQueryTenantRootInsert(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeQueryProtectedColumns(t *testing.T) {
+	env := testEnv()
+	env.tables["gateways"] = Table{
+		Name:         "gateways",
+		TenantColumn: "org_id",
+		Protected:    []string{"public_key", "state"},
+	}
+	env.allowed["gateways"] = true
+
+	rejected := map[string]string{
+		"update state": "UPDATE gateways SET state = $3 " +
+			"WHERE org_id = $1 AND id = $2",
+		"update key": "UPDATE gateways SET name = $3, public_key = $4 " +
+			"WHERE org_id = $1 AND id = $2",
+		"insert state": "INSERT INTO gateways (org_id, id, state) " +
+			"VALUES ($1, $2, $3)",
+		"insert key quoted": `INSERT INTO gateways (org_id, "public_key") ` +
+			"VALUES ($1, $2)",
+	}
+
+	for name, text := range rejected {
+		got := analyzeQuery(query{
+			Name: "Q", File: "q.sql", Line: 1, Text: text, Params: params(4),
+		}, env)
+		if !strings.Contains(messages(got), "protected column") {
+			t.Fatalf("%s accepted: %v", name, got)
+		}
+	}
+
+	accepted := map[string]string{
+		"insert without credentials": "INSERT INTO gateways (org_id, id, " +
+			"name) VALUES ($1, $2, $3)",
+		"update other column": "UPDATE gateways SET name = $3 " +
+			"WHERE org_id = $1 AND id = $2",
+		"read credentials": "SELECT state, public_key FROM gateways " +
+			"WHERE org_id = $1",
+	}
+
+	for name, text := range accepted {
+		got := analyzeQuery(query{
+			Name: "Q", File: "q.sql", Line: 1, Text: text, Params: params(3),
+		}, env)
+		if len(got) != 0 {
+			t.Fatalf("%s rejected: %v", name, got)
+		}
+	}
+}

@@ -23,10 +23,6 @@ func CandidateManagedPaths(m Manifest) (map[string]bool, error) {
 }
 
 func candidateManaged(m Manifest) (map[string][]byte, error) {
-	if err := refuseUngeneratedAuthored(m); err != nil {
-		return nil, err
-	}
-
 	files, err := managedPublished(m)
 	if err != nil {
 		return nil, err
@@ -130,6 +126,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		files[path] = source
 	}
 
+	machine, err := candidateMachineManaged(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range machine {
+		files[path] = source
+	}
+
 	for _, operation := range m.Operations {
 		if operation.outsideContracts() {
 			continue
@@ -217,6 +222,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 			system.Scope != "" {
 			source, err = systemHandler(m, system)
 		} else if authored, ok := m.Operation(entry.Operation); ok &&
+			authored.isStream() && authored.isMachine() {
+			source, err = machineStreamHandler(m, authored, entry)
+		} else if authored, ok := m.Operation(entry.Operation); ok &&
+			authored.isStream() {
+			source, err = streamHandler(m, authored, entry)
+		} else if authored, ok := m.Operation(entry.Operation); ok &&
+			authored.isMachine() {
+			source, err = machineHandler(m, authored)
+		} else if authored, ok := m.Operation(entry.Operation); ok &&
 			authored.isAuthored() {
 			source, err = seamHandler(m, authored)
 		} else {
@@ -302,6 +316,18 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 			}
 
 			files[path] = source
+		}
+
+		if m.AuthEventsOn() {
+			source, err := render(
+				"candidate_auth_events.go",
+				dataFor(m, Endpoint{}),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("auth events: %w", err)
+			}
+
+			files["internal/app/candidate_auth_events_gen.go"] = source
 		}
 	}
 

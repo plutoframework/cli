@@ -104,6 +104,8 @@ func systemHandler(m Manifest, operation Operation) ([]byte, error) {
 		data.Symbol = symbol(operation.Endpoint())
 
 		return render("candidate_provision_handler.go", data)
+	case ScopeEnroll:
+		return enrollHandler(m, operation)
 	case ScopeLookup:
 		data, err := lookupData(m, operation)
 		if err != nil {
@@ -123,7 +125,7 @@ func systemHandler(m Manifest, operation Operation) ([]byte, error) {
 // lookup body would only be dead, ungated surface.
 func validateSystemEndpoints(m Manifest) error {
 	for _, operation := range m.Operations {
-		if operation.Scope == "" {
+		if operation.Scope == "" || operation.Scope == ScopeEachTenant {
 			continue
 		}
 

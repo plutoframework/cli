@@ -1,0 +1,116 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	commonDomain "{{.Module}}/internal/domain"
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+)
+
+// {{.Action}}Limiter is the shared, replica-wide attempt limiter. It fails
+// closed.
+type {{.Action}}Limiter interface {
+	Allow(context.Context, string) error
+}
+
+{{- if .Manifest.AuthEventsOn}}
+
+// {{.Action}}Audit records the enrollment through the declared
+// [auth.events] operation, attributed to the machine and bound to its tenant.
+type {{.Action}}Audit func(context.Context, machineauth.Verified) error
+{{- end}}
+
+type {{.Action}}Boundary interface {
+	sealed{{.Action}}()
+	Execute(
+		context.Context,
+		string,
+		models.{{.Action}}Request) (models.{{.Action}}Data, error)
+}
+
+// {{.Action}} is the public, generated, rate-limited enrollment of a
+// {{.Authored.Principal}} machine. It redeems a single-use token, binds the
+// presented ed25519 public key and activates the machine. The tenant is
+// read from the token row, never from input, and there is no authored body.
+type {{.Action}} struct {
+	{{lowerFirst .Action}}Enroller machineauth.Enroller
+	{{lowerFirst .Action}}Limiter  {{.Action}}Limiter
+{{- if .Manifest.AuthEventsOn}}
+	{{lowerFirst .Action}}Audit    {{.Action}}Audit
+{{- end}}
+}
+
+func New{{.Action}}(
+	enroller machineauth.Enroller,
+	limiter {{.Action}}Limiter,
+{{- if .Manifest.AuthEventsOn}}
+	audit {{.Action}}Audit,
+{{- end}}
+) *{{.Action}} {
+	return &{{.Action}}{
+		{{lowerFirst .Action}}Enroller: enroller,
+		{{lowerFirst .Action}}Limiter:  limiter,
+{{- if .Manifest.AuthEventsOn}}
+		{{lowerFirst .Action}}Audit:    audit,
+{{- end}}
+	}
+}
+
+func (*{{.Action}}) sealed{{.Action}}() {}
+
+// Execute rate limits by the caller-supplied client key, never by the token,
+// so an attacker cannot reset the limit by varying the token.
+func (operation *{{.Action}}) Execute(
+	ctx context.Context,
+	clientKey string,
+	input models.{{.Action}}Request,
+) (models.{{.Action}}Data, error) {
+	var output models.{{.Action}}Data
+
+	if ctx == nil || operation == nil || clientKey == "" ||
+		operation.{{lowerFirst .Action}}Enroller == nil ||
+		operation.{{lowerFirst .Action}}Limiter == nil {
+		return output, commonDomain.ErrUnauthenticated
+	}
+
+	if err := operation.{{lowerFirst .Action}}Limiter.Allow(
+		ctx,
+		{{q .Authored.ID}}+":"+clientKey); err != nil {
+		return output, err
+	}
+
+	verified, err := operation.{{lowerFirst .Action}}Enroller.Enroll(
+		ctx,
+		{{q .Authored.Principal}},
+		input.Token,
+		input.PublicKey)
+	if err != nil {
+		return output, err
+	}
+{{- if .Manifest.AuthEventsOn}}
+
+	// The record is attributed to the machine and bound to the tenant of the
+	// token row. Under a closed policy a failed record withdraws the
+	// enrollment, so no machine is active without its audit row.
+	if operation.{{lowerFirst .Action}}Audit == nil {
+		_ = operation.{{lowerFirst .Action}}Enroller.Withdraw(ctx, verified)
+
+		return output, commonDomain.ErrUnauthenticated
+	}
+
+	if err := operation.{{lowerFirst .Action}}Audit(ctx, verified); err != nil {
+{{- if .Manifest.Auth.Events.Closed}}
+		_ = operation.{{lowerFirst .Action}}Enroller.Withdraw(
+			context.WithoutCancel(ctx),
+			verified)
+
+		return output, err
+{{- end}}
+	}
+{{- end}}
+
+	output.MachineID = verified.MachineID()
+
+	return output, nil
+}

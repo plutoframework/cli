@@ -1,0 +1,81 @@
+package orgs
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"example.test/auditapp/internal/domain"
+	auditmodels "example.test/auditapp/internal/models/audit"
+	models "example.test/auditapp/internal/models/orgs"
+	rules "example.test/auditapp/internal/rules/orgs"
+	"example.test/auditapp/internal/scope"
+)
+
+// Provision creates the organization for the verified subject and records the
+// audit event in the SAME transaction: the new organization, its first admin
+// and its first audit row commit together or not at all. The tenant
+// identifier is minted by generated code; the body cannot choose it.
+func Provision(
+	ctx context.Context,
+	p scope.Provisioning,
+	ports ProvisionPorts,
+	in models.ProvisionRequest,
+) (models.Org, error) {
+	if !rules.ValidSlug(in.Slug) || !rules.ValidName(in.Name) {
+		return models.Org{}, fmt.Errorf("%w: signup", domain.ErrInvalidInput)
+	}
+
+	var org models.Org
+
+	err := ports.TxDB.Provision(ctx, p, func(ctx context.Context, tx scope.Tx) error {
+		created, err := ports.Tenants.ProvisionTx(ctx, tx, in)
+		if err != nil {
+			return err
+		}
+
+		payload, err := json.Marshal(map[string]string{"slug": in.Slug})
+		if err != nil {
+			return err
+		}
+
+		org = created
+
+		if err := ports.AuditEvents.AppendTx(ctx, tx, auditmodels.NewEvent{
+			Type:    "org.provisioned",
+			Payload: payload,
+		}); err != nil {
+			return err
+		}
+
+		// Everything above must roll back with a later failure.
+		if in.Slug == "rollback" {
+			return errors.New("forced failure after the audit append")
+		}
+
+		return nil
+	})
+	if errors.Is(err, rules.ErrSlugTaken) {
+		return models.Org{}, domain.ErrConflict
+	}
+
+	if err != nil {
+		return models.Org{}, err
+	}
+
+	// A provisioning authority mints one tenant: the second attempt must be
+	// refused, so this body can never create a second organization.
+	if in.Slug == "double" {
+		again := ports.TxDB.Provision(
+			ctx,
+			p,
+			func(context.Context, scope.Tx) error { return nil },
+		)
+		if again == nil {
+			return models.Org{}, domain.ErrConflict
+		}
+	}
+
+	return org, nil
+}

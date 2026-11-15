@@ -1,0 +1,19 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// Revoke moves a gateway to the revoked state through generated code: authored
+// SQL may not write the machine state column.
+func Revoke(
+	ctx context.Context,
+	e scope.Execution,
+	ports RevokePorts,
+	in models.GatewayRef,
+) (models.GatewayRef, error) {
+	return ports.Registry.Revoke(ctx, e, in)
+}

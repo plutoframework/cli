@@ -1,0 +1,594 @@
+// Package machineauth is the generated Postgres implementation of machine
+// identity: single-use enrollment, signed-request verification and replay
+// protection. It is app-local and provisional, not a published Pluto API.
+//
+// Every tenant is resolved from the machine row or the enrollment token row,
+// never from request input. Rows are reached before a tenant is known only
+// through security-invoker views admitted by a transaction-local setting
+// that this package alone sets; row-level security is never bypassed.
+package machineauth
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"strconv"
+	"time"
+
+	machineports "{{.Module}}/internal/ports/machineauth"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	tokenSetting  = "SELECT set_config('app.machine_enrollment', $1, true)"
+	tenantSetting = "SELECT set_config('app.tenant_id', $1, true)"
+)
+
+type config struct {
+	bind       string
+	query      string
+	recheck    string
+	issueCheck string
+	activate   string
+	revoke     string
+	reset      string
+	pending    string
+	active     string
+	revoked    string
+	window     time.Duration
+	ttl        time.Duration
+	limit      int
+}
+
+var principals = map[string]config{
+{{- range .Machine.Principals}}
+	{{q .ID}}: {
+		bind:       {{q .Bind}},
+		query:      {{q .Query}},
+		recheck:    {{q .Recheck}},
+		issueCheck: {{q .IssueCheck}},
+		activate:   {{q .Activate}},
+		revoke:     {{q .Revoke}},
+		reset:      {{q .Reset}},
+		pending:    {{q .Pending}},
+		active:     {{q .Active}},
+		revoked:    {{q .Revoked}},
+		limit:      {{.Limit}},
+		window:     time.Duration({{.Window}}),
+		ttl:        time.Duration({{.TTL}}),
+	},
+{{- end}}
+}
+
+// Verifier verifies signed machine requests; it implements
+// machineports.Verifier.
+type Verifier struct {
+	pool  *pgxpool.Pool
+	clock func() time.Time
+}
+
+// NewVerifier is a capability: only generated composition calls it.
+func NewVerifier(pool *pgxpool.Pool) *Verifier {
+	return &Verifier{pool: pool, clock: time.Now}
+}
+
+// Verify resolves the machine, checks state, timestamp window, ed25519
+// signature and nonce freshness, and returns the verified machine. The nonce
+// is consumed even if the operation later fails.
+func (v *Verifier) Verify(
+	ctx context.Context,
+	principal string,
+	request machineports.Request,
+) (machineports.Verified, error) {
+	var none machineports.Verified
+
+	cfg, ok := principals[principal]
+	if !ok || ctx == nil || v == nil || v.pool == nil ||
+		!machineports.IDPattern.MatchString(request.MachineID) ||
+		!machineports.NoncePattern.MatchString(request.Nonce) {
+		return none, machineports.ErrUnauthenticated
+	}
+
+	stamp, err := strconv.ParseInt(request.Timestamp, 10, 64)
+	if err != nil {
+		return none, machineports.ErrUnauthenticated
+	}
+
+	skew := v.clock().Sub(time.Unix(stamp, 0))
+	if skew < -cfg.window || skew > cfg.window {
+		return none, machineports.ErrUnauthenticated
+	}
+
+	signature, err := base64.RawURLEncoding.Strict().DecodeString(
+		request.Signature,
+	)
+	if err != nil || len(signature) != ed25519.SignatureSize {
+		return none, machineports.ErrUnauthenticated
+	}
+
+	tx, err := v.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return none, err
+	}
+
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	row, err := lookupMachine(ctx, tx, cfg, request.MachineID)
+	if err != nil {
+		return none, err
+	}
+
+	public, err := base64.RawURLEncoding.Strict().DecodeString(row.key)
+	if row.state != cfg.active || err != nil ||
+		len(public) != ed25519.PublicKeySize ||
+		!ed25519.Verify(public, machineports.Canonical(
+			principal,
+			request.MachineID,
+			request.Method,
+			request.Path,
+			request.Query,
+			request.Body,
+			stamp,
+			request.Nonce,
+		), signature) {
+		return none, machineports.ErrUnauthenticated
+	}
+
+	if err := consumeNonce(ctx, tx, cfg, principal, row, request); err != nil {
+		return none, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return none, err
+	}
+
+	return machineports.NewVerified(
+		principal,
+		row.id,
+		row.tenant,
+		row.key,
+	), nil
+}
+
+// Recheck confirms, in a short tenant transaction, that the machine is still
+// active with the verified key.
+func (v *Verifier) Recheck(
+	ctx context.Context,
+	verified machineports.Verified,
+) error {
+	if ctx == nil || v == nil || v.pool == nil ||
+		verified.TenantID() == "" {
+		return machineports.ErrUnauthenticated
+	}
+
+	tx, err := v.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if _, err := tx.Exec(ctx, tenantSetting, verified.TenantID()); err != nil {
+		return err
+	}
+
+	return Recheck(ctx, tx, verified)
+}
+
+type machineRow struct {
+	id, tenant, key, state string
+}
+
+// lookupMachine reads the one machine row through the security-invoker view
+// admitted by the transaction-local machine id setting.
+func lookupMachine(
+	ctx context.Context,
+	tx pgx.Tx,
+	cfg config,
+	machineID string,
+) (machineRow, error) {
+	var row machineRow
+
+	if _, err := tx.Exec(ctx, cfg.bind, machineID); err != nil {
+		return row, err
+	}
+
+	rows, err := tx.Query(ctx, cfg.query, machineID)
+	if err != nil {
+		return row, err
+	}
+
+	defer rows.Close()
+
+	if !rows.Next() {
+		return row, errors.Join(machineports.ErrUnauthenticated, rows.Err())
+	}
+
+	var key *string
+
+	if err := rows.Scan(&row.id, &row.tenant, &key, &row.state); err != nil {
+		return machineRow{}, err
+	}
+
+	if key != nil {
+		row.key = *key
+	}
+
+	if rows.Next() || row.tenant == "" {
+		return machineRow{}, machineports.ErrUnauthenticated
+	}
+
+	rows.Close()
+
+	return row, rows.Err()
+}
+
+// consumeNonce binds the machine's tenant for row-level security and records
+// the nonce; a nonce seen before inside its window is a replay.
+func consumeNonce(
+	ctx context.Context,
+	tx pgx.Tx,
+	cfg config,
+	principal string,
+	row machineRow,
+	request machineports.Request,
+) error {
+	if _, err := tx.Exec(ctx, tenantSetting, row.tenant); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
+		ctx,
+		`DELETE FROM pluto_machine_nonces WHERE expires_at < now()`,
+	); err != nil {
+		return err
+	}
+
+	// Each verified request leaves one nonce for two replay windows, so the
+	// rows of a machine count its recent requests across every replica.
+	var recent int
+
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT count(*) FROM pluto_machine_nonces `+
+			`WHERE principal = $1 AND machine_id = $2`,
+		principal,
+		row.id,
+	).Scan(&recent); err != nil {
+		return err
+	}
+
+	if recent >= cfg.limit {
+		return machineports.ErrRateLimited
+	}
+
+	tag, err := tx.Exec(
+		ctx,
+		`INSERT INTO pluto_machine_nonces `+
+			`(principal, machine_id, nonce, tenant_id, expires_at) `+
+			`VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5::double precision)) `+
+			`ON CONFLICT DO NOTHING`,
+		principal,
+		row.id,
+		request.Nonce,
+		row.tenant,
+		(2 * cfg.window).Seconds(),
+	)
+	if err != nil {
+		return err
+	}
+
+	if tag.RowsAffected() != 1 {
+		return machineports.ErrUnauthenticated
+	}
+
+	return nil
+}
+
+// Recheck confirms inside an open tenant transaction that the machine is
+// still active with the verified key. A revoked or re-keyed machine loses
+// access on its next data access, mirroring the live recheck of a user gate.
+func Recheck(ctx context.Context, tx pgx.Tx, v machineports.Verified) error {
+	cfg, ok := principals[v.Principal()]
+	if !ok || tx == nil || v.MachineID() == "" {
+		return machineports.ErrUnauthenticated
+	}
+
+	var present int
+
+	err := tx.QueryRow(
+		ctx,
+		cfg.recheck,
+		v.MachineID(),
+		cfg.active,
+		v.Key(),
+	).Scan(&present)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return machineports.ErrUnauthenticated
+	}
+
+	return err
+}
+
+// IssueEnrollment mints a single-use enrollment token for a pending machine
+// of the open transaction's tenant and returns it once; only its SHA-256 is
+// stored. Earlier unused tokens of the machine are removed.
+func IssueEnrollment(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenant, principal, machineID string,
+) (string, time.Time, error) {
+	cfg, ok := principals[principal]
+	if !ok || tx == nil || tenant == "" || !machineports.IDPattern.MatchString(machineID) {
+		return "", time.Time{}, machineports.ErrInvalidEnrollment
+	}
+
+	var present int
+
+	err := tx.QueryRow(ctx, cfg.issueCheck, machineID, cfg.pending).Scan(&present)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", time.Time{}, machineports.ErrInvalidEnrollment
+	}
+
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", time.Time{}, err
+	}
+
+	token := machineports.TokenPrefix + base64.RawURLEncoding.EncodeToString(raw[:])
+	expires := time.Now().UTC().Add(cfg.ttl)
+
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{
+			`DELETE FROM pluto_machine_enrollments WHERE principal = $1 ` +
+				`AND machine_id = $2 AND used_at IS NULL`,
+			[]any{principal, machineID},
+		},
+		{
+			`DELETE FROM pluto_machine_enrollments ` +
+				`WHERE expires_at < now() - interval '1 day'`,
+			nil,
+		},
+		{
+			`INSERT INTO pluto_machine_enrollments (token_hash, principal, ` +
+				`tenant_id, machine_id, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+			[]any{hashToken(token), principal, tenant, machineID, expires},
+		},
+	} {
+		if _, err := tx.Exec(ctx, statement.sql, statement.args...); err != nil {
+			return "", time.Time{}, err
+		}
+	}
+
+	return token, expires, nil
+}
+
+// RevokeMachine moves a pending or active machine of the open transaction's
+// tenant to the revoked state and removes its unused enrollment tokens. It
+// and RotateMachine are, with enrollment, the only writers of the key and
+// state columns; authored SQL may not name them.
+func RevokeMachine(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenant, principal, machineID string,
+) error {
+	cfg, ok := principals[principal]
+	if !ok || tx == nil || tenant == "" ||
+		!machineports.IDPattern.MatchString(machineID) {
+		return machineports.ErrInvalidMachine
+	}
+
+	tag, err := tx.Exec(
+		ctx, cfg.revoke, cfg.revoked, machineID, cfg.pending, cfg.active,
+	)
+	if err != nil {
+		return err
+	}
+
+	if tag.RowsAffected() != 1 {
+		return machineports.ErrInvalidMachine
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`DELETE FROM pluto_machine_enrollments WHERE principal = $1 `+
+			`AND machine_id = $2 AND used_at IS NULL`,
+		principal,
+		machineID,
+	)
+
+	return err
+}
+
+// RotateMachine clears the key of a pending or active machine, so it stops
+// authenticating at once, returns it to the pending state and issues a fresh
+// single-use enrollment token for the new key. A revoked machine cannot be
+// rotated back in.
+func RotateMachine(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenant, principal, machineID string,
+) (string, time.Time, error) {
+	cfg, ok := principals[principal]
+	if !ok || tx == nil || tenant == "" ||
+		!machineports.IDPattern.MatchString(machineID) {
+		return "", time.Time{}, machineports.ErrInvalidMachine
+	}
+
+	tag, err := tx.Exec(
+		ctx, cfg.reset, cfg.pending, machineID, cfg.pending, cfg.active,
+	)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	if tag.RowsAffected() != 1 {
+		return "", time.Time{}, machineports.ErrInvalidMachine
+	}
+
+	return IssueEnrollment(ctx, tx, tenant, principal, machineID)
+}
+
+func hashToken(token string) string {
+	digest := sha256.Sum256([]byte(token))
+
+	return hex.EncodeToString(digest[:])
+}
+
+// Enroller redeems enrollment tokens.
+type Enroller struct {
+	pool *pgxpool.Pool
+}
+
+// NewEnroller is a capability: only generated composition calls it.
+func NewEnroller(pool *pgxpool.Pool) *Enroller {
+	return &Enroller{pool: pool}
+}
+
+// Enroll redeems a single-use token and binds the public key. The token row
+// is found through a security-invoker view admitted by the hash of the
+// presented token alone; its tenant, never the request, selects the tenant
+// of everything that follows, in one transaction.
+func (e *Enroller) Enroll(
+	ctx context.Context,
+	principal, token, publicKey string,
+) (machineports.Verified, error) {
+	var none machineports.Verified
+
+	cfg, ok := principals[principal]
+	if !ok || ctx == nil || e == nil || e.pool == nil ||
+		!machineports.TokenPattern.MatchString(token) {
+		return none, machineports.ErrInvalidEnrollment
+	}
+
+	key, err := base64.RawURLEncoding.Strict().DecodeString(publicKey)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return none, machineports.ErrInvalidEnrollment
+	}
+
+	tx, err := e.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return none, err
+	}
+
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	hash := hashToken(token)
+
+	if _, err := tx.Exec(ctx, tokenSetting, hash); err != nil {
+		return none, err
+	}
+
+	var tenant, machineID string
+
+	err = tx.QueryRow(
+		ctx,
+		`SELECT tenant_id, machine_id FROM pluto_machine_enrollment_lookup `+
+			`WHERE token_hash = $1 AND principal = $2`,
+		hash,
+		principal,
+	).Scan(&tenant, &machineID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return none, machineports.ErrInvalidEnrollment
+	}
+
+	if err != nil {
+		return none, err
+	}
+
+	if _, err := tx.Exec(ctx, tenantSetting, tenant); err != nil {
+		return none, err
+	}
+
+	if err := redeem(ctx, tx, cfg, hash, principal, machineID, publicKey); err != nil {
+		return none, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return none, err
+	}
+
+	return machineports.NewVerified(principal, machineID, tenant, publicKey), nil
+}
+
+// Withdraw revokes a machine that just enrolled.
+func (e *Enroller) Withdraw(
+	ctx context.Context,
+	verified machineports.Verified,
+) error {
+	if ctx == nil || e == nil || e.pool == nil || verified.TenantID() == "" {
+		return machineports.ErrInvalidMachine
+	}
+
+	tx, err := e.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if _, err := tx.Exec(ctx, tenantSetting, verified.TenantID()); err != nil {
+		return err
+	}
+
+	if err := RevokeMachine(
+		ctx,
+		tx,
+		verified.TenantID(),
+		verified.Principal(),
+		verified.MachineID(),
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// redeem marks the token used and activates the machine. Both must change
+// exactly one row, or the whole transaction rolls back.
+func redeem(
+	ctx context.Context,
+	tx pgx.Tx,
+	cfg config,
+	hash, principal, machineID, publicKey string,
+) error {
+	tag, err := tx.Exec(
+		ctx,
+		`UPDATE pluto_machine_enrollments SET used_at = now() `+
+			`WHERE token_hash = $1 AND principal = $2 AND used_at IS NULL `+
+			`AND expires_at > now()`,
+		hash,
+		principal,
+	)
+	if err != nil {
+		return err
+	}
+
+	if tag.RowsAffected() != 1 {
+		return machineports.ErrInvalidEnrollment
+	}
+
+	tag, err = tx.Exec(ctx, cfg.activate, publicKey, cfg.active, machineID, cfg.pending)
+	if err != nil {
+		return err
+	}
+
+	if tag.RowsAffected() != 1 {
+		return machineports.ErrInvalidEnrollment
+	}
+
+	return nil
+}

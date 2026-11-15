@@ -1,0 +1,16 @@
+package gateways
+
+import (
+	"context"
+
+	"example.test/gwapp/internal/scope"
+)
+
+// MarkStale marks the verified tenant's silent gateways offline.
+func MarkStale(
+	ctx context.Context,
+	e scope.Execution,
+	ports MarkStalePorts,
+) error {
+	return ports.Registry.MarkStale(ctx, e)
+}

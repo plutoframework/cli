@@ -1,0 +1,509 @@
+package app_test
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"example.test/gwapp/internal/access"
+	machineauth "example.test/gwapp/internal/ports/machineauth"
+	models "example.test/gwapp/internal/models/gateways"
+
+	"github.com/plutoframework/pluto-auth/httpauth"
+)
+
+// A gateway enrolls once with the token an admin created, then every request
+// is verified by signature and acts in the tenant of its own row.
+func TestMachineEnrollAndSign(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "owner@example.test")
+	created := f.create(t, org, "edge-1")
+
+	if !strings.HasPrefix(created.Token, "plt_enr_") {
+		t.Fatalf("unexpected token %q", created.Token)
+	}
+
+	// The token is stored only as a SHA-256 hash.
+	digest := sha256.Sum256([]byte(created.Token))
+	hash := hex.EncodeToString(digest[:])
+
+	if f.scalar(t, "SELECT count(*) FROM pluto_machine_enrollments "+
+		"WHERE token_hash = $1", hash) != "1" ||
+		f.scalar(t, "SELECT count(*) FROM pluto_machine_enrollments "+
+			"WHERE token_hash = $1", created.Token) != "0" {
+		t.Fatal("token is not stored as its hash")
+	}
+
+	// A pending gateway cannot authenticate: it has no key yet.
+	pendingKey, _ := gwKey(t)
+	f.expect(t, f.heartbeat(t, pendingKey, created.ID, 1), 401)
+
+	private, public := gwKey(t)
+	f.expect(t, f.enrollGateway(created.Token, public), 200)
+
+	if f.scalar(t, "SELECT state FROM gateways WHERE id = $1", created.ID) !=
+		"active" ||
+		f.scalar(t, "SELECT public_key FROM gateways WHERE id = $1",
+			created.ID) != public {
+		t.Fatal("enrollment did not bind the key and activate the machine")
+	}
+
+	// The token is spent.
+	_, other := gwKey(t)
+	f.expect(t, f.enrollGateway(created.Token, other), 401)
+
+	response := f.heartbeat(t, private, created.ID, 7)
+	f.expect(t, response, 200)
+
+	if !strings.Contains(response.Body.String(), `"seq":7`) {
+		t.Fatalf("unexpected ack %s", response.Body.String())
+	}
+
+	if f.scalar(t, "SELECT last_seq FROM gateways WHERE id = $1",
+		created.ID) != "7" {
+		t.Fatal("heartbeat did not update the verified machine's row")
+	}
+
+	// A signed read sees its own record; the echoed query is signed too.
+	status := f.serve(signed(
+		t, "GET", "/api/gateway/status?echo=hello", "", private, created.ID,
+		time.Now(),
+	))
+	f.expect(t, status, 200)
+
+	for _, want := range []string{created.ID, `"echo":"hello"`,
+		`"state":"active"`, `"name":"edge-1"`} {
+		if !strings.Contains(status.Body.String(), want) {
+			t.Fatalf("status misses %s: %s", want, status.Body.String())
+		}
+	}
+}
+
+// Every way of presenting a bad signature is the same 401.
+func TestMachineSignatureRejections(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "sig@example.test")
+	id, key := f.active(t, org, "edge-sig")
+	other, _ := f.active(t, org, "edge-other")
+	stranger, _ := gwKey(t)
+	now := time.Now()
+
+	good := func() *http.Request {
+		return signed(t, "POST", "/api/gateway/heartbeat", `{"seq":1}`, key,
+			id, now)
+	}
+
+	cases := map[string]func() *http.Request{
+		"no signature": func() *http.Request {
+			return httptest.NewRequest("POST", "/api/gateway/heartbeat",
+				strings.NewReader(`{"seq":1}`))
+		},
+		"user session cookie only": func() *http.Request {
+			request := httptest.NewRequest("GET", "/api/gateway/status", nil)
+			request.AddCookie(&http.Cookie{
+				Name: httpauth.CookieName, Value: org.admin.session,
+			})
+			request.Header.Set("X-Tenant-ID", org.tenant)
+
+			return request
+		},
+		"wrong key": func() *http.Request {
+			return signed(t, "POST", "/api/gateway/heartbeat", `{"seq":1}`,
+				stranger, id, now)
+		},
+		"another machine's id": func() *http.Request {
+			return signed(t, "POST", "/api/gateway/heartbeat", `{"seq":1}`,
+				key, other, now)
+		},
+		"unknown machine": func() *http.Request {
+			return signed(t, "POST", "/api/gateway/heartbeat", `{"seq":1}`,
+				key, "no-such-machine", now)
+		},
+		"tampered body": func() *http.Request {
+			request := good()
+			request.Body = io.NopCloser(strings.NewReader(`{"seq":99}`))
+
+			return request
+		},
+		"tampered query": func() *http.Request {
+			request := signed(t, "GET", "/api/gateway/status?echo=a", "", key,
+				id, now)
+			request.URL.RawQuery = "echo=b"
+
+			return request
+		},
+		"signature for another path": func() *http.Request {
+			request := signed(t, "POST", "/api/gateway/heartbeat2",
+				`{"seq":1}`, key, id, now)
+			request.URL.Path = "/api/gateway/heartbeat"
+
+			return request
+		},
+		"malformed signature": func() *http.Request {
+			request := good()
+			request.Header.Set(machineauth.HeaderSignature, "not-base64!")
+
+			return request
+		},
+		"short nonce": func() *http.Request {
+			request := good()
+			request.Header.Set(machineauth.HeaderNonce, "abc")
+
+			return request
+		},
+		"non-numeric timestamp": func() *http.Request {
+			request := good()
+			request.Header.Set(machineauth.HeaderTimestamp, "yesterday")
+
+			return request
+		},
+	}
+
+	for name, build := range cases {
+		request := build()
+		request.Header.Set("Origin", gwOrigin)
+
+		if got := f.serve(request).Code; got != 401 {
+			t.Fatalf("%s: status=%d want 401", name, got)
+		}
+	}
+
+	// Nothing above changed any heartbeat state.
+	if f.scalar(t, "SELECT last_seq FROM gateways WHERE id = $1", id) != "0" {
+		t.Fatal("a rejected request mutated state")
+	}
+
+	f.expect(t, f.serve(good()), 200)
+}
+
+func TestMachineReplayAndWindow(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "replay@example.test")
+	id, key := f.active(t, org, "edge-replay")
+
+	request := signed(t, "POST", "/api/gateway/heartbeat", `{"seq":3}`, key,
+		id, time.Now())
+	replay := request.Clone(t.Context())
+
+	var captured []byte
+
+	captured, _ = io.ReadAll(request.Body)
+	request.Body = io.NopCloser(bytes.NewReader(captured))
+	replay.Body = io.NopCloser(bytes.NewReader(captured))
+
+	f.expect(t, f.serve(request), 200)
+	f.expect(t, f.serve(replay), 401)
+
+	// The replay window is two minutes either way.
+	for name, at := range map[string]time.Time{
+		"stale":  time.Now().Add(-5 * time.Minute),
+		"future": time.Now().Add(5 * time.Minute),
+	} {
+		got := f.serve(signed(t, "POST", "/api/gateway/heartbeat",
+			`{"seq":4}`, key, id, at)).Code
+		if got != 401 {
+			t.Fatalf("%s timestamp: status=%d want 401", name, got)
+		}
+	}
+
+	if f.scalar(t, "SELECT last_seq FROM gateways WHERE id = $1", id) != "3" {
+		t.Fatal("a replayed or out-of-window request mutated state")
+	}
+
+	if f.scalar(t, "SELECT count(*) FROM pluto_machine_nonces") != "1" {
+		t.Fatal("expected exactly one recorded nonce")
+	}
+}
+
+// Revoking the machine row denies on the next request; reactivation under a
+// different key does not honor the old key.
+func TestMachineRevocation(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "revoke@example.test")
+	id, key := f.active(t, org, "edge-revoke")
+
+	f.expect(t, f.heartbeat(t, key, id, 1), 200)
+
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"UPDATE gateways SET state = 'revoked' WHERE id = $1",
+		id,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.expect(t, f.heartbeat(t, key, id, 2), 401)
+
+	// A revoked machine cannot be re-enrolled with a fresh token either.
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"UPDATE gateways SET state = 'active' WHERE id = $1",
+		id,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"UPDATE gateways SET public_key = $2 WHERE id = $1",
+		id,
+		base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.expect(t, f.heartbeat(t, key, id, 3), 401)
+
+	if f.scalar(t, "SELECT last_seq FROM gateways WHERE id = $1", id) != "1" {
+		t.Fatal("a revoked or re-keyed machine changed state")
+	}
+}
+
+func TestMachineEnrollmentRejections(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "enroll@example.test")
+	created := f.create(t, org, "edge-enroll")
+	_, public := gwKey(t)
+
+	unknownToken := `{"token":"plt_enr_` + strings.Repeat("A", 43) +
+		`","public_key":"` + public + `"}`
+
+	for name, body := range map[string]string{
+		"empty":           `{}`,
+		"unknown token":   unknownToken,
+		"malformed token": `{"token":"nope","public_key":"` + public + `"}`,
+		"short key":       `{"token":"` + created.Token + `","public_key":"AAAA"}`,
+		"padded key":      `{"token":"` + created.Token + `","public_key":"` + public + `="}`,
+		"extra field":     `{"token":"` + created.Token + `","public_key":"` + public + `","tenant":"x"}`,
+	} {
+		got := f.call("POST", "/api/gateways/enroll", body, "", "").Code
+		if got != 400 && got != 401 {
+			t.Fatalf("%s: status=%d want 400 or 401", name, got)
+		}
+	}
+
+	// None of those consumed the token or activated the machine.
+	if f.scalar(t, "SELECT state FROM gateways WHERE id = $1", created.ID) !=
+		"pending" {
+		t.Fatal("a rejected enrollment activated the machine")
+	}
+
+	// An expired token is the same 401.
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"UPDATE pluto_machine_enrollments SET expires_at = now() - "+
+			"interval '1 minute'",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.expect(t, f.enrollGateway(created.Token, public), 401)
+
+	// A revoked machine cannot be activated by its still-valid token, and the
+	// failed attempt does not spend the token.
+	again := f.create(t, org, "edge-late")
+
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"UPDATE gateways SET state = 'revoked' WHERE id = $1",
+		again.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.expect(t, f.enrollGateway(again.Token, public), 401)
+
+	if f.scalar(t, "SELECT count(*) FROM pluto_machine_enrollments "+
+		"WHERE machine_id = $1 AND used_at IS NULL", again.ID) != "1" {
+		t.Fatal("a failed activation spent the token")
+	}
+}
+
+// Exactly one of many concurrent redemptions of a token succeeds.
+func TestMachineEnrollmentSingleUse(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "race@example.test")
+	created := f.create(t, org, "edge-race")
+
+	var (
+		wait sync.WaitGroup
+		wins int
+		lock sync.Mutex
+	)
+
+	for range 8 {
+		_, public := gwKey(t)
+
+		wait.Add(1)
+
+		go func() {
+			defer wait.Done()
+
+			if f.enrollGateway(created.Token, public).Code == 200 {
+				lock.Lock()
+				wins++
+				lock.Unlock()
+			}
+		}()
+	}
+
+	wait.Wait()
+
+	if wins != 1 {
+		t.Fatalf("%d concurrent redemptions succeeded, want 1", wins)
+	}
+}
+
+// Enrollment is rate limited per client and fails closed.
+func TestMachineEnrollRateLimit(t *testing.T) {
+	f := gwSetup(t)
+	_, public := gwKey(t)
+
+	body := `{"token":"plt_enr_` + strings.Repeat("A", 43) +
+		`","public_key":"` + public + `"}`
+
+	for range 12 {
+		f.expect(t, f.call("POST", "/api/gateways/enroll", body, "", ""), 401)
+	}
+
+	f.expect(t, f.call("POST", "/api/gateways/enroll", body, "", ""), 429)
+}
+
+// Two tenants' machines never reach each other's rows, and request input
+// cannot choose the tenant.
+func TestMachineTenantIsolation(t *testing.T) {
+	f := gwSetup(t)
+	acme := f.org(t, "acme@example.test")
+	globex := f.org(t, "globex@example.test")
+
+	acmeID, acmeKey := f.active(t, acme, "acme-edge")
+	globexID, _ := f.active(t, globex, "globex-edge")
+
+	request := signed(t, "POST", "/api/gateway/heartbeat", `{"seq":5}`,
+		acmeKey, acmeID, time.Now())
+	request.Header.Set("X-Tenant-ID", globex.tenant)
+	f.expect(t, f.serve(request), 200)
+
+	if f.scalar(t, "SELECT last_seq FROM gateways WHERE id = $1", acmeID) !=
+		"5" ||
+		f.scalar(t, "SELECT last_seq FROM gateways WHERE id = $1",
+			globexID) != "0" {
+		t.Fatal("a machine acted outside its own tenant")
+	}
+
+	// A user session of one tenant cannot register in the other.
+	err := f.app.WithSession(
+		t.Context(),
+		acme.admin.session,
+		globex.tenant,
+		func(ctx context.Context, caller access.Caller) error {
+			_, err := f.app.Operations.GatewaysCreate.Execute(
+				ctx,
+				caller,
+				models.NewGateway{Name: "intruder"},
+			)
+
+			return err
+		},
+	)
+	if err == nil {
+		t.Fatal("a stranger registered a gateway in another tenant")
+	}
+
+	// A machine id from another tenant cannot be enrolled with this tenant's
+	// token: tokens resolve their tenant from their own row.
+	if f.scalar(t, "SELECT count(*) FROM gateways WHERE name = 'intruder'") !=
+		"0" {
+		t.Fatal("cross-tenant insert happened")
+	}
+}
+
+// Without the transaction-local settings only generated code sets, the
+// runtime role sees no machine rows, no tokens and no nonces.
+func TestMachineRowLevelBoundaries(t *testing.T) {
+	f := gwSetup(t)
+	org := f.org(t, "rls@example.test")
+	created := f.create(t, org, "edge-rls")
+
+	digest := sha256.Sum256([]byte(created.Token))
+	hash := hex.EncodeToString(digest[:])
+
+	count := func(query string, args ...any) int {
+		t.Helper()
+
+		var n int
+
+		row := f.runtime.QueryRow(t.Context(), query, args...)
+		if err := row.Scan(&n); err != nil {
+			t.Fatal(query, err)
+		}
+
+		return n
+	}
+
+	for _, table := range []string{
+		"gateways",
+		"pluto_machine_enrollments",
+		"pluto_machine_nonces",
+		"pluto_machine_enrollment_lookup",
+		"pluto_lookup_gateways_gatewaymachine",
+	} {
+		if got := count("SELECT count(*) FROM " + table); got != 0 {
+			t.Fatalf("%s leaked %d rows without a setting", table, got)
+		}
+	}
+
+	// The lookup views admit only the one row named by their setting.
+	tx, err := f.runtime.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		_ = tx.Rollback(t.Context())
+	}()
+
+	if _, err := tx.Exec(
+		t.Context(),
+		"SELECT set_config('app.machine_enrollment', $1, true)",
+		hash,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows int
+
+	err = tx.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM pluto_machine_enrollment_lookup",
+	).Scan(&rows)
+	if err != nil || rows != 1 {
+		t.Fatalf("lookup view returned %d rows: %v", rows, err)
+	}
+
+	// The base table is still closed to writes outside a tenant.
+	if _, err := tx.Exec(
+		t.Context(),
+		"UPDATE pluto_machine_enrollments SET used_at = now()",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	err = tx.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM pluto_machine_enrollments "+
+			"WHERE used_at IS NOT NULL",
+	).Scan(&rows)
+	if err != nil || rows != 0 {
+		t.Fatalf("lookup policy admitted a write: %d %v", rows, err)
+	}
+}

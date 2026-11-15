@@ -32,8 +32,25 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 `,
 	)
 
-	if m.hasScope(ScopeProvision) || m.hasScope(ScopeLookup) {
+	if m.hasScope(ScopeProvision) || m.hasScope(ScopeLookup) ||
+		m.hasScope(ScopeEnroll) || m.hasEachTenant() {
 		source.WriteString("\t\"time\"\n")
+	}
+
+	if m.hasIdempotentWrites() {
+		source.WriteString(
+			"\tidempostgres \"github.com/plutoframework/pluto-core/stores/" +
+				"postgres\"\n",
+		)
+	}
+
+	if m.hasEachTenant() {
+		source.WriteString("\t\"sync\"\n")
+		fmt.Fprintf(
+			&source,
+			"\t\"%s/internal/storage/tenantindex\"\n",
+			m.Project.Module,
+		)
 	}
 
 	local := m.Capabilities.LocalCredentials
@@ -53,6 +70,27 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 			&source,
 			`authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
 `,
+		)
+	}
+
+	if m.HasMachine() {
+		internalImports = append(internalImports, "storage/machineauth")
+	}
+
+	if m.AuthEventsOn() && m.HasMachine() {
+		fmt.Fprintf(
+			&source,
+			"\tmachineports %s\n",
+			q(m.Project.Module+"/internal/ports/machineauth"),
+		)
+	}
+
+	if m.AuthEventsOn() {
+		operation, _ := m.Operation(m.Auth.Events.Operation)
+		fmt.Fprintf(
+			&source,
+			"\tauthEventModels %s\n",
+			q(m.Project.Module+"/internal/models/"+operation.Group),
 		)
 	}
 
@@ -220,6 +258,7 @@ type CandidateRuntime struct {
 	candidateRuntimeManager *auth.Manager
 	candidateRuntimeHandler http.Handler
 	candidateRuntimePool    *pgxpool.Pool
+	candidateRuntimeLogger  *slog.Logger
 }
 `,
 	)
@@ -344,6 +383,7 @@ func NewCandidateRuntime(
 	runtime := &CandidateRuntime{
 		candidateRuntimeManager: authentication.Manager,
 		candidateRuntimePool:    pool,
+		candidateRuntimeLogger:  logger,
 	}
 `,
 	)
@@ -375,15 +415,39 @@ func NewCandidateRuntime(
 		)
 	}
 
+	if m.HasMachine() {
+		source.WriteString(
+			`
+	machineVerifier := machineauth.NewVerifier(pool)
+	machineEnroller := machineauth.NewEnroller(pool)
+
+	_, _ = machineVerifier, machineEnroller
+`,
+		)
+	}
+
 	for index, operation := range m.Operations {
+		if operation.Scope == ScopeEachTenant {
+			writeEachTenantOperation(&source, operation, index)
+
+			continue
+		}
+
 		if operation.Scope != "" {
 			if err := writeSystemOperation(
 				&source,
+				m,
 				operation,
 				index,
 			); err != nil {
 				return nil, err
 			}
+
+			continue
+		}
+
+		if operation.isMachine() {
+			writeMachineOperation(&source, operation)
 
 			continue
 		}
@@ -506,28 +570,60 @@ func NewCandidateRuntime(
 		)
 	}
 
+	if err := writeAuthEvents(&source, m); err != nil {
+		return nil, err
+	}
+
 	source.WriteString(
 		`
 	router := chi.NewRouter()
 	router.Use(transport.SecurityHeaders)
 	router.Use(transport.Recover(logger))
 
+	evaluator := features.New(cfg.Features)
+
 	reg := transport.Registrar{
 		Router:   router,
 		Auth:     authentication.Verifier,
 		Sessions: authentication.HTTP,
-		Features: features.New(cfg.Features),
+		Features: evaluator,
 		Logger:   logger,
 		Policy:   policy,
 	}
 `,
 	)
+
+	if m.hasIdempotentWrites() {
+		source.WriteString(
+			`
+	idempotencyStore, err := idempostgres.New(pool)
+	if err != nil {
+		return nil, err
+	}
+
+	reg.Idempotency, err = transport.NewIdempotency(
+		idempotencyStore,
+		cfg.Server.BodyLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+`,
+		)
+	}
+
 	source.WriteString(
-		`	transport.RegisterSessions(reg, authentication)
+		`
+	transport.RegisterSessions(reg, authentication)
 `,
 	)
 
-	if local {
+	if local && m.AuthEventsOn() {
+		source.WriteString(
+			`	registerCandidateCredentials(router, authentication, events)
+`,
+		)
+	} else if local {
 		source.WriteString(
 			`	registerCandidateCredentials(router, authentication)
 `,
@@ -539,6 +635,22 @@ func NewCandidateRuntime(
 		paths.Health,
 		func(w http.ResponseWriter, r *http.Request) {
 			transport.JSON(w, 200, paths.HealthResponse{Data: "ok"})
+		},
+	)
+`,
+	)
+
+	source.WriteString(
+		`	// Only flags declared client-visible are listed, to authenticated
+	// callers; a flag never grants authorization.
+	reg.Handle(
+		paths.GetFeatures,
+		func(w http.ResponseWriter, r *http.Request) {
+			transport.JSON(
+				w,
+				200,
+				paths.FeaturesResponse{Data: evaluator.Visible()},
+			)
 		},
 	)
 `,
@@ -582,6 +694,17 @@ func NewCandidateRuntime(
 		)
 	}
 
+	for _, operation := range m.Operations {
+		if operation.Scope == ScopeEachTenant {
+			fmt.Fprintf(
+				&source,
+				`%s string
+`,
+				symbol(operation.Endpoint()),
+			)
+		}
+	}
+
 	source.WriteString(
 		`}
 
@@ -593,6 +716,7 @@ func (r *CandidateRuntime) Worker(
 	}
 
 	handlers := map[jobs.Kind]jobs.Handler{}
+	workerConfig := jobs.DefaultConfig()
 `,
 	)
 
@@ -624,15 +748,24 @@ func (r *CandidateRuntime) Worker(
 
 	source.WriteString(
 		`
+`,
+	)
+
+	writeEachTenantHandlers(&source, m)
+
+	source.WriteString(
+		`
 	store, err := jobspostgres.New(r.candidateRuntimePool)
 	if err != nil {
 		return nil, err
 	}
 
-	return jobs.NewWorker(store, handlers, jobs.DefaultConfig())
+	return jobs.NewWorker(store, handlers, workerConfig)
 }
 `,
 	)
+
+	writeEachTenantSchedule(&source, m)
 
 	if len(authoredGroups) > 0 {
 		source.WriteString(candidateTenantResourceSource)
@@ -731,6 +864,55 @@ func writeAuthoredOperation(
 	)
 }
 
+// writeMachineOperation wires one machine-authenticated operation: the
+// signature verifier and the declared adapters as the logic ports. There is
+// no user gate; the verifier is the only way the authored body runs.
+func writeMachineOperation(source *bytes.Buffer, operation Operation) {
+	var ports bytes.Buffer
+
+	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			fmt.Fprintf(
+				&ports,
+				"%s: adapters.%sTx, ",
+				foreignPortField(id),
+				adapterField(Port{ID: id}),
+			)
+
+			continue
+		}
+
+		fmt.Fprintf(
+			&ports,
+			"%s: adapters.%s, ",
+			modelName(id),
+			adapterField(Port{ID: id}),
+		)
+	}
+
+	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			ports.WriteString("TxDB: adapters.DB, ")
+
+			break
+		}
+	}
+
+	fmt.Fprintf(
+		source,
+		`
+	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
+		machineVerifier,
+		%[2]slogic.%[3]sPorts{%[4]s},
+	)
+`,
+		symbol(operation.Endpoint()),
+		operation.Group,
+		operation.Action,
+		ports.String(),
+	)
+}
+
 // candidateTenantResourceSource is the tenant resource policy of authored
 // operations: membership and permission are verified by the gate, row-level
 // security isolates the data, and the resource must be the declared one.
@@ -749,84 +931,3 @@ func candidateTenantResource(resource string) rbac.ResourcePolicyFunc {
 	}
 }
 `
-
-// writeSystemOperation wires one provision or lookup operation: the shared
-// attempt limiter plus either the provisioning gate over the declared ports
-// or the generated lookup reader. Neither has a membership gate: no tenant
-// or membership exists at that point.
-func writeSystemOperation(
-	source *bytes.Buffer,
-	operation Operation,
-	index int,
-) error {
-	attempts, window, err := ParseRateLimit(operation.RateLimit)
-	if err != nil {
-		return fmt.Errorf("operation %s: %w", operation.ID(), err)
-	}
-
-	suffix := fmt.Sprint(index)
-
-	fmt.Fprintf(
-		source,
-		`
-	limiter%[1]s, err := identity.NewAttemptLimiter(
-		pool,
-		%[2]d,
-		time.Duration(%[3]d),
-	)
-	if err != nil {
-		return nil, err
-	}
-`,
-		suffix,
-		attempts,
-		window.Nanoseconds(),
-	)
-
-	if operation.Scope == ScopeLookup {
-		fmt.Fprintf(
-			source,
-			`
-	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
-		%[2]slookup.New%[3]sReader(pool),
-		limiter%[4]s,
-	)
-`,
-			symbol(operation.Endpoint()),
-			operation.Group,
-			operation.Action,
-			suffix,
-		)
-
-		return nil
-	}
-
-	var ports bytes.Buffer
-
-	for _, id := range operation.Ports {
-		fmt.Fprintf(
-			&ports,
-			"%s: adapters.%s, ",
-			modelName(id),
-			adapterField(Port{ID: id}),
-		)
-	}
-
-	fmt.Fprintf(
-		source,
-		`
-	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
-		authentication.Manager,
-		limiter%[4]s,
-		%[2]slogic.%[3]sPorts{%[5]s},
-	)
-`,
-		symbol(operation.Endpoint()),
-		operation.Group,
-		operation.Action,
-		suffix,
-		ports.String(),
-	)
-
-	return nil
-}

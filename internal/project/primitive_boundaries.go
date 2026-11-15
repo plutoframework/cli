@@ -46,6 +46,7 @@ func inspectPrimitiveBoundaries(
 			Action      string `toml:"action"`
 			Write       bool   `toml:"write"`
 			Idempotency string `toml:"idempotency"`
+			Scope       string `toml:"scope"`
 		} `toml:"operations"`
 		Jobs []struct {
 			Operation string `toml:"operation"`
@@ -53,6 +54,18 @@ func inspectPrimitiveBoundaries(
 	}
 
 	_ = toml.Unmarshal(manifest, &declaration)
+
+	// Generated tenant job gates and the scope package handle deliveries and
+	// requests by design; managed integrity keeps those files exact.
+	tenantJobFiles := map[string]bool{scopeFile: true}
+
+	for _, operation := range declaration.Operations {
+		if operation.Scope == ScopeEachTenant {
+			tenantJobFiles["internal/operations/"+operation.Group+"/"+
+				lowerAction(operation.Action)+"_gate_gen.go"] = true
+		}
+	}
+
 	set := token.NewFileSet()
 	files := []*primitiveSource{}
 	byDirectory := map[string][]*primitiveSource{}
@@ -392,7 +405,7 @@ func inspectPrimitiveBoundaries(
 
 			if dependency == "github.com/plutoframework/pluto-jobs" &&
 				(capability == "NewRequest" || capability == "Decode") &&
-				!effectsDeclared {
+				!effectsDeclared && !tenantJobFiles[file.path] {
 				add(
 					"ARCH506",
 					file,

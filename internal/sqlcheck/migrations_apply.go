@@ -376,7 +376,12 @@ func (s *migrationState) applyPolicy(
 				tableKey(s.columns[table]),
 			)
 
-			if isLookup {
+			if isLookup && lookup.Enumerate {
+				policy.LookupOK = switchExpression(
+					st[at+2:skipParens(st, at+1)-1],
+					strings.ToLower(lookup.Setting),
+				)
+			} else if isLookup {
 				policy.LookupOK = settingExpression(
 					st[at+2:skipParens(st, at+1)-1],
 					tableKey(lookup.Key),

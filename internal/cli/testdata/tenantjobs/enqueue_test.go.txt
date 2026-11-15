@@ -1,0 +1,148 @@
+package scope
+
+import (
+	"context"
+	"errors"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	jobs "github.com/plutoframework/pluto-jobs"
+	jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
+)
+
+// Tx.Enqueue joins the business transaction: the delivery exists if and only
+// if the transaction commits, carries the transaction's tenant and the
+// declared budget, and only declared kinds are accepted.
+func TestTxEnqueue(t *testing.T) {
+	address := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
+	if address == "" {
+		t.Skip("needs PLUTO_CLI_TEST_DATABASE_URL")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer pool.Close()
+
+	schema := "enq_" + strings.ToLower(jobs.NewID())
+	if _, err := pool.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		_, _ = pool.Exec(
+			context.WithoutCancel(ctx), "DROP SCHEMA "+schema+" CASCADE")
+	}()
+
+	migration, err := os.ReadFile("../../db/migrations/005_jobs.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := pgxpool.ParseConfig(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings.ConnConfig.RuntimeParams["search_path"] = schema
+
+	scoped, err := pgxpool.NewWithConfig(ctx, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer scoped.Close()
+
+	if _, err := scoped.Exec(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := jobspostgres.New(scoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	enqueueAttempts["test.kind"] = 7
+
+	defer delete(enqueueAttempts, "test.kind")
+
+	open := func() (Tx, pgx.Tx) {
+		raw, err := scoped.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return Tx{
+			scopeTx:     raw,
+			scopeTenant: Tenant{scopeTenant: "org-a"},
+			scopeJobs:   store,
+		}, raw
+	}
+
+	count := func() int {
+		var n int
+		if err := scoped.QueryRow(
+			ctx, "SELECT count(*) FROM pluto_jobs").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+
+		return n
+	}
+
+	tx, raw := open()
+
+	if err := tx.Enqueue(ctx, "undeclared.kind", []byte(`{}`)); !errors.Is(
+		err, ErrUnknownJob) {
+		t.Fatalf("undeclared kind: %v", err)
+	}
+
+	if err := tx.Enqueue(ctx, "test.kind", []byte(`not json`)); err == nil {
+		t.Fatal("invalid payload accepted")
+	}
+
+	_ = raw.Rollback(ctx)
+
+	tx, raw = open()
+	if err := tx.Enqueue(ctx, "test.kind", []byte(`{"n":1}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := raw.Rollback(ctx); err != nil || count() != 0 {
+		t.Fatalf("rolled back enqueue persisted: %v %d", err, count())
+	}
+
+	tx, raw = open()
+	if err := tx.Enqueue(ctx, "test.kind", []byte(`{"n":2}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := raw.Commit(ctx); err != nil || count() != 1 {
+		t.Fatalf("committed enqueue missing: %v %d", err, count())
+	}
+
+	var tenant string
+
+	var attempts int
+
+	if err := scoped.QueryRow(
+		ctx,
+		"SELECT tenant_id, max_attempts FROM pluto_jobs",
+	).Scan(&tenant, &attempts); err != nil || tenant != "org-a" ||
+		attempts != 7 {
+		t.Fatalf("tenant/budget: %q %d %v", tenant, attempts, err)
+	}
+
+	if err := (Tx{}).Enqueue(ctx, "test.kind", []byte(`{}`)); !errors.Is(
+		err, ErrNoTenant) {
+		t.Fatalf("zero Tx: %v", err)
+	}
+}

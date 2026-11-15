@@ -1,0 +1,30 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+	queries "example.test/gwapp/internal/storage/queries/gateways"
+)
+
+// AuditStore is the authored audit adapter.
+type AuditStore struct{ db scope.DB }
+
+func NewAuditStore(db scope.DB) *AuditStore { return &AuditStore{db: db} }
+
+// Append records one event in the verified tenant, attributed to the verified
+// subject.
+func (s *AuditStore) Append(
+	ctx context.Context,
+	e scope.Execution,
+	in models.AuthEvent,
+) error {
+	return s.db.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		return queriesOf(tx).AppendAudit(ctx, queries.AppendAuditParams{
+			OrgID:   tx.Tenant(),
+			ActorID: tx.SubjectID(),
+			Type:    "auth." + in.Event,
+		})
+	})
+}

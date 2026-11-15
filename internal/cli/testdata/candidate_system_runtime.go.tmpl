@@ -81,7 +81,17 @@ type sysFixture struct {
 // sysSetup applies the migrations as the database owner, then runs the whole
 // application as a separate login role that owns nothing, is not a superuser
 // and cannot bypass row-level security: the deployment the design requires.
+// sysSetup enables every authored feature flag; the flag test starts from
+// the generated default of off.
 func sysSetup(t *testing.T) *sysFixture {
+	t.Helper()
+
+	return sysSetupFlags(t, map[string]string{
+		config.Prefix + "FEATURE_ORGS_PROVISION": "true",
+	})
+}
+
+func sysSetupFlags(t *testing.T, env map[string]string) *sysFixture {
 	t.Helper()
 
 	address := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
@@ -206,7 +216,13 @@ func sysSetup(t *testing.T) *sysFixture {
 
 	cfg, err := config.LoadFrom(
 		func(key string) (string, bool) {
-			return address, key == config.Prefix+"DATABASE_URL"
+			if key == config.Prefix+"DATABASE_URL" {
+				return address, true
+			}
+
+			value, ok := env[key]
+
+			return value, ok
 		},
 	)
 	if err != nil {

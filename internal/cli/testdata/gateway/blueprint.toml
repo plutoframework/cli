@@ -1,0 +1,409 @@
+[[roles]]
+id = "admin"
+name = "Administrator"
+description = "Manages gateways."
+permissions = ["gateways.manage", "audit.record"]
+
+[[roles]]
+id = "janitor"
+name = "Tenant janitor"
+description = "Service role of the per-tenant sweeps."
+permissions = ["gateways.sweep", "audit.record"]
+
+[[tables]]
+group = "gateways"
+name = "orgs"
+tenant_column = "id"
+tenant_root = true
+row_security = true
+
+[[tables]]
+group = "gateways"
+name = "users"
+tenant_column = "org_id"
+row_security = true
+
+[[tables]]
+group = "gateways"
+name = "gateways"
+tenant_column = "org_id"
+row_security = true
+
+[[tables]]
+group = "gateways"
+name = "gateway_beats"
+tenant_column = "org_id"
+row_security = true
+
+[[tables]]
+group = "gateways"
+name = "audit_events"
+tenant_column = "org_id"
+append_only = true
+row_security = true
+
+[[queries]]
+group = "gateways"
+files = ["db/queries/gateways/*.sql"]
+tables = ["users", "gateways", "gateway_beats", "audit_events"]
+
+[[principals]]
+id = "gateways.Gateway"
+kind = "machine"
+table = "gateways"
+id_column = "id"
+key_column = "public_key"
+state_column = "state"
+pending_value = "pending"
+active_value = "active"
+permissions = ["gateway.heartbeat", "gateway.status", "gateway.history", "gateway.channel"]
+enroll_ttl = "1h"
+replay_window = "2m"
+request_limit = 40
+
+[[ports]]
+id = "gateways.Registry"
+adapter = "gateways.Store"
+methods = [
+  "Create(scope.Execution, models.NewGateway) (models.CreatedGateway, error)",
+  "Rename(scope.Execution, models.RenameGateway) (models.GatewayInfo, error)",
+  "Revoke(scope.Execution, models.GatewayRef) (models.GatewayRef, error)",
+  "Rotate(scope.Execution, models.GatewayRef) (models.CreatedGateway, error)",
+  "Beat(scope.Execution, models.Beat) (models.Ack, error)",
+  "Status(scope.Execution, models.StatusRequest) (models.GatewayStatus, error)",
+  "History(scope.Execution, models.HistoryRequest) (pagination.Page[models.BeatRow], error)",
+  "MarkStale(scope.Execution) error",
+]
+
+[[ports]]
+id = "gateways.Audit"
+adapter = "gateways.AuditStore"
+methods = ["Append(scope.Execution, models.AuthEvent) error"]
+
+[[models]]
+id = "gateways.NewGateway"
+fields = ["name:string"]
+
+[[models]]
+id = "gateways.CreatedGateway"
+fields = ["id:string", "token:string"]
+
+[[models]]
+id = "gateways.RenameGateway"
+fields = ["id:string", "name:string"]
+
+[[models]]
+id = "gateways.GatewayInfo"
+fields = ["id:string", "name:string", "state:string", "online:bool"]
+
+[[models]]
+id = "gateways.GatewayRef"
+fields = ["id:string"]
+
+[[models]]
+id = "gateways.EnrollInput"
+fields = ["token:string", "public_key:string"]
+
+[[models]]
+id = "gateways.Enrolled"
+fields = ["machine_id:string"]
+
+[[models]]
+id = "gateways.Beat"
+fields = ["seq:int64"]
+
+[[models]]
+id = "gateways.Ack"
+fields = ["seq:int64"]
+
+[[models]]
+id = "gateways.BeatRow"
+fields = ["id:int64", "seq:int64", "at:time"]
+
+[[models]]
+id = "gateways.AuthEvent"
+fields = ["event:string"]
+
+[[models]]
+id = "gateways.GatewayStatus"
+fields = [
+  "id:string",
+  "name:string",
+  "state:string",
+  "online:bool",
+  "last_seq:int64",
+  "echo:string",
+]
+
+# An authored write exposed over HTTP behind the default-off flag. The
+# response carries the one-time token, so it is not stored for replay.
+[[operations]]
+group = "gateways"
+action = "Create"
+permission = "gateways.manage"
+write = true
+idempotency = "exempt"
+replay_reason = "The response carries a one-time token that must not be stored for replay."
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.NewGateway"
+output = "gateways.CreatedGateway"
+feature = "gateways"
+
+[[operations]]
+group = "gateways"
+action = "Rename"
+permission = "gateways.manage"
+write = true
+idempotency = "required"
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.RenameGateway"
+output = "gateways.GatewayInfo"
+feature = "gateways"
+
+[[operations]]
+group = "gateways"
+action = "Revoke"
+permission = "gateways.manage"
+write = true
+idempotency = "exempt"
+replay_reason = "Revoking a revoked gateway is refused, so a repeat changes nothing."
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.GatewayRef"
+output = "gateways.GatewayRef"
+feature = "gateways"
+
+[[operations]]
+group = "gateways"
+action = "Rotate"
+permission = "gateways.manage"
+write = true
+idempotency = "exempt"
+replay_reason = "The response carries a one-time token that must not be stored for replay."
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.GatewayRef"
+output = "gateways.CreatedGateway"
+feature = "gateways"
+
+[[operations]]
+group = "gateways"
+action = "Enroll"
+scope = "enroll"
+principal = "gateways.Gateway"
+public = true
+write = true
+idempotency = "exempt"
+replay_reason = "A single-use token is the replay protection."
+rate_limit = "12/1h"
+body = "system"
+response = "object"
+input = "gateways.EnrollInput"
+output = "gateways.Enrolled"
+
+[[operations]]
+group = "gateways"
+action = "Heartbeat"
+auth = "machine:gateways.Gateway"
+permission = "gateway.heartbeat"
+write = true
+idempotency = "exempt"
+replay_reason = "Signed nonces reject replays."
+body = "authored"
+resource = "gateways.heartbeat"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.Beat"
+output = "gateways.Ack"
+
+[[operations]]
+group = "gateways"
+action = "Status"
+auth = "machine:gateways.Gateway"
+permission = "gateway.status"
+idempotency = "none"
+body = "authored"
+resource = "gateways.status"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+output = "gateways.GatewayStatus"
+query = [{ name = "echo", type = "string", max = 64 }]
+
+[[operations]]
+group = "gateways"
+action = "History"
+auth = "machine:gateways.Gateway"
+permission = "gateway.history"
+idempotency = "none"
+collection = true
+body = "authored"
+resource = "gateways.history"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "page"
+item = "gateways.BeatRow"
+
+[[operations]]
+group = "gateways"
+action = "Channel"
+auth = "machine:gateways.Gateway"
+permission = "gateway.channel"
+write = true
+idempotency = "exempt"
+replay_reason = "Each message is an independent signed heartbeat."
+body = "authored"
+resource = "gateways.channel"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "stream"
+item = "gateways.Ack"
+input = "gateways.Beat"
+feature = "gateways"
+
+[operations.stream]
+max_message_bytes = 1024
+ping_seconds = 1
+idle_seconds = 5
+recheck_seconds = 1
+max_connections = 3
+
+[[operations]]
+group = "gateways"
+action = "MarkStale"
+scope = "each_tenant"
+schedule = "every 5s"
+timeout = "10s"
+concurrency = 2
+max_attempts = 2
+write = true
+idempotency = "exempt"
+replay_reason = "Marking silent gateways offline twice changes nothing."
+permission = "gateways.sweep"
+service_role = "janitor"
+body = "authored"
+resource = "gateways.sweep"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+
+# Run only by the generated [auth.events] hook and machine enrollment.
+[[operations]]
+group = "gateways"
+action = "RecordAuthEvent"
+permission = "audit.record"
+write = true
+idempotency = "exempt"
+replay_reason = "Authentication events are recorded once per occurrence."
+body = "authored"
+resource = "gateways.audit"
+resource_policy = "tenant"
+ports = ["gateways.Audit"]
+input = "gateways.AuthEvent"
+
+[[endpoints]]
+group = "gateways"
+action = "Create"
+operation = "gateways.Create"
+method = "POST"
+path = "/api/gateways"
+name = "Create gateway"
+description = "Register a gateway and return its one-time enrollment token."
+
+[[endpoints]]
+group = "gateways"
+action = "Rename"
+operation = "gateways.Rename"
+method = "PATCH"
+path = "/api/gateways"
+name = "Rename gateway"
+description = "Rename a gateway; replays of one Idempotency-Key run once."
+
+[[endpoints]]
+group = "gateways"
+action = "Revoke"
+operation = "gateways.Revoke"
+method = "DELETE"
+path = "/api/gateways"
+name = "Revoke gateway"
+description = "Revoke a gateway; its next request is denied."
+
+[[endpoints]]
+group = "gateways"
+action = "Rotate"
+operation = "gateways.Rotate"
+method = "POST"
+path = "/api/gateways/rotate"
+name = "Rotate gateway key"
+description = "Clear a gateway key and return a new enrollment token."
+
+[[endpoints]]
+group = "gateways"
+action = "Enroll"
+operation = "gateways.Enroll"
+method = "POST"
+path = "/api/gateways/enroll"
+name = "Enroll gateway"
+description = "Redeem a single-use enrollment token and bind the gateway key."
+
+[[endpoints]]
+group = "gateways"
+action = "Heartbeat"
+operation = "gateways.Heartbeat"
+method = "POST"
+path = "/api/gateway/heartbeat"
+name = "Gateway heartbeat"
+description = "A signed gateway reports liveness."
+
+[[endpoints]]
+group = "gateways"
+action = "Status"
+operation = "gateways.Status"
+method = "GET"
+path = "/api/gateway/status"
+name = "Gateway status"
+description = "A signed gateway reads its own record."
+
+[[endpoints]]
+group = "gateways"
+action = "History"
+operation = "gateways.History"
+method = "GET"
+path = "/api/gateway/beats"
+name = "Gateway heartbeat history"
+description = "A signed gateway pages through its own heartbeats."
+
+[[endpoints]]
+group = "gateways"
+action = "Channel"
+operation = "gateways.Channel"
+transport = "websocket"
+method = "GET"
+path = "/api/gateway/channel"
+name = "Gateway channel"
+description = "A signed gateway opens its job channel."
+
+[authored]
+
+[auth.events]
+operation = "gateways.RecordAuthEvent"
+
+[memberships]
+table = "gateways.users"
+tenant_column = "org_id"
+subject_column = "id"
+role_column = "role"

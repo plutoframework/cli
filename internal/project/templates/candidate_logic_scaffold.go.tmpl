@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 
+{{- if not .Authored.EachTenant}}
 	models "{{.Module}}/internal/models/{{.Group}}"
+{{- end}}
 {{- if .Authored.Pagination}}
 	"github.com/plutoframework/pluto-core/pagination"
 {{- end}}
@@ -19,13 +21,33 @@ import (
 // This package may import rules/{{.Group}}, models/{{.Group}}, ports/{{.Group}},
 // internal/scope, internal/domain and the pure standard library. It has no
 // init, no package-level variables and no goroutines.
+{{- if .Authored.IsStream}}
+//
+// stream is the typed channel of this connection: Send writes a server
+// message, Receive blocks for the next client message and both fail with
+// scope.ErrStreamClosed once the stream ends. Return nil to close the stream
+// normally; any error closes it with a fixed internal-error reason. The
+// stream is closed for you when the gate is revoked, so keep loops short and
+// pass ctx to every call.
+{{- end}}
 func {{.Action}}(
 	ctx context.Context,
 	e scope.{{if .Authored.Provision}}Provisioning{{else}}Execution{{end}},
 	p {{.Action}}Ports,
+{{- if not .Authored.EachTenant}}
 	in models.{{.Action}}Request,
+{{- if .Authored.IsStream}}
+	stream scope.Stream[{{.Authored.StreamIn}}, {{.Authored.StreamOut}}],
+{{- end}}
+{{- end}}
 ) ({{.Authored.Returns}}) {
+{{- if .Authored.EachTenant}}
+	_, _, _ = ctx, e, p
+{{- else if .Authored.IsStream}}
+	_, _, _, _, _ = ctx, e, p, in, stream
+{{- else}}
 	_, _, _, _ = ctx, e, p, in
+{{- end}}
 {{if .Authored.Result}}
 	var zero {{.Authored.Result}}
 

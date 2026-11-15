@@ -12,6 +12,9 @@ import (
 {{- end}}
 	logic "{{.Module}}/internal/logic/{{.Group}}"
 	models "{{.Module}}/internal/models/{{.Group}}"
+{{- if .Authored.MachineEvent}}
+	machineauth "{{.Module}}/internal/ports/machineauth"
+{{- end}}
 	"{{.Module}}/internal/scope"
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
 {{- if .Authored.Pagination}}
@@ -68,3 +71,19 @@ func (operation *{{.Action}}) execute(
 		operation.{{lowerFirst .Action}}Ports,
 		request)
 }
+{{- if .Authored.MachineEvent}}
+
+// executeMachine binds the machine verified by generated enrollment to this
+// operation's fixed resource and runs the body.
+func (operation *{{.Action}}) executeMachine(
+	ctx context.Context,
+	verified machineauth.Verified,
+	request models.{{.Action}}Request,
+) ({{.Authored.Returns}}) {
+	return logic.{{.Action}}(
+		ctx,
+		scope.BindMachine(verified, {{q .Authored.Resource}}),
+		operation.{{lowerFirst .Action}}Ports,
+		request)
+}
+{{- end}}

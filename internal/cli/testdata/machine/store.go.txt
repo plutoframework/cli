@@ -1,0 +1,105 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+	queries "example.test/gwapp/internal/storage/queries/gateways"
+)
+
+// Store is the authored gateway adapter.
+type Store struct{ db scope.DB }
+
+func NewStore(db scope.DB) *Store { return &Store{db: db} }
+
+// Create inserts a pending gateway and mints its enrollment token in the
+// same transaction.
+func (s *Store) Create(
+	ctx context.Context,
+	e scope.Execution,
+	in models.NewGateway,
+) (models.CreatedGateway, error) {
+	var out models.CreatedGateway
+
+	err := s.db.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		id, err := queriesOf(tx).CreateGateway(
+			ctx,
+			queries.CreateGatewayParams{OrgID: tx.Tenant(), Name: in.Name},
+		)
+		if err != nil {
+			return err
+		}
+
+		token, _, err := tx.IssueEnrollment(ctx, "gateways.Gateway", id)
+		if err != nil {
+			return err
+		}
+
+		out = models.CreatedGateway{ID: id, Token: token}
+
+		return nil
+	})
+
+	return out, err
+}
+
+// Beat updates the verified machine's own row: the tenant and the machine id
+// come from the transaction, never from the request.
+func (s *Store) Beat(
+	ctx context.Context,
+	e scope.Execution,
+	in models.Beat,
+) (models.Ack, error) {
+	var out models.Ack
+
+	err := s.db.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		seq, err := queriesOf(tx).Beat(ctx, queries.BeatParams{
+			OrgID: tx.Tenant(),
+			ID:    tx.SubjectID(),
+			Seq:   in.Seq,
+		})
+		if err != nil {
+			return err
+		}
+
+		out = models.Ack{Seq: seq}
+
+		return nil
+	})
+
+	return out, err
+}
+
+func (s *Store) Status(
+	ctx context.Context,
+	e scope.Execution,
+	in models.StatusRequest,
+) (models.GatewayStatus, error) {
+	var out models.GatewayStatus
+
+	err := s.db.Read(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		row, err := queriesOf(tx).GatewayStatus(
+			ctx,
+			queries.GatewayStatusParams{
+				OrgID: tx.Tenant(),
+				ID:    tx.SubjectID(),
+			},
+		)
+		if err != nil {
+			return err
+		}
+
+		out = models.GatewayStatus{
+			ID:      row.ID,
+			Name:    row.Name,
+			State:   row.State,
+			LastSeq: row.LastSeq,
+			Echo:    in.Echo,
+		}
+
+		return nil
+	})
+
+	return out, err
+}

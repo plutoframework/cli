@@ -1,0 +1,69 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	commonDomain "{{.Module}}/internal/domain"
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+{{- if .Authored.Pagination}}
+	"github.com/plutoframework/pluto-core/pagination"
+{{- end}}
+)
+
+// {{.Action}}Principal is the machine principal whose signature gates
+// {{.Authored.ID}}.
+const {{.Action}}Principal = {{q .Authored.Principal}}
+
+type {{.Action}}Boundary interface {
+	sealed{{.Action}}()
+	Execute(
+		context.Context,
+		machineauth.Request,
+		models.{{.Action}}Request) ({{.Authored.Returns}})
+}
+
+// {{.Action}} gates the authored body logic.{{.Action}}. It verifies the
+// machine's ed25519 signature, timestamp window and nonce, resolves the
+// tenant from the machine row and only then runs the body, which is
+// reachable from this operation's generated workflow alone.
+type {{.Action}} struct {
+	{{lowerFirst .Action}}Verifier machineauth.Verifier
+	{{lowerFirst .Action}}Ports    logic.{{.Action}}Ports
+}
+
+func New{{.Action}}(
+	verifier machineauth.Verifier,
+	ports logic.{{.Action}}Ports,
+) *{{.Action}} {
+	return &{{.Action}}{
+		{{lowerFirst .Action}}Verifier: verifier,
+		{{lowerFirst .Action}}Ports:    ports,
+	}
+}
+
+func (*{{.Action}}) sealed{{.Action}}() {}
+
+func (operation *{{.Action}}) Execute(
+	ctx context.Context,
+	request machineauth.Request,
+	input models.{{.Action}}Request,
+) ({{.Authored.Returns}}) {
+	var zero {{.Authored.Result}}
+
+	if ctx == nil || operation == nil ||
+		operation.{{lowerFirst .Action}}Verifier == nil {
+		return zero, commonDomain.ErrUnauthenticated
+	}
+
+	verified, err := operation.{{lowerFirst .Action}}Verifier.Verify(
+		ctx,
+		{{.Action}}Principal,
+		request)
+	if err != nil {
+		return zero, err
+	}
+
+	return operation.execute(ctx, verified, input)
+}

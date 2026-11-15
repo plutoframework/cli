@@ -1,0 +1,26 @@
+package gateways
+
+import (
+	"context"
+	"fmt"
+
+	"example.test/gwapp/internal/domain"
+	models "example.test/gwapp/internal/models/gateways"
+	rules "example.test/gwapp/internal/rules/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// RecordAuthEvent appends one authentication event to the audit log of the
+// verified tenant, attributed to the verified subject (a user or a machine).
+func RecordAuthEvent(
+	ctx context.Context,
+	e scope.Execution,
+	ports RecordAuthEventPorts,
+	in models.AuthEvent,
+) error {
+	if !rules.ValidAuthEvent(in.Event) {
+		return fmt.Errorf("%w: event", domain.ErrInvalidInput)
+	}
+
+	return ports.Audit.Append(ctx, e, in)
+}

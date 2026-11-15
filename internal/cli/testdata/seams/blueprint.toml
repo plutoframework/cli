@@ -2,25 +2,25 @@
 id = "auditor"
 name = "Auditor"
 description = "Reads the audit trail."
-permissions = ["audit.read"]
+permissions = ["audit.read", "audit.record"]
 
 [[roles]]
 id = "recorder"
 name = "Recorder"
 description = "Reads and appends audit events."
-permissions = ["audit.read", "audit.write"]
+permissions = ["audit.read", "audit.write", "audit.record"]
 
 [[roles]]
 id = "approver"
 name = "Approver"
 description = "Approves requests; audit entries are written on its behalf."
-permissions = ["approvals.write"]
+permissions = ["approvals.write", "audit.record"]
 
 [[roles]]
 id = "admin"
 name = "Administrator"
 description = "Administers the organization."
-permissions = ["members.read"]
+permissions = ["members.read", "audit.record"]
 
 [[tables]]
 group = "orgs"
@@ -79,7 +79,7 @@ methods = [
   "Scan(scope.Execution, int64, int64) ([]models.Entry, error)",
 ]
 tx_methods = ["AppendTx"]
-tx_callers = ["approvals.Approve"]
+tx_callers = ["approvals.Approve", "orgs.Provision"]
 
 [[ports]]
 id = "approvals.Requests"
@@ -97,6 +97,10 @@ fields = ["seq:int64", "type:string", "payload:json", "hash:hex", "created_at:ti
 [[models]]
 id = "audit.NewEvent"
 fields = ["type:string", "payload:json"]
+
+[[models]]
+id = "audit.AuthEvent"
+fields = ["event:string"]
 
 [[models]]
 id = "audit.Verification"
@@ -132,6 +136,8 @@ resource_policy = "tenant"
 ports = ["audit.Events"]
 response = "object"
 output = "audit.Verification"
+feature = "audit.verify"
+feature_client_visible = true
 
 [[operations]]
 group = "audit"
@@ -145,6 +151,20 @@ resource = "audit.events"
 resource_policy = "tenant"
 ports = ["audit.Events"]
 input = "audit.NewEvent"
+
+# Run only by the generated [auth.events] hook; no endpoint reaches it.
+[[operations]]
+group = "audit"
+action = "RecordAuthEvent"
+permission = "audit.record"
+write = true
+idempotency = "exempt"
+replay_reason = "Authentication events are recorded once per sign-in."
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+input = "audit.AuthEvent"
 
 [[operations]]
 group = "approvals"
@@ -177,11 +197,51 @@ path = "/api/audit/verify"
 name = "Verify audit"
 description = "Verify audit event integrity."
 
+[[models]]
+id = "audit.Cursor"
+fields = ["seq:int64"]
+
+[[models]]
+id = "audit.Tick"
+fields = ["seq:int64", "type:string"]
+
+[[operations]]
+group = "audit"
+action = "Watch"
+permission = "audit.read"
+idempotency = "none"
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+response = "stream"
+item = "audit.Tick"
+input = "audit.Cursor"
+query = [{ name = "after", type = "int64" }]
+
+[operations.stream]
+max_message_bytes = 1024
+ping_seconds = 1
+idle_seconds = 5
+recheck_seconds = 1
+max_connections = 3
+
+[[endpoints]]
+group = "audit"
+action = "Watch"
+operation = "audit.Watch"
+transport = "websocket"
+origins = ["127.0.0.1:8080"]
+method = "GET"
+path = "/api/audit/watch"
+name = "Watch audit"
+description = "Replay audit events over a WebSocket; send {seq} to resume."
+
 [[ports]]
 id = "orgs.Tenants"
 adapter = "orgs.TenantStore"
 methods = [
-  "Provision(scope.Provisioning, models.Signup) (models.Org, error)",
+  "ProvisionTx(scope.Tx, models.Signup) (models.Org, error)",
   "CountMembers(scope.Execution) (int64, error)",
 ]
 
@@ -206,10 +266,11 @@ idempotency = "exempt"
 replay_reason = "A signup mints a new tenant; replays are rate limited."
 rate_limit = "3/1h"
 body = "authored"
-ports = ["orgs.Tenants"]
+ports = ["orgs.Tenants", "audit.Events"]
 response = "object"
 input = "orgs.Signup"
 output = "orgs.Org"
+feature = "orgs.provision"
 
 [[operations]]
 group = "orgs"
@@ -264,6 +325,9 @@ name = "Count members"
 description = "Count the organization's members."
 
 [authored]
+
+[auth.events]
+operation = "audit.RecordAuthEvent"
 
 [memberships]
 table = "orgs.users"

@@ -157,6 +157,7 @@ func sqlcheckConfig(root string, m Manifest) sqlcheck.Config {
 			TenantColumn: table.TenantColumn,
 			AppendOnly:   table.AppendOnly,
 			TenantRoot:   table.TenantRoot,
+			Protected:    m.protectedColumns(table),
 		})
 	}
 
@@ -241,12 +242,31 @@ func inspectAuthoredSQL(
 func sqlcheckLookups(m Manifest) []sqlcheck.Lookup {
 	var lookups []sqlcheck.Lookup
 
-	for _, lookup := range m.Lookups {
+	for _, lookup := range m.allLookups() {
 		lookups = append(lookups, sqlcheck.Lookup{
 			Table:   lookup.Table,
 			Key:     lookup.Key,
 			Policy:  lookup.PolicyName(),
 			Setting: lookup.Setting(),
+		})
+	}
+
+	if root, ok := m.TenantRoot(); ok && m.hasEachTenant() {
+		lookups = append(lookups, sqlcheck.Lookup{
+			Table:     root.Name,
+			Key:       root.TenantColumn,
+			Policy:    tenantIndexPolicy,
+			Setting:   tenantIndexSetting,
+			Enumerate: true,
+		})
+	}
+
+	if index, ok := m.MemberIndexOf(); ok {
+		lookups = append(lookups, sqlcheck.Lookup{
+			Table:   index.Table,
+			Key:     index.Subject,
+			Policy:  index.PolicyName(),
+			Setting: index.Setting(),
 		})
 	}
 

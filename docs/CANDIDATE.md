@@ -201,6 +201,214 @@ Steps:
   candidate validator, so they become migratable when that support lands. Scaffold
   tests specific to the published composition are removed while pristine.
 
+## Machine identity
+
+Gateways, relays and other non-human callers are not users. A declared
+principal gives them a lifecycle: an org admin registers one (a pending row plus
+a one-time token), the machine enrolls once through a public generated endpoint
+that binds its ed25519 public key, and from then on every request is verified by
+signature. Tenant and subject come from the machine's own row, never from
+request input.
+
+```toml
+[[tables]]
+group = "gateways"
+name = "gateways"
+tenant_column = "org_id"
+row_security = true
+
+[[principals]]
+id = "gateways.Gateway"            # <group>.<Name>
+kind = "machine"
+table = "gateways"                 # declared table of the same group
+id_column = "id"                   # text-comparable (text, uuid)
+key_column = "public_key"          # nullable text: base64url ed25519 key
+state_column = "state"             # text
+pending_value = "pending"          # state until enrollment
+active_value = "active"            # the only state that authenticates
+permissions = ["gateway.heartbeat", "gateway.status"]
+enroll_ttl = "24h"                 # default 24h, max 168h
+replay_window = "2m"               # default 2m, 5s to 10m
+
+[[operations]]
+group = "gateways"
+action = "Enroll"
+scope = "enroll"
+principal = "gateways.Gateway"
+public = true
+write = true
+idempotency = "exempt"
+replay_reason = "A single-use token is the replay protection."
+rate_limit = "12/1h"
+body = "system"
+response = "object"
+input = "gateways.EnrollInput"    # exactly token:string, public_key:string
+output = "gateways.Enrolled"      # exactly machine_id:string
+
+[[operations]]
+group = "gateways"
+action = "Heartbeat"
+auth = "machine:gateways.Gateway" # signature-verified, no user session
+permission = "gateway.heartbeat"  # must be one of the principal's permissions
+write = true
+idempotency = "exempt"
+replay_reason = "Signed nonces reject replays."
+body = "authored"
+resource = "gateways.heartbeat"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.Beat"           # JSON body (writes) or [[operations.query]] (reads)
+output = "gateways.Ack"
+```
+
+Rules, all enforced before any write:
+
+- Each principal needs exactly one `enroll` operation; machine permissions are
+  declared only on the principal and must not equal any user role or operation
+  permission, so they never enter the user permission catalog. Machine
+  operations use `body = "authored"`, `response = "object"`, `"page"` or
+  `"stream"`, `resource_policy = "tenant"` and exactly one endpoint (POST for
+  object writes, GET for reads, pages and streams). Machines require `tenancy = "multi"` and local credentials (the
+  shared attempt limiter rate limits enrollment).
+- Registration is authored: insert the pending row (`state = pending_value`,
+  key null) and, in the same write transaction, call
+  `tx.IssueEnrollment(ctx, "gateways.Gateway", id)`. It returns the token once;
+  only its SHA-256 is stored, tokens are 256-bit random, and re-issuing removes
+  the earlier unused token. It refuses a machine that is not a pending row of
+  the transaction's tenant.
+- Enrollment resolves the token before any tenant is known through the lookup
+  pattern: a `security_invoker` view plus a SELECT policy admitting only the row
+  whose hash equals a transaction-local setting. The token's tenant then selects
+  the tenant of the rest of one transaction: the token is marked used
+  (`used_at IS NULL AND expires_at > now()` in one UPDATE) and the machine row
+  moves from pending to active with the key. Unknown, expired, used and foreign
+  tokens, a non-pending machine and malformed input are the same
+  `401 invalid_enrollment`; a failed attempt does not spend the token.
+- A request is signed with ed25519 over the newline-joined string
+  `pluto-machine-v1`, principal id, machine id, method, escaped path, raw query,
+  hex SHA-256 of the body, unix seconds and nonce, sent as
+  `X-Pluto-Machine-ID`, `X-Pluto-Timestamp`, `X-Pluto-Nonce` (16 to 64
+  base64url characters) and `X-Pluto-Signature` (base64url, no padding). The
+  verifier looks the machine up by id through its own lookup view and policy,
+  requires `active_value`, a timestamp within `replay_window`, a valid
+  signature, and a fresh nonce (consumed in the tenant's nonce table even if the
+  operation later fails). Every failure is the same `401 unauthenticated`.
+- The body receives a `scope.Execution` whose tenant is the machine row's and
+  whose `SubjectID()` is the machine id. `DB.Read/Write` recheck inside the
+  transaction that the machine is still active with the verified key, so a
+  revoked or re-keyed machine is denied on its next data access.
+- Generated storage uses forced-RLS framework tables (`pluto_machine_enrollments`,
+  `pluto_machine_nonces`, migration `101_machine_identity.sql`) and the machine
+  table's lookup policy/view (proposed with the table's RLS migration). ARCH612
+  checks the policy exactly; authored queries cannot touch the framework tables
+  or the lookup view. Authored code cannot construct `machineauth.Verified` or
+  call `scope.BindMachine` (ARCH603/ARCH604) nor import the machine packages
+  (ARCH610). Client helpers: `transport.SignMachineRequest` signs a request in
+  Go; any ed25519 client can build the headers from the canonical string.
+
+Credential columns are generated-only:
+
+- The principal's `key_column` and `state_column` are protected: ARCH612
+  rejects any authored `INSERT` that names them and any authored `UPDATE` that
+  sets them, so authored code can neither forge a key nor revive a machine. A
+  registering `INSERT` omits both; give the state column
+  `DEFAULT '<pending_value>'` (a row in any other state is refused by
+  `IssueEnrollment`) and leave the key null. The enrollment tokens live in the
+  generated, forced-RLS `pluto_machine_enrollments` table, which authored SQL
+  cannot touch either.
+- Registration, rotation and revocation are generated `scope.Tx` methods an
+  authored write calls inside its own transaction, so they commit or roll back
+  with the business change: `tx.IssueEnrollment(ctx, principal, id)`,
+  `tx.RotateMachine(ctx, principal, id)` (clears the key, which stops the
+  machine authenticating at once, and returns a new single-use token) and
+  `tx.RevokeMachine(ctx, principal, id)` (moves a pending or active machine to
+  `revoked_value`, default `revoked`, and deletes its unused tokens). A revoked
+  machine cannot be rotated back; both fail with a conflict
+  (`scope.ErrMachineState`) for an unknown, foreign or revoked id.
+- A verified machine has a request budget: `request_limit` (default 600, max
+  100000) verified requests per two replay windows, counted from the nonce
+  table so every replica shares it. Over budget answers `429 rate_limited`;
+  only requests whose signature verified count, so an unauthenticated caller
+  cannot spend or probe a machine's budget.
+- With `[auth.events]` declared, a successful enrollment is recorded through
+  the same operation with `event = "machine_enroll"`, bound to the machine's own
+  tenant and attributed to the machine id (`e.SubjectID()`). Under the closed
+  policy a failed record withdraws the enrollment (the machine is revoked) and
+  the enroll call fails; best effort logs and proceeds. The event operation
+  gains a generated `ExecuteMachine` entry used only by enrollment; the
+  `RecordAuthEvent` body must therefore accept that kind.
+
+Machine operations take three response shapes. `response = "object"` (a read
+with query parameters, or a write with a JSON input) as above. `response =
+"page"` with `collection = true` and an `item` model is a signed paginated read:
+the cursor is bound to the verified machine, its tenant, the resource and the
+filters, so another machine cannot replay it. `response = "stream"` is a signed
+WebSocket channel (see Streams): the upgrade request is verified once (signature
+over `GET`, path and query, empty body), the body runs as the machine in its
+tenant with `e.SubjectID()` = the machine id, every data access and a periodic
+recheck (`recheck_seconds`) confirm the machine is still active with the
+verified key, and revoking it closes the stream (1008). Machine streams have no
+user Origin allowance: service clients send none, and a browser Origin is
+refused unless `origins` lists it.
+
+Limits: liveness is a normal tenant column (see the per-tenant job below); a
+machine stream is verified at the upgrade, not per message; the registering
+operation is an authored write exposed like any other (see authored write
+endpoints).
+
+## Authored write endpoints
+
+An authored operation with `write = true` and an `input` model is exposed by an
+ordinary `[[endpoints]]` entry using `POST`, `PUT`, `PATCH` or `DELETE` (a
+write behind a read method is refused). The input is the request body, whatever
+the method; the response is `response = "object"` with an `output` model.
+
+```toml
+[[operations]]
+group = "gateways"
+action = "Rename"
+permission = "gateways.manage"
+write = true
+idempotency = "required"          # or exempt + replay_reason
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.RenameGateway"
+output = "gateways.GatewayInfo"
+feature = "gateways"              # optional default-off flag
+
+[[endpoints]]
+group = "gateways"
+action = "Rename"
+operation = "gateways.Rename"
+method = "PATCH"
+path = "/api/gateways"
+```
+
+The generated handler, in order: the route gate (feature flag, session);
+the verified caller and tenant; a body read limited by the server body limit
+(`413 body_too_large`); a strict decode into the declared model (unknown fields,
+trailing data, non-object JSON and wrong types are `400`); then the identity
+gate (membership, permission, resource) before the authored body runs. The
+OpenAPI request schema is the input model. Field values beyond their type
+(lengths, formats, ranges) are domain rules: validate them in the body or the
+`rules` package.
+
+`idempotency = "required"` adds generated `Idempotency-Key` handling over the
+durable store: the claim is taken only after the gate has authorized the exact
+request (an unauthorized caller never creates or replays one), a replay of the
+same key and body returns the stored response without running the body, and the
+same key with another body is `409`. Claims are never released on error, so a
+failed execution is not retried under its key. The stored response is replayed
+verbatim: do not return secrets (such as an enrollment token) from an
+idempotent write; declare those `exempt` with a `replay_reason`. `required`
+needs an HTTP endpoint; an authored write that no endpoint exposes stays
+`exempt`. The operation cannot take path or query parameters: carry identifiers
+in the body.
+
 ## Same-transaction writes across groups
 
 A port method that takes `scope.Tx` first may be called by another group's
@@ -229,6 +437,83 @@ adapter uses only `queriesOf(tx)`; the tenant is the caller's. Any other
 operation naming the port, or a read operation, fails validation.
 `scope.Tx.Enqueue` stays fail-closed.
 
+A `scope = "provision"` operation may list such a port too (it must appear in the
+port's `tx_callers`). The provision body then receives the narrow interface and
+`TxDB`; `TxDB.Provision(ctx, p, run)` opens the one transaction bound to the NEW
+tenant, so the organization, its first admin and its first audit row commit or
+roll back together, attributed to the verified subject (`tx.SubjectID()`). The
+provisioning authority still mints at most one tenant per request.
+
+## Authentication events
+
+Managed credential handlers cannot call authored code, so events are declared
+and generated instead of hooked by hand. `[auth.events]` names one authored
+operation the generated glue runs when a session is issued or ended:
+
+```toml
+[auth.events]
+operation = "audit.RecordAuthEvent"
+on_error = "closed"   # or "best_effort"; default closed
+
+[[models]]
+id = "audit.AuthEvent"
+fields = ["event:string"]
+
+[[operations]]
+group = "audit"
+action = "RecordAuthEvent"
+permission = "audit.record"
+write = true
+idempotency = "exempt"
+replay_reason = "Authentication events are recorded once per sign-in."
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+input = "audit.AuthEvent"
+```
+
+The operation is an ordinary protected authored write: its body appends through
+`queriesOf` under RLS (for example into an append-only audit group). Validation
+requires local credentials and `[memberships]`; an input model of exactly
+`event:string`; no response; no endpoint, job or agent (so only the generated
+hook can run it); and every declared role must hold its permission, so a
+fail-closed policy can never lock out a member whose role lacks it.
+
+Recorded events, with `event` set to `login`, `oidc_login` (when OIDC is on) or
+`logout`:
+
+- **Sign-in / OIDC sign-in**: the handler's response is held until the record
+  is written. The subject is verified through the new live session; its
+  organizations come from its active memberships (`active_column` applies);
+  the operation runs once in each, through the normal identity gate
+  (membership, permission, RLS) and is attributed to the verified subject
+  (`tx.SubjectID()`). More than 16 organizations is a failure. Nothing is read
+  from the request: a presented `X-Tenant-ID` is ignored.
+- **Sign-out**: recorded before revocation (a revoked session cannot prove the
+  subject), after the same Origin and ingress checks as the handler.
+- **Not recorded in any org**: sign-up, verification, recovery, reset, failed
+  sign-in, and any event of a subject with no organization (for example sign-in
+  before provisioning). With no verified subject and organization there is no
+  scope to write into without letting a stranger choose or probe one, so they
+  are logged by kind only. Failed sign-in is deliberately identical for known
+  and unknown accounts; recording it per organization would need an
+  unauthenticated account-to-org lookup. The provisioning transaction records
+  the organization's first audit row itself (see above).
+- **Policy**: `closed` (default) denies the sign-in with 503, revokes the
+  just-issued session and delivers no credential; sign-out is refused with 503
+  and the session stays. `best_effort` logs the failure by event kind and
+  proceeds. A response too large to hold is never delivered.
+
+Organizations are resolved through a generated subject index on the memberships
+table, created by the proposed migration: a SELECT policy admitting only rows
+whose subject equals the transaction-local `app.auth_event_subject`, and a
+security-invoker view `pluto_auth_event_members` exposing only the organization
+id of active memberships. Only the generated hook sets the setting, from a live
+verified session; ARCH612 accepts exactly this policy beside tenant isolation,
+and the runtime role gets SELECT on the view only. Without `[auth.events]`
+neither the policy, the view, nor any read exists.
+
 ## Tenant-less system operations
 
 Everything is tenant scoped except two explicit shapes. Declare the tenant root
@@ -253,6 +538,28 @@ is its own id).
 `ARCH612` understands these two query kinds; no general tenant-less escape hatch
 exists. Inserts into the tenant root are accepted only in provision queries.
 
+## Feature flags on operations
+
+An `[[operations]]` entry (authored, generated, system) may declare
+`feature = "<key>"` and optionally `feature_client_visible = true`. The operation
+owns the flag: its `[[endpoints]]` entries inherit it, and an entry that declares
+a different or additional flag fails validation (route-only flags stay rejected).
+Keys are the existing flag keys; the flag is declared by use, defaults to off and
+is set through `<PREFIX>FEATURE_<KEY>` (dots and hyphens become underscores).
+
+- The generated route gate checks the flag after session verification and before
+  the handler, the identity gate, membership lookups, rate limits, idempotency or
+  the authored body run. A disabled flag answers `403 feature_disabled` to
+  every verified caller, authorized or not, and produces no database effect.
+  Anonymous callers still get `401`.
+- An enabled flag changes nothing else: authentication, membership, permission
+  and resource checks apply unchanged. A flag never grants authorization.
+- OpenAPI marks the operation with `x-feature`. `GET /api/features` (now served
+  by the candidate runtime) lists only keys declared `feature_client_visible`,
+  to authenticated callers.
+- Flags gate transports. Code that calls an operation directly (workers, other
+  authored code) is not flag gated; gate exposure, not authorization.
+
 ## Memberships, active state and the runtime role
 
 Candidate `[memberships]` binds roles to an app-owned declared table. Optional
@@ -268,3 +575,190 @@ tables; enable login and set the credential in the deployment. Generated
 start when the connected role is a superuser, has BYPASSRLS, owns or inherits
 ownership of a declared table, is not the declared runtime role, or a declared
 table lacks forced row-level security. There is no override.
+
+## Streams (WebSocket)
+
+An authored operation with `response = "stream"` is a long-lived bidirectional
+channel for gateway job pushes, relay fan-out or live replay. It is exposed
+only through one endpoint with `transport = "websocket"`; the body never sees a
+connection.
+
+```toml
+[[models]]
+id = "audit.Cursor"                 # client -> server
+fields = ["seq:int64"]
+
+[[models]]
+id = "audit.Tick"                   # server -> client
+fields = ["seq:int64", "type:string"]
+
+[[operations]]
+group = "audit"
+action = "Watch"
+permission = "audit.read"
+idempotency = "none"
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+response = "stream"
+item = "audit.Tick"                 # server message; required
+input = "audit.Cursor"              # client message; omit for push-only
+query = [{ name = "after", type = "int64" }]
+
+[operations.stream]                 # optional; these are the defaults
+max_message_bytes = 65536           # 1..1048576, both directions
+write_seconds = 10                  # slow-consumer deadline per Send
+ping_seconds = 20
+idle_seconds = 60                   # must exceed ping_seconds
+recheck_seconds = 15                # gate recheck interval
+max_connections = 256               # per operation, per process
+
+[[endpoints]]
+group = "audit"
+action = "Watch"
+operation = "audit.Watch"
+transport = "websocket"
+origins = ["app.example.com"]       # optional browser host patterns
+method = "GET"
+path = "/api/audit/watch"
+name = "Watch audit"
+description = "Replay audit events over a WebSocket."
+```
+
+The body is `func Watch(ctx, e scope.Execution, p WatchPorts, in
+models.WatchRequest, stream scope.Stream[models.Cursor, models.Tick]) error`.
+`stream.Send(ctx, msg)` writes one JSON text frame; `stream.Receive(ctx)`
+returns the next client message decoded strictly (one object, unknown fields
+and trailing data rejected) or `scope.ErrStreamClosed` when the stream ends,
+which a loop treats as its normal end. Returning nil closes normally. Push-only
+streams (no `input`) use `scope.Stream[scope.NoMessage, Out]`; any client data
+message disconnects the peer. Query parameters are the usual typed `query`
+declarations and arrive in `in`.
+
+Generated code owns everything else:
+
+- Authentication and the gate run before the upgrade (`Prepare`): a denied
+  caller gets an ordinary 401/403/400 and never a socket; a full operation gets
+  503 `stream_capacity`. Serve then reruns the gate and runs the body inside
+  it, so `scope.DB` and every adapter call recheck identity, membership,
+  permission and resource per access, exactly as for HTTP bodies.
+- Origin: a request carrying an `Origin` header must be same-host or match
+  `origins` (host patterns; `*.example.com` allowed, a bare `*` is rejected).
+  Clients without an Origin header are service clients, not browsers. The
+  session transport's trusted origin may differ from the Host seen behind a
+  proxy; list it in `origins`.
+- Tenant: the `X-Tenant-ID` header, or for browsers (no custom headers on a
+  WebSocket) the `tenant` query parameter, verified like any tenant selection.
+  Credentials are the session cookie or bearer token, so a machine principal
+  works wherever the application accepts it for HTTP (the stream only needs an
+  `access.Caller`).
+- Limits: read limit and outbound size check at `max_message_bytes`; text
+  frames only; `Send` blocks while the peer is slow and fails the stream after
+  `write_seconds` (backpressure, no unbounded queue); the inbound queue holds
+  16 messages, so a body that declares input must keep calling `Receive`.
+- Liveness: the runtime pings every `ping_seconds` and closes (1001) a peer
+  that has not answered within `idle_seconds`. Quiet but responsive streams
+  stay open.
+- Revocation: every `recheck_seconds` the live gate is re-verified. Any
+  failure, including a transient one, closes the stream (1008 for denied or
+  unauthenticated, 1011 otherwise) and cancels the body's context, so a
+  suspended member, expired session or removed role loses the stream within
+  one interval.
+- Close codes are fixed strings, never error text: 1000 done, 1001 idle or
+  going away, 1003 binary frame, 1007 invalid message, 1008 unauthorized or
+  unexpected message, 1009 too big, 1011 internal error.
+
+A stream may write (`write = true`, `idempotency = "exempt"` with a
+`replay_reason`; the upgrade is still a GET protected by the Origin check).
+Cross-tenant data stays impossible: tenant comes only from the verified
+execution and RLS binds every transaction.
+
+Test bodies with `scopetest.RunStream(ctx, harness, subject, tenant, resource,
+drive, body)`: it runs the body under a real gate execution through the same
+runtime over an in-memory peer (`Send`, `SendRaw`, `Receive`, `Close`).
+
+Generated OpenAPI documents the upgrade as a GET with a 101 response and an
+`x-websocket` extension holding the message schemas, the size limit and the
+allowed origins. Blueprints and `pluto generate` need the WebSocket module:
+blueprints pin `github.com/coder/websocket` v1.8.14 in go.mod/go.sum; after
+adding a stream by editing pluto.toml run `go mod tidy`. Authored code may not
+declare any websocket library in `[[authored.dependencies]]`, and the library
+is imported only by generated files.
+
+Limits of this phase: connection caps are per process; streams are not closed
+by `http.Server.Shutdown` (hijacked connections), so rely on the process exit
+or the recheck interval; there is no per-subject connection quota or message
+rate limit beyond the size, write and idle bounds.
+
+## Per-tenant background jobs
+
+Offline detection, expiry sweeps and similar maintenance must run for every
+tenant without any cross-tenant query. Declare an operation with
+`scope = "each_tenant"`:
+
+```toml
+[[roles]]
+id = "janitor"
+name = "Tenant janitor"
+description = "Service role of the per-tenant sweeps."
+permissions = ["gateways.sweep"]
+
+[[operations]]
+group = "gateways"
+action = "MarkStale"
+scope = "each_tenant"
+schedule = "every 30s"          # "every <5s..24h>" or "triggered"
+timeout = "10s"                 # per tenant, 1s..5m, default 30s
+concurrency = 2                 # simultaneous tenants, 1..32, default 4
+max_attempts = 2                # pluto-jobs budget per tenant run, default 3
+write = true
+idempotency = "exempt"
+replay_reason = "Marking a gateway offline twice is a no-op."
+permission = "gateways.sweep"
+service_role = "janitor"
+body = "authored"
+resource = "gateways.sweep"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+```
+
+The body is `logic.MarkStale(ctx, e scope.Execution, ports MarkStalePorts) error`.
+It has no request, no HTTP entry, no caller and no tenant input; `e` is the
+execution of one tenant and `e.Tenant()`, `scope.DB.Read/Write` and
+`queriesOf(tx)` behave as in any authored body, so row-level security and
+ARCH612 bind it to that tenant alone. `write = true` needs
+`idempotency = "exempt"` and a `replay_reason`: a run may repeat per tenant and
+schedule slot, so the body must be idempotent.
+
+How it runs (all generated):
+
+- The tenant root table (`tenant_root = true`, required) gains a migration with
+  a SELECT policy `USING (current_setting('app.tenant_index', true) = 'on')` and
+  a security-invoker view `pluto_tenant_index` exposing the tenant column alone.
+  Only the generated index reader sets the switch, in a read-only transaction
+  that queries only that view. There is no BYPASSRLS role and no tenant-less
+  escape hatch; sqlcheck requires the exact policy shape and rejects any wider
+  permissive policy on the root, and authored SQL may not touch the view.
+- `Schedule(ctx)` on the runtime (started by the generated worker main) ticks
+  each scheduled job, pages the index and enqueues one pluto-jobs delivery per
+  tenant with kind `tenant.<group>.<action>`, a delivery id derived from the
+  kind, tenant and schedule slot (replicas enqueue each run once) and the
+  declared budget. `triggered` jobs have no loop; call
+  `runtime.Operations.<Group><Action>.Enqueue(ctx)` from your own trigger.
+- Each delivery is input, not authority: the handler checks kind and budget,
+  decodes the payload, re-checks the tenant against the index (a vanished tenant
+  is a permanent failure), takes a concurrency slot (`concurrency`), applies
+  the per-tenant `timeout`, authenticates the configured service credential live
+  and runs the identity gate. The gate's membership check is "the tenant exists"
+  and its RBAC resolver grants exactly the declared `service_role`, which must
+  directly grant the operation's `permission`; every `scope.DB` call rechecks
+  the session, tenant, permission and resource policy. Retries and backoff are
+  pluto-jobs'; handler timeout and lease are sized for the slowest job.
+- The service credential is a session token in
+  `<PREFIX>JOB_<GROUP>_<ACTION>_CREDENTIAL`. The subject behind it needs no
+  membership in any tenant; its authority is the service role alone, so give
+  that role only what the sweep needs.
+
+Delivered rows stay in `pluto_jobs` (pluto-jobs has no retention); plan pruning
+for high-frequency schedules across many tenants.
