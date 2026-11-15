@@ -46,7 +46,12 @@ func seamFixture(t *testing.T) Manifest {
 	m.Ports = []Port{{
 		ID:      "audit.Events",
 		Adapter: "audit.EventStore",
-		Methods: []string{"Append", "Query", "Scan"},
+		Methods: []string{
+			"Append(scope.Execution, models.Event) error",
+			"Query(scope.Execution, pagination.Request) " +
+				"(pagination.Page[models.Entry], error)",
+			"Scan(scope.Execution, int64, int64) ([]models.Entry, error)",
+		},
 	}}
 	m.Models = []Model{
 		{
@@ -457,16 +462,34 @@ func TestSeamQueryRequiresProtectedRead(t *testing.T) {
 	}
 }
 
-func TestAuthoredBodyFailsClosedBeforeGenerators(t *testing.T) {
+func streamFixture(t *testing.T) Manifest {
+	t.Helper()
+
 	m := seamFixture(t)
 
+	for index := range m.Operations {
+		if m.Operations[index].ID() == "audit.List" {
+			m.Operations[index].Response = ResponseStream
+			m.Operations[index].Collection = false
+			m.Operations[index].Query = nil
+		}
+	}
+
+	m.Endpoints = nil
+
+	return m
+}
+
+func TestStreamBodyFailsClosed(t *testing.T) {
+	m := streamFixture(t)
+
 	if _, err := Managed(m); err == nil ||
-		!strings.Contains(err.Error(), "seam generation is not implemented") {
+		!strings.Contains(err.Error(), "does not support streams") {
 		t.Fatalf("Managed: %v", err)
 	}
 
 	if _, err := CandidateManagedPaths(m); err == nil {
-		t.Fatal("CandidateManagedPaths must refuse authored bodies")
+		t.Fatal("CandidateManagedPaths must refuse stream bodies")
 	}
 
 	root := t.TempDir()
@@ -482,14 +505,18 @@ func TestAuthoredBodyFailsClosedBeforeGenerators(t *testing.T) {
 
 	err := Vet(context.Background(), root, m, io.Discard, io.Discard)
 	if err == nil ||
-		!strings.Contains(err.Error(), "seam generation is not implemented") {
-		t.Fatalf("Vet must refuse authored bodies for that reason: %v", err)
+		!strings.Contains(err.Error(), "does not support streams") {
+		t.Fatalf("Vet must refuse stream bodies for that reason: %v", err)
 	}
 }
 
 func TestRefuseUngeneratedAuthoredNamesOperation(t *testing.T) {
-	err := refuseUngeneratedAuthored(seamFixture(t))
+	err := refuseUngeneratedAuthored(streamFixture(t))
 	if err == nil || !strings.Contains(err.Error(), "audit.List") {
 		t.Fatalf("got %v", err)
+	}
+
+	if err := refuseUngeneratedAuthored(seamFixture(t)); err != nil {
+		t.Fatalf("supported authored shapes refused: %v", err)
 	}
 }

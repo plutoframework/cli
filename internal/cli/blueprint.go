@@ -23,6 +23,12 @@ type operationBlueprint struct {
 	Endpoints          []project.Endpoint          `toml:"endpoints"`
 	Jobs               []project.Job               `toml:"jobs"`
 	Agents             []project.Agent             `toml:"agents"`
+	Tables             []project.Table             `toml:"tables"`
+	Queries            []project.QuerySet          `toml:"queries"`
+	Ports              []project.Port              `toml:"ports"`
+	Models             []project.Model             `toml:"models"`
+	Authored           *project.Authored           `toml:"authored"`
+	Memberships        *project.Memberships        `toml:"memberships"`
 }
 
 func readOperationBlueprint(path string) (operationBlueprint, error) {
@@ -77,7 +83,15 @@ func readOperationBlueprint(path string) (operationBlueprint, error) {
 		blueprint.Jobs,
 	)+len(
 		blueprint.Agents,
-	) == 0 {
+	)+len(
+		blueprint.Tables,
+	)+len(
+		blueprint.Queries,
+	)+len(
+		blueprint.Ports,
+	)+len(
+		blueprint.Models,
+	) == 0 && blueprint.Authored == nil && blueprint.Memberships == nil {
 		return blueprint, fmt.Errorf(
 			"blueprint must declare application contracts",
 		)
@@ -156,6 +170,39 @@ func addBlueprintCommand(options Options) *cobra.Command {
 			manifest.Agents = append(
 				append([]project.Agent(nil), manifest.Agents...),
 				blueprint.Agents...)
+			manifest.Tables = append(
+				append([]project.Table(nil), manifest.Tables...),
+				blueprint.Tables...)
+			manifest.Queries = append(
+				append([]project.QuerySet(nil), manifest.Queries...),
+				blueprint.Queries...)
+			manifest.Ports = append(
+				append([]project.Port(nil), manifest.Ports...),
+				blueprint.Ports...)
+			manifest.Models = append(
+				append([]project.Model(nil), manifest.Models...),
+				blueprint.Models...)
+
+			if blueprint.Authored != nil {
+				if manifest.Authored != nil {
+					return fmt.Errorf(
+						"blueprint cannot replace existing [authored]",
+					)
+				}
+
+				manifest.Authored = blueprint.Authored
+			}
+
+			if blueprint.Memberships != nil {
+				if manifest.Memberships != nil {
+					return fmt.Errorf(
+						"blueprint cannot replace existing [memberships]",
+					)
+				}
+
+				manifest.Memberships = blueprint.Memberships
+			}
+
 			if err := manifest.Validate(); err != nil {
 				return err
 			}
@@ -206,6 +253,20 @@ func addBlueprintCommand(options Options) *cobra.Command {
 				}
 			}
 
+			if err := merge(
+				project.AuthoredAdapterStubs(manifest),
+			); err != nil {
+				return err
+			}
+
+			if len(blueprint.Tables) > 0 {
+				if err := merge(
+					project.ProposeTableMigrations(root, manifest),
+				); err != nil {
+					return err
+				}
+			}
+
 			return applyBlueprintChange(cmd, root, manifest, old, files, dry)
 		},
 	}
@@ -237,6 +298,19 @@ func applyBlueprintChange(
 	previous, err := project.Managed(old)
 	if err != nil {
 		return err
+	}
+
+	// sqlc.yaml and .golangci.yml are the published tool files until a query
+	// set is declared; the candidate render then extends them, so untouched
+	// copies are replaceable.
+	for _, name := range []string{"sqlc.yaml", ".golangci.yml"} {
+		if _, owned := previous[name]; owned {
+			continue
+		}
+
+		if tool, ok := project.ToolFiles(old)[name]; ok {
+			previous[name] = tool
+		}
 	}
 
 	for _, name := range []string{"pluto.toml", "go.mod", "go.sum"} {

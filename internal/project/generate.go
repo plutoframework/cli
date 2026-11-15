@@ -38,6 +38,10 @@ type templateData struct {
 	Params          []string
 	Body            bool
 	TestPath        string
+
+	// Authored-body seam views; see candidate_authored.go.
+	Authored      authoredOp
+	AuthoredGroup authoredGroupView
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {
@@ -307,6 +311,13 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 			d := dataFor(m, e)
 
 			request := "nil"
+			query := ""
+
+			if authored, ok := m.Operation(e.Operation); ok &&
+				authored.isAuthored() {
+				query = seamPathQuery(authored)
+			}
+
 			if d.Body {
 				request = e.Group + "." + e.Action + "Request{}"
 			}
@@ -318,7 +329,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 					"Permission:access.%sPermission,\nFeature:%q,\n"+
 					"Request:%s,\nResponse:%s.%sResponse{},\n"+
 					"SuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n"+
-					"}\n",
+					"%s}\n",
 				d.Symbol,
 				e.Group+"."+e.Action,
 				e.Name,
@@ -333,6 +344,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				e.Action,
 				e.Collection,
 				e.RequiresIdempotency(),
+				query,
 			)
 			fmt.Fprintf(&catalog, "%s,\n", d.Symbol)
 			fmt.Fprintf(
@@ -565,7 +577,24 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	for path, data := range ToolFiles(m) {
+		if _, managed := files[path]; managed &&
+			(path == "sqlc.yaml" || path == ".golangci.yml") &&
+			m.Boundary.Mode == "candidate" {
+			continue
+		}
+
 		files[path] = data
+	}
+
+	if m.Boundary.Mode == "candidate" {
+		stubs, err := AuthoredAdapterStubs(m)
+		if err != nil {
+			return nil, err
+		}
+
+		for path, data := range stubs {
+			files[path] = data
+		}
 	}
 
 	files["go.mod"], err = AdoptBoundaryModules(
@@ -575,6 +604,10 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if m.Boundary.Mode == "candidate" {
+		applyFrameworkMigrations(m, files)
 	}
 
 	manifest, err := Encode(m)

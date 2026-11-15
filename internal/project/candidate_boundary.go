@@ -45,6 +45,8 @@ type candidateRules struct {
 	protectedTypes     map[string]bool
 	privateNames       map[string]map[string]string
 	domainFiles        map[string]bool
+	roles              map[string]authoredRole
+	dependencies       []string
 }
 
 // inspectCandidateBoundaries checks the closed, declared candidate source
@@ -126,7 +128,9 @@ func inspectCandidateBoundaries(
 		)
 	}
 
-	if len(declaration.Operations) > 0 || len(declaration.Resources) > 0 ||
+	if (len(declaration.Operations) > 0 &&
+		!allAuthored(declaration.Operations)) ||
+		len(declaration.Resources) > 0 ||
 		len(declaration.Contracts) > 0 ||
 		len(declaration.Effects) > 0 {
 		if err := ValidateContracts(
@@ -181,6 +185,10 @@ func inspectCandidateBoundaries(
 		}
 
 		operations[operation.ID()] = operation
+		if operation.Body == BodyAuthored {
+			continue
+		}
+
 		contract, ok := contracts[operation.ID()]
 
 		write := contract.Kind == "create" || contract.Kind == "transition" ||
@@ -272,6 +280,7 @@ func inspectCandidateBoundaries(
 	}
 
 	rules.managed = owned
+	addAuthoredRules(&rules, module, canonical)
 
 	// The authored credential seam is a declared framework extension. Its
 	// files are not trusted by content; their capabilities are restricted.
@@ -281,6 +290,8 @@ func inspectCandidateBoundaries(
 			filepath.Dir(CandidateCredentialSeam),
 		)
 	}
+
+	adapterDirs, adapterModules := adapterDirectories(metadata)
 
 	managedDirectories := map[string]bool{}
 
@@ -430,6 +441,14 @@ func inspectCandidateBoundaries(
 		)
 	}
 
+	sqlcOutputs := sqlcGeneratedFiles(root, canonical)
+
+	for _, file := range files {
+		if sqlcOutputs[file.path] {
+			rules.managed[file.path] = true
+		}
+	}
+
 	types := map[string]candidateType{}
 	functions := map[string]candidateType{}
 
@@ -480,6 +499,27 @@ func inspectCandidateBoundaries(
 			add(id, file.path, set.Position(pos).Line, message, repair)
 		}
 
+		// sqlc output is generated, not authored; ARCH612 proves it with sqlc
+		// diff. It may reach only the scope package and the driver.
+		if sqlcOutputs[file.path] {
+			for _, spec := range file.tree.Imports {
+				path, err := strconv.Unquote(spec.Path.Value)
+				if err != nil || candidateStdlib(path) ||
+					path == module+"/"+scopeDir ||
+					strings.HasPrefix(path, "github.com/jackc/pgx/v5") {
+					continue
+				}
+
+				emit(
+					"ARCH610",
+					spec.Pos(),
+					"sqlc output imports outside scope and the driver: "+path,
+					"Generated query packages use only internal/scope "+
+						"types (through sqlc go_type overrides) and pgx.",
+				)
+			}
+		}
+
 		for _, spec := range file.tree.Imports {
 			path, _ := strconv.Unquote(spec.Path.Value)
 			if path == "unsafe" {
@@ -493,7 +533,10 @@ func inspectCandidateBoundaries(
 				)
 			}
 
-			if !rules.managed[file.path] && candidateDataPackage(path) {
+			adapterPgtypeUse := adapterDirs[file.directory] != "" &&
+				path == adapterPgtype
+			if !rules.managed[file.path] && candidateDataPackage(path) &&
+				!adapterPgtypeUse {
 				emit(
 					"ARCH608",
 					spec.Pos(),
@@ -578,6 +621,22 @@ func inspectCandidateBoundaries(
 			continue
 		}
 
+		inspectAuthoredImports(file, rules, module, emit)
+
+		if group, ok := adapterDirs[file.directory]; ok {
+			inspectCandidateAdapter(file, group, module, adapterModules, emit)
+			inspectCandidateFile(file, rules, types, functions, emit)
+
+			continue
+		}
+
+		if role, ok := rules.roles[file.directory]; ok {
+			inspectAuthoredRole(file, rules, role, module, emit)
+			inspectCandidateFile(file, rules, types, functions, emit)
+
+			continue
+		}
+
 		if credentialSeam != "" && file.directory == credentialSeam {
 			inspectCandidateCredentialSeam(file, module, emit)
 			inspectCandidateFile(file, rules, types, functions, emit)
@@ -597,6 +656,8 @@ func inspectCandidateBoundaries(
 		)
 		inspectCandidateFile(file, rules, types, functions, emit)
 	}
+
+	checkAuthoredBodies(canonical, files, add)
 
 	return diagnostics, []string{
 		"candidate source checks compose with exact managed integrity; " +

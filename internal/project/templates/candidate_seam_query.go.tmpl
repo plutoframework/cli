@@ -1,0 +1,97 @@
+package {{.Group}}
+
+import (
+	"net/url"
+	"sort"
+	"strconv"
+	"unicode/utf8"
+)
+
+// QueryError is a rejected query parameter. Code is a stable client-visible
+// error code; Param names the offending parameter.
+type QueryError struct {
+	Code  string
+	Param string
+}
+
+func (e *QueryError) Error() string {
+	return e.Code + ": " + e.Param
+}
+
+// queryUnknown rejects every parameter that is not declared.
+func queryUnknown(query url.Values, allowed ...string) error {
+	known := map[string]bool{}
+	for _, name := range allowed {
+		known[name] = true
+	}
+
+	names := make([]string, 0, len(query))
+	for name := range query {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	for _, name := range names {
+		if !known[name] {
+			return &QueryError{Code: "unknown_query_parameter", Param: name}
+		}
+	}
+
+	return nil
+}
+
+// queryOne returns the single non-empty value of a parameter.
+func queryOne(query url.Values, name string) (string, bool, error) {
+	values, present := query[name]
+	if !present {
+		return "", false, nil
+	}
+
+	if len(values) != 1 {
+		return "", false, &QueryError{
+			Code:  "repeated_query_parameter",
+			Param: name,
+		}
+	}
+
+	if values[0] == "" {
+		return "", false, &QueryError{
+			Code:  "empty_query_parameter",
+			Param: name,
+		}
+	}
+
+	return values[0], true, nil
+}
+
+// queryText accepts valid UTF-8 without control characters.
+func queryText(value string) bool {
+	if !utf8.ValidString(value) {
+		return false
+	}
+
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+
+	return true
+}
+
+// queryLimit accepts a decimal page limit between 1 and 100.
+func queryLimit(value string) (int, error) {
+	limit, err := strconv.Atoi(value)
+	if err != nil || len(value) > 3 || limit < 1 || limit > 100 {
+		return 0, &QueryError{Code: "invalid_limit", Param: "limit"}
+	}
+
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return 0, &QueryError{Code: "invalid_limit", Param: "limit"}
+		}
+	}
+
+	return limit, nil
+}

@@ -112,13 +112,27 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		contracts[contract.ID] = contract
 	}
 
+	authored, err := candidateAuthoredManaged(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range authored {
+		files[path] = source
+	}
+
 	for _, operation := range m.Operations {
+		if operation.Body == BodyAuthored {
+			continue
+		}
+
 		contract := contracts[operation.ID()]
 		data := dataFor(m, operation.Endpoint())
 		data.Resource = resources[contract.Resource]
 		data.Contract = contract
 
 		data.ContractEffects = m.Effects
+
 		for _, item := range []struct {
 			path, name string
 		}{
@@ -151,6 +165,12 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 				"candidate_workflow.go",
 			},
 		} {
+
+			// Authored operations get their models from the seam generator.
+			if operation.isAuthored() && item.name == "candidate_models.go" {
+				continue
+			}
+
 			source, err := render(item.name, data)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", item.path, err)
@@ -182,7 +202,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		data.Contract = contracts[entry.Operation]
 		data.Resource = resources[data.Contract.Resource]
 
-		source, err := render("candidate_handler.go", data)
+		var source []byte
+
+		if authored, ok := m.Operation(entry.Operation); ok &&
+			authored.isAuthored() {
+			source, err = seamHandler(m, authored)
+		} else {
+			source, err = render("candidate_handler.go", data)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -190,6 +218,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		files["internal/handlers/"+entry.Group+"/"+strings.ToLower(
 			entry.Action,
 		)+".go"] = source
+	}
+
+	seamModels, err := candidateSeamModels(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range seamModels {
+		files[path] = source
 	}
 
 	for _, job := range m.Jobs {
@@ -256,6 +293,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		}
 	}
 
+	adapterFiles, err := candidateAdapterFiles(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range adapterFiles {
+		files[path] = source
+	}
+
 	files["internal/app/routes_gen.go"] = []byte("package app\n")
 	files["internal/app/app.go"] = []byte("package app\n")
 	files["internal/app/worker.go"] = []byte("package app\n")
@@ -274,22 +320,25 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 
 	files["internal/access/roles.go"] = roles
 
-	memberships, err := render(
-		"candidate_memberships.go",
-		dataFor(m, Endpoint{}),
-	)
+	var memberships []byte
+	if m.Memberships != nil {
+		memberships, err = candidateAppMemberships(m)
+	} else {
+		memberships, err = render(
+			"candidate_memberships.go",
+			dataFor(m, Endpoint{}),
+		)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
 	files["internal/storage/identity/memberships_gen.go"] = memberships
-	files["db/migrations/099_memberships.sql"] = []byte(
-		`CREATE TABLE "pluto_resource_memberships" (` +
-			`"tenant_id" text NOT NULL,` +
-			`"actor_id" text NOT NULL,` +
-			`"roles" text[] NOT NULL,` +
-			`PRIMARY KEY("tenant_id","actor_id"));`,
-	)
+
+	if m.Memberships == nil {
+		files["db/migrations/099_memberships.sql"] = candidateMembershipsSchema
+	}
 
 	for _, item := range []struct {
 		path, name string
@@ -323,6 +372,8 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 				formatted...)
 		}
 	}
+
+	applyFrameworkMigrations(m, files)
 
 	return files, nil
 }

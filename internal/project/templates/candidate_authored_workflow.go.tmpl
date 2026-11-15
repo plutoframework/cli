@@ -1,0 +1,70 @@
+package {{.Group}}
+
+import (
+	"context"
+{{- if .Authored.PagedRequest}}
+	"fmt"
+	"strconv"
+{{- end}}
+
+{{- if .Authored.PagedRequest}}
+	commonDomain "{{.Module}}/internal/domain"
+{{- end}}
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/scope"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
+{{- if .Authored.Pagination}}
+	"github.com/plutoframework/pluto-core/pagination"
+{{- end}}
+)
+
+// execute is the only caller of the authored body. It binds the
+// callback-scoped execution to this operation's gate and fixed resource, so
+// every data access the body makes revalidates identity, membership,
+// permission and resource policy.
+{{- if .Authored.PagedRequest}}
+//
+// A page request's keyset binding is derived here from the verified subject,
+// tenant, resource and the canonical filters, never from the caller.
+{{- end}}
+func (operation *{{.Action}}) execute(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	request models.{{.Action}}Request,
+) ({{.Authored.Returns}}) {
+{{- if .Authored.PagedRequest}}
+	query := request.Values()
+	if request.Limit > 0 {
+		query.Set("limit", strconv.Itoa(request.Limit))
+	}
+
+	if request.Cursor != "" {
+		query.Set("cursor", request.Cursor)
+	}
+
+	page, err := pagination.Parse(
+		query,
+		pagination.Binding(
+			query,
+			{{q .Authored.Resource}},
+			{{q .Authored.ID}},
+			execution.SubjectID(),
+			execution.TenantID()))
+	if err != nil {
+		var zero {{.Authored.Result}}
+
+		return zero, fmt.Errorf("%w: %w", commonDomain.ErrInvalidInput, err)
+	}
+
+	request.Page = page
+{{end}}
+	return logic.{{.Action}}(
+		ctx,
+		scope.Bind(
+			execution,
+			operation.{{lowerFirst .Action}}Gate,
+			{{q .Authored.Resource}}),
+		operation.{{lowerFirst .Action}}Ports,
+		request)
+}

@@ -47,7 +47,7 @@ func TestPublishedToCandidateWithPins(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if plan.Blocked || len(plan.Manual) != 0 {
+	if plan.Blocked || len(scaffoldTestManual(plan)) != 0 {
 		t.Fatalf("pinned migration blocked: %+v", plan.Manual)
 	}
 

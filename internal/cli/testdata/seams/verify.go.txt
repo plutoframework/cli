@@ -1,0 +1,44 @@
+package audit
+
+import (
+	"context"
+
+	models "example.test/auditapp/internal/models/audit"
+	rules "example.test/auditapp/internal/rules/audit"
+	"example.test/auditapp/internal/scope"
+)
+
+const verifyBatch = 100
+
+// Verify recomputes every stored event hash of the verified tenant.
+func Verify(
+	ctx context.Context,
+	e scope.Execution,
+	p VerifyPorts,
+	_ models.VerifyRequest,
+) (models.Verification, error) {
+	result := models.Verification{Valid: true}
+
+	var after int64
+
+	for {
+		batch, err := p.Events.Scan(ctx, e, after, verifyBatch)
+		if err != nil {
+			return models.Verification{}, err
+		}
+
+		for _, entry := range batch {
+			result.Checked++
+
+			if entry.Hash != rules.EventHash(entry.Type, entry.Payload) {
+				result.Valid = false
+			}
+
+			after = entry.Seq
+		}
+
+		if len(batch) < verifyBatch {
+			return result, nil
+		}
+	}
+}

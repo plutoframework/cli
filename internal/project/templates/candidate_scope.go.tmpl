@@ -1,0 +1,219 @@
+// Package scope is the generated, app-local capability surface authored role
+// packages receive. It is provisional and not a published Pluto API.
+//
+// Authored code can neither construct nor convert any type here: an Execution
+// exists only inside its gate callback, a Tenant is obtainable only from an
+// Execution or Tx, and a Tx exists only inside DB.Read or DB.Write, which
+// recheck the live gate before opening a transaction.
+package scope
+
+import (
+	"context"
+	"database/sql/driver"
+	"errors"
+	"fmt"
+
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// ErrNoTenant rejects a zero Tenant or Execution.
+var ErrNoTenant = errors.New("scope: no verified tenant")
+
+// ErrUnsupported reports a capability whose generator is not available yet.
+var ErrUnsupported = errors.New("scope: capability not supported")
+
+// Execution is the only identity an authored body sees: no constructor, the
+// zero value denies, and it is valid only inside its gate callback.
+type Execution struct {
+	scopeExecution *identitygate.Execution
+	scopeGate      *identitygate.Gate
+	scopeResource  string
+}
+
+// SubjectID is the verified acting subject and the only legitimate actor
+// source for authored code. Never take an actor from request input.
+func (e Execution) SubjectID() string {
+	if e.scopeExecution == nil {
+		return ""
+	}
+
+	return e.scopeExecution.SubjectID()
+}
+
+// Tenant is the verified tenant of this execution.
+func (e Execution) Tenant() Tenant {
+	if e.scopeExecution == nil {
+		return Tenant{}
+	}
+
+	return Tenant{scopeTenant: e.scopeExecution.TenantID()}
+}
+
+// Tenant is the sqlc go_type of every declared tenant column. Authored code
+// cannot build one, so every tenant-scoped query argument is the verified
+// tenant. Scanning a result column never produces a usable value.
+type Tenant struct {
+	scopeTenant string
+}
+
+// Value implements driver.Valuer and rejects an empty tenant.
+func (t Tenant) Value() (driver.Value, error) {
+	if t.scopeTenant == "" {
+		return nil, ErrNoTenant
+	}
+
+	return t.scopeTenant, nil
+}
+
+// Scan accepts a tenant column read back from the database and discards it. A
+// scanned value never becomes a usable Tenant, so Scan cannot forge one.
+func (t *Tenant) Scan(value any) error {
+	switch value.(type) {
+	case nil, string, []byte:
+		return nil
+	}
+
+	return fmt.Errorf("scope: unsupported tenant column type %T", value)
+}
+
+// String is for diagnostics only.
+func (t Tenant) String() string {
+	return t.scopeTenant
+}
+
+// DB opens gate-rechecked tenant transactions. It holds the pool privately.
+type DB struct {
+	scopeDBPool *pgxpool.Pool
+}
+
+// Tx is one open tenant-scoped transaction.
+type Tx struct {
+	scopeTx     pgx.Tx
+	scopeTenant Tenant
+}
+
+// Tenant is the verified tenant this transaction is bound to.
+func (t Tx) Tenant() Tenant {
+	return t.scopeTenant
+}
+
+// Read rechecks the live gate, opens a read-only transaction and binds
+// app.tenant_id for row-level security.
+func (d DB) Read(
+	ctx context.Context,
+	e Execution,
+	run func(context.Context, Tx) error,
+) error {
+	return d.within(ctx, e, pgx.ReadOnly, run)
+}
+
+// Write is Read with a read-write transaction.
+func (d DB) Write(
+	ctx context.Context,
+	e Execution,
+	run func(context.Context, Tx) error,
+) error {
+	return d.within(ctx, e, pgx.ReadWrite, run)
+}
+
+func (d DB) within(
+	ctx context.Context,
+	e Execution,
+	mode pgx.TxAccessMode,
+	run func(context.Context, Tx) error,
+) error {
+	if d.scopeDBPool == nil || e.scopeExecution == nil ||
+		e.scopeGate == nil || run == nil {
+		return ErrNoTenant
+	}
+
+	tenant := e.scopeExecution.TenantID()
+
+	return e.scopeGate.Use(
+		ctx,
+		e.scopeExecution,
+		tenant,
+		e.scopeResource,
+		func(ctx context.Context) error {
+			return d.transact(ctx, mode, Tenant{scopeTenant: tenant}, run)
+		},
+	)
+}
+
+func (d DB) transact(
+	ctx context.Context,
+	mode pgx.TxAccessMode,
+	tenant Tenant,
+	run func(context.Context, Tx) error,
+) (err error) {
+	tx, err := d.scopeDBPool.BeginTx(ctx, pgx.TxOptions{AccessMode: mode})
+	if err != nil {
+		return err
+	}
+
+	// Rollback after Commit is a no-op, so every exit, including a panic in
+	// run, releases the transaction.
+	defer func() {
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+	}()
+
+	if _, err = tx.Exec(
+		ctx,
+		"SELECT set_config('app.tenant_id', $1, true)",
+		tenant.scopeTenant,
+	); err != nil {
+		return err
+	}
+
+	if err = run(ctx, Tx{scopeTx: tx, scopeTenant: tenant}); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// Queries binds an sqlc constructor to the transaction. Only the generated
+// per-group queriesOf helper may call it; authored adapters call queriesOf(tx).
+// It panics when the constructor does not take a pgx-compatible DBTX, which
+// sqlc's pgx/v5 output always does.
+func Queries[Q, D any](t Tx, constructor func(D) Q) Q {
+	db, ok := any(t.scopeTx).(D)
+	if !ok || t.scopeTx == nil {
+		panic("scope: sqlc constructor does not accept a pgx transaction")
+	}
+
+	return constructor(db)
+}
+
+// NoRows reports an empty single-row result.
+func NoRows(err error) bool {
+	return errors.Is(err, pgx.ErrNoRows)
+}
+
+// Enqueue is reserved for transactional job enqueue; its generator is a later
+// phase, so it fails closed.
+func (t Tx) Enqueue(context.Context, string, []byte) error {
+	return ErrUnsupported
+}
+
+// Bind is a capability: only generated workflow files and the scope test
+// harness may call it. It attaches a callback-scoped execution and its gate.
+func Bind(
+	execution *identitygate.Execution,
+	gate *identitygate.Gate,
+	resource string,
+) Execution {
+	return Execution{
+		scopeExecution: execution,
+		scopeGate:      gate,
+		scopeResource:  resource,
+	}
+}
+
+// NewDB is a capability: only generated composition may call it.
+func NewDB(pool *pgxpool.Pool) DB {
+	return DB{scopeDBPool: pool}
+}

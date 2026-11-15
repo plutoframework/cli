@@ -1,0 +1,21 @@
+package audit
+
+import (
+	"context"
+
+	models "example.test/auditapp/internal/models/audit"
+	"example.test/auditapp/internal/scope"
+
+	"github.com/plutoframework/pluto-core/pagination"
+)
+
+// List returns one page of the verified tenant's audit events. Filters were
+// parsed and the cursor was bound to the verified scope by generated code.
+func List(
+	ctx context.Context,
+	e scope.Execution,
+	p ListPorts,
+	in models.ListRequest,
+) (pagination.Page[models.Entry], error) {
+	return p.Events.Query(ctx, e, in)
+}

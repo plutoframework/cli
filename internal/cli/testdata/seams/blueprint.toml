@@ -1,0 +1,120 @@
+[[roles]]
+id = "auditor"
+name = "Auditor"
+description = "Reads the audit trail."
+permissions = ["audit.read"]
+
+[[roles]]
+id = "recorder"
+name = "Recorder"
+description = "Reads and appends audit events."
+permissions = ["audit.read", "audit.write"]
+
+[[tables]]
+group = "access"
+name = "users"
+tenant_column = "org_id"
+row_security = true
+
+[[tables]]
+group = "audit"
+name = "audit_events"
+tenant_column = "org_id"
+append_only = true
+row_security = true
+
+[[queries]]
+group = "audit"
+files = ["db/queries/audit/*.sql"]
+tables = ["audit_events"]
+
+[[ports]]
+id = "audit.Events"
+adapter = "audit.EventStore"
+methods = [
+  "Append(scope.Execution, models.NewEvent) error",
+  "Query(scope.Execution, models.ListRequest) (pagination.Page[models.Entry], error)",
+  "Scan(scope.Execution, int64, int64) ([]models.Entry, error)",
+]
+
+[[models]]
+id = "audit.Entry"
+fields = ["seq:int64", "type:string", "payload:json", "hash:hex", "created_at:time"]
+
+[[models]]
+id = "audit.NewEvent"
+fields = ["type:string", "payload:json"]
+
+[[models]]
+id = "audit.Verification"
+fields = ["valid:bool", "checked:int64"]
+
+[[operations]]
+group = "audit"
+action = "List"
+permission = "audit.read"
+collection = true
+idempotency = "none"
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+response = "page"
+item = "audit.Entry"
+query = [
+  { name = "actor_id", type = "string", max = 256 },
+  { name = "type", type = "string", max = 64 },
+  { name = "from", type = "time" },
+  { name = "to", type = "time", after = "from" },
+]
+
+[[operations]]
+group = "audit"
+action = "Verify"
+permission = "audit.read"
+idempotency = "none"
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+response = "object"
+output = "audit.Verification"
+
+[[operations]]
+group = "audit"
+action = "Append"
+permission = "audit.write"
+write = true
+idempotency = "exempt"
+replay_reason = "Append events are not replay-sensitive; callers dedupe upstream."
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+input = "audit.NewEvent"
+
+[[endpoints]]
+group = "audit"
+action = "List"
+operation = "audit.List"
+method = "GET"
+path = "/api/audit"
+name = "List audit"
+description = "List audit events."
+
+[[endpoints]]
+group = "audit"
+action = "Verify"
+operation = "audit.Verify"
+method = "GET"
+path = "/api/audit/verify"
+name = "Verify audit"
+description = "Verify audit event integrity."
+
+[authored]
+
+[memberships]
+table = "access.users"
+tenant_column = "org_id"
+subject_column = "id"
+role_column = "role"

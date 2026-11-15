@@ -1,0 +1,142 @@
+package audit
+
+import (
+	"context"
+	"strconv"
+	"time"
+
+	models "example.test/auditapp/internal/models/audit"
+	rules "example.test/auditapp/internal/rules/audit"
+	"example.test/auditapp/internal/scope"
+	queries "example.test/auditapp/internal/storage/queries/audit"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/plutoframework/pluto-core/pagination"
+)
+
+// EventStore is the authored audit adapter. It reaches the database only
+// through scope.DB transactions bound to the verified tenant.
+type EventStore struct{ db scope.DB }
+
+func NewEventStore(db scope.DB) *EventStore { return &EventStore{db: db} }
+
+func (s *EventStore) Append(
+	ctx context.Context,
+	e scope.Execution,
+	in models.NewEvent,
+) error {
+	return s.db.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		_, err := queriesOf(tx).AppendEvent(
+			ctx,
+			queries.AppendEventParams{
+				OrgID:   tx.Tenant(),
+				ActorID: e.SubjectID(),
+				Type:    in.Type,
+				Payload: []byte(in.Payload),
+				Hash:    rules.EventHash(in.Type, in.Payload),
+			},
+		)
+
+		return err
+	})
+}
+
+func (s *EventStore) Query(
+	ctx context.Context,
+	e scope.Execution,
+	in models.ListRequest,
+) (pagination.Page[models.Entry], error) {
+	var page pagination.Page[models.Entry]
+
+	after, err := afterSeq(in.Page)
+	if err != nil {
+		return page, err
+	}
+
+	err = s.db.Read(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		rows, err := queriesOf(tx).ListEvents(
+			ctx,
+			queries.ListEventsParams{
+				OrgID:     tx.Tenant(),
+				After:     after,
+				ActorID:   in.ActorID,
+				EventType: in.Type,
+				Since:     timestamp(in.From),
+				Until:     timestamp(in.To),
+				MaxRows:   int32(in.Page.FetchLimit()),
+			},
+		)
+		if err != nil {
+			return err
+		}
+
+		entries := make([]models.Entry, 0, len(rows))
+		for _, row := range rows {
+			entries = append(entries, models.Entry{
+				Seq:       row.Seq,
+				Type:      row.Type,
+				Payload:   row.Payload,
+				Hash:      row.Hash,
+				CreatedAt: row.CreatedAt.Time.UTC(),
+			})
+		}
+
+		page, err = pagination.Finish(in.Page, entries, entryKey)
+
+		return err
+	})
+
+	return page, err
+}
+
+func (s *EventStore) Scan(
+	ctx context.Context,
+	e scope.Execution,
+	after, limit int64,
+) ([]models.Entry, error) {
+	var entries []models.Entry
+
+	err := s.db.Read(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		rows, err := queriesOf(tx).ScanEvents(
+			ctx,
+			queries.ScanEventsParams{
+				OrgID:   tx.Tenant(),
+				After:   after,
+				MaxRows: int32(limit),
+			},
+		)
+		if err != nil {
+			return err
+		}
+
+		for _, row := range rows {
+			entries = append(entries, models.Entry{
+				Seq:       row.Seq,
+				Type:      row.Type,
+				Payload:   row.Payload,
+				Hash:      row.Hash,
+				CreatedAt: row.CreatedAt.Time.UTC(),
+			})
+		}
+
+		return nil
+	})
+
+	return entries, err
+}
+
+func entryKey(entry models.Entry) pagination.Key {
+	return pagination.Key{ID: strconv.FormatInt(entry.Seq, 10)}
+}
+
+func afterSeq(request pagination.Request) (int64, error) {
+	if request.After.ID == "" {
+		return 0, nil
+	}
+
+	return strconv.ParseInt(request.After.ID, 10, 64)
+}
+
+func timestamp(value time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: value, Valid: !value.IsZero()}
+}

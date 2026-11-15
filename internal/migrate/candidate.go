@@ -74,6 +74,12 @@ func planCandidate(w *Workspace) error {
 		}
 	}
 
+	if len(blockers) == 0 {
+		if err := adoptMigrationNumbers(w, &next); err != nil {
+			return err
+		}
+	}
+
 	for _, item := range blockers {
 		w.Block(item)
 	}
@@ -425,4 +431,34 @@ func tomlLine(raw []byte, key string, index int) int {
 	}
 
 	return 1
+}
+
+// adoptMigrationNumbers records the numbers framework migrations take in this
+// application, so existing numbered files are never renamed.
+func adoptMigrationNumbers(w *Workspace, next *project.Manifest) error {
+	rendered, err := project.InitialFiles(*next)
+	if err != nil {
+		return err
+	}
+
+	recorded, err := allocateMigrations(w, rendered)
+	if err != nil {
+		w.Block(Item{
+			Path:   "db/migrations",
+			Line:   1,
+			Reason: err.Error(),
+			Action: "renumber unapplied migrations by hand and rerun " +
+				"pluto migrate",
+		})
+
+		return nil
+	}
+
+	if len(recorded) == 0 {
+		return nil
+	}
+
+	next.Migrations.Framework = recorded
+
+	return next.Validate()
 }

@@ -393,6 +393,10 @@ func InspectArchitecture(directory string) ArchitectureReport {
 					continue
 				}
 
+				// The sealed scope package is the declared capability
+				// surface: its driver imports are its purpose and are
+				// confined by the candidate ownership checks, so they are
+				// not charged to the packages that use it.
 				if local != "" {
 					if sources[local] == nil {
 						add(
@@ -403,7 +407,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 							"Restore the local package or remove the "+
 								"unresolved import.",
 						)
-					} else {
+					} else if role != "scope" {
 						visit(local, append(chain, current))
 					}
 				}
@@ -461,6 +465,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 		manifest,
 	)
 	r.Diagnostics = append(r.Diagnostics, primitiveDiagnostics...)
+	r.Diagnostics = append(r.Diagnostics, inspectAuthoredSQL(root, manifest)...)
 	r.Unassessed = append(r.Unassessed, primitiveUnassessed...)
 	sort.SliceStable(r.Diagnostics, func(i, j int) bool {
 		a, b := r.Diagnostics[i], r.Diagnostics[j]
@@ -555,6 +560,22 @@ func architectureRole(path string) string {
 		{
 			"internal/storage",
 			"data",
+		},
+		{
+			"internal/adapters",
+			"data",
+		},
+		{
+			"internal/rules",
+			"domain",
+		},
+		{
+			"internal/logic",
+			"operations",
+		},
+		{
+			"internal/scope",
+			"scope",
 		},
 		{
 			"internal/caching",
