@@ -731,7 +731,7 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "tx write foreign logic imports",
                 "internal/project/candidate_authored_rules.go",
                 "if ok && r.foreignPorts[role.group][owner] {",
-                "if ok {",
+                "if ok && (r.foreignPorts[role.group][owner] || true) {",
                 "TestCandidateAuthoredSeamEndToEnd",
             ),
             (
@@ -751,8 +751,8 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
             (
                 "scope transaction always rolls back",
                 "internal/project/templates/candidate_scope.go.tmpl",
-                "defer func() {\n\t\t_ = tx.Rollback(context.WithoutCancel(ctx))\n\t}()",
-                "defer func() {\n\t}()",
+                "// run, releases the transaction.\n\tdefer func() {\n\t\t_ = tx.Rollback(context.WithoutCancel(ctx))\n\t}()",
+                "// run, releases the transaction.\n\tdefer func() {\n\t}()",
                 "./internal/project#TestScopeAlwaysRollsBack",
             ),
             (
@@ -848,6 +848,10 @@ required_assertions = {
         "expected precise semantic integrity rejection"
     ),
 }
+
+only = os.environ.get("PLUTO_MUTATION_ONLY", "")
+if only:
+    mutations = [item for item in mutations if only in item[0]]
 
 results = []
 for name, relative, old, new, test in mutations:
