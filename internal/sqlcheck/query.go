@@ -138,6 +138,7 @@ func analyzeQuery(q query, env queryEnv) []Diagnostic {
 	}
 
 	diagnostics = append(diagnostics, checkTenantRootWrite(q, stmt, env)...)
+	diagnostics = append(diagnostics, checkProtectedColumns(q, stmt, env)...)
 
 	return append(diagnostics, checkTenantBinding(q, stmt, env)...)
 }
@@ -168,6 +169,47 @@ func checkTenantRootWrite(q query, stmt *statement, env queryEnv) []Diagnostic {
 	}
 
 	return nil
+}
+
+// checkProtectedColumns rejects authored writes of columns that only
+// generated code may change, such as a machine's key and state.
+func checkProtectedColumns(q query, stmt *statement, env queryEnv) []Diagnostic {
+	if stmt.Kind != "insert" && stmt.Kind != "update" {
+		return nil
+	}
+
+	var diagnostics []Diagnostic
+
+	for _, ref := range stmt.Refs {
+		for _, column := range env.tables[ref.Name].Protected {
+			named := stmt.Kind == "update" && setsColumn(stmt.Set, column)
+
+			for _, inserted := range stmt.InsertColumns {
+				named = named || tableKey(inserted) == tableKey(column)
+			}
+
+			if !named {
+				continue
+			}
+
+			diagnostics = append(diagnostics, newDiagnostic(
+				q.File,
+				q.Line,
+				fmt.Sprintf(
+					"query %s writes protected column %s.%s.",
+					q.Name,
+					ref.Name,
+					column,
+				),
+				"Only generated code writes machine key and state "+
+					"columns; use tx.IssueEnrollment, tx.RotateMachine "+
+					"or tx.RevokeMachine, and give the state column a "+
+					"DEFAULT of the pending value.",
+			))
+		}
+	}
+
+	return diagnostics
 }
 
 func trimTrailingSemicolon(tokens []token) []token {

@@ -509,4 +509,41 @@ func (t Tx) IssueEnrollment(
 		machineID,
 	)
 }
+
+// RevokeMachine moves a pending or active machine of this transaction's
+// tenant to the revoked state: its next request is denied. Authored SQL may
+// not write the key or state columns; this is the revocation path.
+func (t Tx) RevokeMachine(ctx context.Context, principal, machineID string) error {
+	if t.scopeTx == nil || t.scopeTenant.scopeTenant == "" {
+		return ErrNoTenant
+	}
+
+	return machinestore.RevokeMachine(
+		ctx,
+		t.scopeTx,
+		t.scopeTenant.scopeTenant,
+		principal,
+		machineID,
+	)
+}
+
+// RotateMachine clears the machine's key, which stops it authenticating at
+// once, and returns a new single-use enrollment token (once) for its next
+// key. A revoked machine cannot be rotated.
+func (t Tx) RotateMachine(
+	ctx context.Context,
+	principal, machineID string,
+) (string, time.Time, error) {
+	if t.scopeTx == nil || t.scopeTenant.scopeTenant == "" {
+		return "", time.Time{}, ErrNoTenant
+	}
+
+	return machinestore.RotateMachine(
+		ctx,
+		t.scopeTx,
+		t.scopeTenant.scopeTenant,
+		principal,
+		machineID,
+	)
+}
 {{end}}

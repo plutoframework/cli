@@ -83,6 +83,12 @@ func Register{{.Action}}(
 					return
 				}
 
+				if errors.Is(err, machineauth.ErrRateLimited) {
+					transport.Error(w, r, 429, "rate_limited")
+
+					return
+				}
+
 				transport.OperationError(w, r, err)
 
 				return

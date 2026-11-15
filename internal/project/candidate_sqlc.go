@@ -157,6 +157,7 @@ func sqlcheckConfig(root string, m Manifest) sqlcheck.Config {
 			TenantColumn: table.TenantColumn,
 			AppendOnly:   table.AppendOnly,
 			TenantRoot:   table.TenantRoot,
+			Protected:    m.protectedColumns(table),
 		})
 	}
 

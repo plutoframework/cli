@@ -37,6 +37,13 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 		source.WriteString("\t\"time\"\n")
 	}
 
+	if m.hasIdempotentWrites() {
+		source.WriteString(
+			"\tidempostgres \"github.com/plutoframework/pluto-core/stores/" +
+				"postgres\"\n",
+		)
+	}
+
 	if m.hasEachTenant() {
 		source.WriteString("\t\"sync\"\n")
 		fmt.Fprintf(
@@ -576,6 +583,25 @@ func NewCandidateRuntime(
 	}
 `,
 	)
+	if m.hasIdempotentWrites() {
+		source.WriteString(
+			`
+	idempotencyStore, err := idempostgres.New(pool)
+	if err != nil {
+		return nil, err
+	}
+
+	reg.Idempotency, err = transport.NewIdempotency(
+		idempotencyStore,
+		cfg.Server.BodyLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+`,
+		)
+	}
+
 	source.WriteString(
 		`	transport.RegisterSessions(reg, authentication)
 `,

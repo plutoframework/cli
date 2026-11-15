@@ -40,6 +40,10 @@ const (
 	defaultReplayWindow = 2 * time.Minute
 	maxReplayWindow     = 10 * time.Minute
 	maxMachinePerms     = 32
+
+	defaultRevokedValue = "revoked"
+	defaultRequestLimit = 600
+	maxRequestLimit     = 100000
 )
 
 var machinePermission = regexp.MustCompile(
@@ -61,12 +65,30 @@ type Principal struct {
 	PendingValue string `toml:"pending_value"`
 	ActiveValue  string `toml:"active_value"`
 
+	// RevokedValue is the state generated revocation writes; it defaults to
+	// "revoked". Only generated code writes the key and state columns.
+	RevokedValue string `toml:"revoked_value,omitempty"`
+
 	// Permissions are the machine capabilities this principal may be
 	// granted by operations. They are separate from user roles.
 	Permissions []string `toml:"permissions"`
 
 	EnrollTTL    string `toml:"enroll_ttl,omitempty"`
 	ReplayWindow string `toml:"replay_window,omitempty"`
+
+	// RequestLimit caps the verified requests one machine may make within
+	// two replay windows (the nonce lifetime); the count is shared by every
+	// replica because it reads the nonce table. Default 600.
+	RequestLimit int `toml:"request_limit,omitempty"`
+}
+
+// Revoked is the state written by generated revocation.
+func (p Principal) Revoked() string {
+	if p.RevokedValue == "" {
+		return defaultRevokedValue
+	}
+
+	return p.RevokedValue
 }
 
 // Group is the owning group of the principal.
@@ -106,6 +128,15 @@ func (p Principal) TTL() time.Duration {
 	}
 
 	return value
+}
+
+// Limit is the verified-request cap per nonce lifetime.
+func (p Principal) Limit() int {
+	if p.RequestLimit == 0 {
+		return defaultRequestLimit
+	}
+
+	return p.RequestLimit
 }
 
 // Window is the accepted clock skew and nonce lifetime base.
@@ -259,11 +290,18 @@ func (p Principal) validate(m Manifest, tables map[string]Table) error {
 
 	if !activeValue.MatchString(p.PendingValue) ||
 		!activeValue.MatchString(p.ActiveValue) ||
-		p.PendingValue == p.ActiveValue {
+		!activeValue.MatchString(p.Revoked()) ||
+		p.PendingValue == p.ActiveValue ||
+		p.Revoked() == p.ActiveValue || p.Revoked() == p.PendingValue {
 		return fmt.Errorf(
-			"pending_value and active_value must be distinct 1-64 " +
+			"pending_value, active_value and revoked_value must be distinct " +
+				"1-64 " +
 				"character values of letters, digits, '_', '-' or '.'",
 		)
+	}
+
+	if p.RequestLimit < 0 || p.RequestLimit > maxRequestLimit {
+		return fmt.Errorf("request_limit must be 1 to %d", maxRequestLimit)
 	}
 
 	if err := p.validateTimes(); err != nil {
@@ -532,4 +570,18 @@ func validateMachineSystem(m Manifest) error {
 	}
 
 	return validateMachineEndpoints(m)
+}
+
+// protectedColumns lists the columns of a table that only generated machine
+// code may write: the key and state of the principal bound to it.
+func (m Manifest) protectedColumns(table Table) []string {
+	var columns []string
+
+	for _, principal := range m.Principals {
+		if principal.Group() == table.Group && principal.Table == table.Name {
+			columns = append(columns, principal.KeyColumn, principal.StateColumn)
+		}
+	}
+
+	return columns
 }

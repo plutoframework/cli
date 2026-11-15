@@ -36,10 +36,14 @@ type config struct {
 	recheck    string
 	issueCheck string
 	activate   string
+	revoke     string
+	reset      string
 	pending    string
 	active     string
+	revoked    string
 	window     time.Duration
 	ttl        time.Duration
+	limit      int
 }
 
 var principals = map[string]config{
@@ -50,8 +54,12 @@ var principals = map[string]config{
 		recheck:    {{q .Recheck}},
 		issueCheck: {{q .IssueCheck}},
 		activate:   {{q .Activate}},
+		revoke:     {{q .Revoke}},
+		reset:      {{q .Reset}},
 		pending:    {{q .Pending}},
 		active:     {{q .Active}},
+		revoked:    {{q .Revoked}},
+		limit:      {{.Limit}},
 		window:     time.Duration({{.Window}}),
 		ttl:        time.Duration({{.TTL}}),
 	},
@@ -217,6 +225,24 @@ func consumeNonce(
 		return err
 	}
 
+	// Each verified request leaves one nonce for two replay windows, so the
+	// rows of a machine count its recent requests across every replica.
+	var recent int
+
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT count(*) FROM pluto_machine_nonces `+
+			`WHERE principal = $1 AND machine_id = $2`,
+		principal,
+		row.id,
+	).Scan(&recent); err != nil {
+		return err
+	}
+
+	if recent >= cfg.limit {
+		return machineports.ErrRateLimited
+	}
+
 	tag, err := tx.Exec(
 		ctx,
 		`INSERT INTO pluto_machine_nonces `+
@@ -323,6 +349,72 @@ func IssueEnrollment(
 	}
 
 	return token, expires, nil
+}
+
+// RevokeMachine moves a pending or active machine of the open transaction's
+// tenant to the revoked state and removes its unused enrollment tokens. It
+// and RotateMachine are, with enrollment, the only writers of the key and
+// state columns; authored SQL may not name them.
+func RevokeMachine(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenant, principal, machineID string,
+) error {
+	cfg, ok := principals[principal]
+	if !ok || tx == nil || tenant == "" ||
+		!machineports.IDPattern.MatchString(machineID) {
+		return machineports.ErrInvalidMachine
+	}
+
+	tag, err := tx.Exec(
+		ctx, cfg.revoke, cfg.revoked, machineID, cfg.pending, cfg.active,
+	)
+	if err != nil {
+		return err
+	}
+
+	if tag.RowsAffected() != 1 {
+		return machineports.ErrInvalidMachine
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`DELETE FROM pluto_machine_enrollments WHERE principal = $1 `+
+			`AND machine_id = $2 AND used_at IS NULL`,
+		principal,
+		machineID,
+	)
+
+	return err
+}
+
+// RotateMachine clears the key of a pending or active machine, so it stops
+// authenticating at once, returns it to the pending state and issues a fresh
+// single-use enrollment token for the new key. A revoked machine cannot be
+// rotated back in.
+func RotateMachine(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenant, principal, machineID string,
+) (string, time.Time, error) {
+	cfg, ok := principals[principal]
+	if !ok || tx == nil || tenant == "" ||
+		!machineports.IDPattern.MatchString(machineID) {
+		return "", time.Time{}, machineports.ErrInvalidMachine
+	}
+
+	tag, err := tx.Exec(
+		ctx, cfg.reset, cfg.pending, machineID, cfg.pending, cfg.active,
+	)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	if tag.RowsAffected() != 1 {
+		return "", time.Time{}, machineports.ErrInvalidMachine
+	}
+
+	return IssueEnrollment(ctx, tx, tenant, principal, machineID)
 }
 
 func hashToken(token string) string {

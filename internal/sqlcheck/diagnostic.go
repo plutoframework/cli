@@ -34,6 +34,10 @@ type Table struct {
 	// TenantColumn is its own identifier. Only provisioning query sets may
 	// INSERT into it.
 	TenantRoot bool
+
+	// Protected lists credential and state columns only generated code may
+	// write: authored INSERT and UPDATE statements may not name them.
+	Protected []string
 }
 
 // Lookup is one declared tenant-root lookup by unique key. Its migration

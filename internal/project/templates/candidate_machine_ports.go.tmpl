@@ -24,6 +24,15 @@ var ErrUnauthenticated = errors.New("machine: unauthenticated")
 // indistinguishable to the caller.
 var ErrInvalidEnrollment = errors.New("machine: invalid enrollment")
 
+// ErrInvalidMachine reports a revoke or rotate of a machine that is unknown to
+// the tenant or not pending or active.
+var ErrInvalidMachine = errors.New("machine: invalid machine")
+
+// ErrRateLimited rejects a verified machine that exceeded its request limit.
+// It is returned only after the signature verified, so unauthenticated
+// callers can never exhaust or probe a machine's budget.
+var ErrRateLimited = errors.New("machine: rate limited")
+
 // Request headers of a signed machine request.
 const (
 	HeaderMachine   = "X-Pluto-Machine-ID"

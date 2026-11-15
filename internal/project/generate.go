@@ -403,7 +403,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				}
 			}
 
-			if d.Body {
+			if d.Body || authoredWriteBody(m, e) {
 				request = e.Group + "." + e.Action + "Request{}"
 			}
 

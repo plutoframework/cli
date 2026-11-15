@@ -162,10 +162,13 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 		}
 	}
 
-	if operation.Write && operation.Idempotency == "required" {
+	if operation.Write && operation.Idempotency == "required" &&
+		!(operation.isAuthoredWriteBody() && m.hasEndpoint(operation)) {
 		return view, fmt.Errorf(
-			"operation %s: authored write bodies support idempotency = "+
-				"\"exempt\" with a replay_reason only",
+			"operation %s: idempotency = \"required\" needs an HTTP "+
+				"endpoint (the generated Idempotency-Key claim); internal "+
+				"authored writes use idempotency = \"exempt\" with a "+
+				"replay_reason",
 			operation.ID(),
 		)
 	}

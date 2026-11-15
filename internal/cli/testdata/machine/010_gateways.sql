@@ -9,7 +9,7 @@ CREATE TABLE gateways (
     id text PRIMARY KEY,
     name text NOT NULL,
     public_key text UNIQUE,
-    state text NOT NULL,
+    state text NOT NULL DEFAULT 'pending',
     last_seq bigint NOT NULL DEFAULT 0,
     last_seen timestamptz
 );

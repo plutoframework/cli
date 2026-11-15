@@ -28,8 +28,12 @@ type machinePrincipalView struct {
 	Recheck    string
 	IssueCheck string
 	Activate   string
+	Revoke     string
+	Reset      string
 	Pending    string
 	Active     string
+	Revoked    string
+	Limit      int
 	Window     int64
 	TTL        int64
 }
@@ -69,8 +73,15 @@ func machineData(m Manifest) (machineView, error) {
 			Activate: "UPDATE " + from + " SET " + key + " = $1, " + state +
 				" = $2 WHERE " + id + "::text = $3 AND " + state +
 				"::text = $4",
+			Revoke: "UPDATE " + from + " SET " + state + " = $1 WHERE " + id +
+				"::text = $2 AND " + state + "::text IN ($3, $4)",
+			Reset: "UPDATE " + from + " SET " + key + " = NULL, " + state +
+				" = $1 WHERE " + id + "::text = $2 AND " + state +
+				"::text IN ($3, $4)",
 			Pending: principal.PendingValue,
 			Active:  principal.ActiveValue,
+			Revoked: principal.Revoked(),
+			Limit:   principal.Limit(),
 			Window:  principal.Window().Nanoseconds(),
 			TTL:     principal.TTL().Nanoseconds(),
 		})

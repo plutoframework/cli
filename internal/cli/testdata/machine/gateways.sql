@@ -1,6 +1,6 @@
 -- name: CreateGateway :one
-INSERT INTO gateways (org_id, id, name, state)
-VALUES (@org_id, gen_random_uuid()::text, @name, 'pending')
+INSERT INTO gateways (org_id, id, name)
+VALUES (@org_id, gen_random_uuid()::text, @name)
 RETURNING id;
 
 -- name: Beat :one

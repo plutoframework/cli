@@ -259,6 +259,31 @@ func assertMachineNegatives(t *testing.T, root, module string) {
 				"SELECT id FROM pluto_lookup_gateways_gatewaymachine;\n"),
 		},
 		{
+			name:  "authored query sets the machine state",
+			check: "ARCH612",
+			path:  "db/queries/gateways/gateways.sql",
+			mutate: appendTo("-- name: Revive :exec\n" +
+				"UPDATE gateways SET state = 'active'\n" +
+				"WHERE org_id = @org_id AND id = @id;\n"),
+		},
+		{
+			name:  "authored query sets the machine key",
+			check: "ARCH612",
+			path:  "db/queries/gateways/gateways.sql",
+			mutate: appendTo("-- name: Rekey :exec\n" +
+				"UPDATE gateways SET public_key = @public_key\n" +
+				"WHERE org_id = @org_id AND id = @id;\n"),
+		},
+		{
+			name:  "authored insert names the machine state",
+			check: "ARCH612",
+			path:  "db/queries/gateways/gateways.sql",
+			mutate: appendTo("-- name: Forge :one\n" +
+				"INSERT INTO gateways (org_id, id, name, state)\n" +
+				"VALUES (@org_id, gen_random_uuid()::text, @name, 'active')\n" +
+				"RETURNING id;\n"),
+		},
+		{
 			name:  "missing machine lookup policy",
 			check: "ARCH612",
 			path:  policyFile,
