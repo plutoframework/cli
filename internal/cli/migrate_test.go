@@ -101,12 +101,19 @@ func TestMigrateDryRunPreconditionsAndNoWrites(t *testing.T) {
 		sources...,
 	)
 
-	output := mustInvoke(t, root, args...)
+	// Pristine scaffold tests are kept, never deleted silently; the one that
+	// calls the removed published app.New is reported for manual porting.
+	output, err := invoke(t, root, args...)
+	if err == nil {
+		t.Fatalf("expected manual items for the kept scaffold test:\n%s",
+			output)
+	}
+
 	for _, want := range []string{
+		"internal/app/app_test.go:29: uses app.New",
 		"Migrating schema 10/published -> schema 10/candidate",
 		"step 010-published-to-candidate",
 		"  A db/migrations/099_memberships.sql",
-		"  D internal/transport/http_test.go",
 		"+mode = 'candidate'",
 		"Dry run: nothing written.",
 	} {
