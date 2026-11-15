@@ -235,6 +235,15 @@ func assertSeamNegatives(t *testing.T, root string) {
 			},
 		},
 		{
+			name:  "scope.Queries called outside the generated helper",
+			check: "ARCH603",
+			path:  "internal/logic/audit/queries.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport \"" + module +
+					"internal/scope\"\n\nvar _ = scope.Queries[int, int]\n"
+			},
+		},
+		{
 			name:  "sqlc WithTx handle",
 			check: "ARCH611",
 			path:  "internal/adapters/audit/withtx.go",
