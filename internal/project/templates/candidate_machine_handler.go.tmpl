@@ -1,0 +1,97 @@
+package {{.Group}}
+
+import (
+{{- if not .Endpoint}}
+	"bytes"
+{{- end}}
+	"errors"
+{{- if not .Endpoint}}
+	"io"
+{{- end}}
+	"net/http"
+
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	operations "{{.Module}}/internal/operations/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/transport"
+)
+
+type {{.Action}}Operations = operations.{{.Action}}Boundary
+
+// Register{{.Action}} serves a machine-authenticated route. It carries no
+// user session: the operation gate verifies the request signature over the
+// exact body and the tenant comes from the machine row.
+func Register{{.Action}}(
+	reg transport.Registrar,
+	operation {{.Action}}Operations,
+	bodyLimit int64,
+) {
+	reg.Handle(
+		paths.{{.Symbol}},
+		func(w http.ResponseWriter, r *http.Request) {
+			var body []byte
+{{- if not .Endpoint}}
+
+			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
+			if err != nil {
+				var tooLarge *http.MaxBytesError
+				if errors.As(err, &tooLarge) {
+					transport.Error(w, r, 413, "payload_too_large")
+
+					return
+				}
+
+				transport.Error(w, r, 400, "invalid_body")
+
+				return
+			}
+
+			r.Body = io.NopCloser(bytes.NewReader(body))
+
+			var input models.{{.Action}}Request
+			if !transport.Decode(w, r, &input, bodyLimit) {
+				return
+			}
+{{- else}}
+
+			_ = bodyLimit
+
+			input, err := models.Parse{{.Action}}Query(r.URL.Query())
+			if err != nil {
+				var rejected *models.QueryError
+				if errors.As(err, &rejected) {
+					transport.Error(w, r, 400, rejected.Code)
+
+					return
+				}
+
+				transport.Error(w, r, 400, "invalid_query_parameter")
+
+				return
+			}
+{{- end}}
+
+			output, err := operation.Execute(
+				r.Context(),
+				transport.MachineRequestFrom(r, body),
+				input)
+			if err != nil {
+				if errors.Is(err, machineauth.ErrUnauthenticated) {
+					transport.Error(w, r, 401, "unauthenticated")
+
+					return
+				}
+
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			transport.JSON(
+				w,
+				paths.{{.Symbol}}.SuccessStatus,
+				models.{{.Action}}Response{Data: output},
+			)
+		})
+}

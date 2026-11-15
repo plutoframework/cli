@@ -1,0 +1,18 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// Heartbeat records liveness of the verified machine in its own tenant.
+func Heartbeat(
+	ctx context.Context,
+	e scope.Execution,
+	ports HeartbeatPorts,
+	in models.Beat,
+) (models.Ack, error) {
+	return ports.Registry.Beat(ctx, e, in)
+}

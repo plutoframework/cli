@@ -99,6 +99,16 @@ func Document() ([]byte, error) {
 			}
 		}
 
+		{{if .HasMachine}}
+
+		if endpoint.Machine != "" {
+			operation["security"] = []any{
+				map[string]any{"machineSignature": []string{}},
+			}
+			operation["x-pluto-machine"] = endpoint.Machine
+		}
+		{{end}}
+
 		{{if .LocalCredentials}}
 
 		if strings.HasPrefix(endpoint.ID, "credentials.") {
@@ -283,6 +293,14 @@ func Document() ([]byte, error) {
 					"type":   "http",
 					"scheme": "bearer",
 				},
+{{- if .HasMachine}}
+				"machineSignature": map[string]any{
+					"type":        "apiKey",
+					"in":          "header",
+					"name":        "X-Pluto-Signature",
+					"description": "Ed25519 signature with X-Pluto-Machine-ID, X-Pluto-Timestamp and X-Pluto-Nonce over the pluto-machine-v1 canonical request.",
+				},
+{{- end}}
 			},
 			"schemas": map[string]any{
 				"Error": map[string]any{

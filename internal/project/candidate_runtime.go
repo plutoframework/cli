@@ -32,7 +32,8 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 `,
 	)
 
-	if m.hasScope(ScopeProvision) || m.hasScope(ScopeLookup) {
+	if m.hasScope(ScopeProvision) || m.hasScope(ScopeLookup) ||
+		m.hasScope(ScopeEnroll) {
 		source.WriteString("\t\"time\"\n")
 	}
 
@@ -54,6 +55,10 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 			`authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
 `,
 		)
+	}
+
+	if m.HasMachine() {
+		internalImports = append(internalImports, "storage/machineauth")
 	}
 
 	for _, name := range internalImports {
@@ -375,6 +380,17 @@ func NewCandidateRuntime(
 		)
 	}
 
+	if m.HasMachine() {
+		source.WriteString(
+			`
+	machineVerifier := machineauth.NewVerifier(pool)
+	machineEnroller := machineauth.NewEnroller(pool)
+
+	_, _ = machineVerifier, machineEnroller
+`,
+		)
+	}
+
 	for index, operation := range m.Operations {
 		if operation.Scope != "" {
 			if err := writeSystemOperation(
@@ -384,6 +400,12 @@ func NewCandidateRuntime(
 			); err != nil {
 				return nil, err
 			}
+
+			continue
+		}
+
+		if operation.isMachine() {
+			writeMachineOperation(&source, operation)
 
 			continue
 		}
@@ -731,6 +753,55 @@ func writeAuthoredOperation(
 	)
 }
 
+// writeMachineOperation wires one machine-authenticated operation: the
+// signature verifier and the declared adapters as the logic ports. There is
+// no user gate; the verifier is the only way the authored body runs.
+func writeMachineOperation(source *bytes.Buffer, operation Operation) {
+	var ports bytes.Buffer
+
+	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			fmt.Fprintf(
+				&ports,
+				"%s: adapters.%sTx, ",
+				foreignPortField(id),
+				adapterField(Port{ID: id}),
+			)
+
+			continue
+		}
+
+		fmt.Fprintf(
+			&ports,
+			"%s: adapters.%s, ",
+			modelName(id),
+			adapterField(Port{ID: id}),
+		)
+	}
+
+	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			ports.WriteString("TxDB: adapters.DB, ")
+
+			break
+		}
+	}
+
+	fmt.Fprintf(
+		source,
+		`
+	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
+		machineVerifier,
+		%[2]slogic.%[3]sPorts{%[4]s},
+	)
+`,
+		symbol(operation.Endpoint()),
+		operation.Group,
+		operation.Action,
+		ports.String(),
+	)
+}
+
 // candidateTenantResourceSource is the tenant resource policy of authored
 // operations: membership and permission are verified by the gate, row-level
 // security isolates the data, and the resource must be the declared one.
@@ -782,6 +853,24 @@ func writeSystemOperation(
 		attempts,
 		window.Nanoseconds(),
 	)
+
+	if operation.Scope == ScopeEnroll {
+		fmt.Fprintf(
+			source,
+			`
+	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
+		machineEnroller,
+		limiter%[4]s,
+	)
+`,
+			symbol(operation.Endpoint()),
+			operation.Group,
+			operation.Action,
+			suffix,
+		)
+
+		return nil
+	}
 
 	if operation.Scope == ScopeLookup {
 		fmt.Fprintf(

@@ -47,6 +47,10 @@ type authoredOp struct {
 	// scope.Provisioning instead of a scope.Execution.
 	Provision bool
 
+	// Principal is the machine principal of a machine-authenticated body or
+	// an enrollment operation.
+	Principal string
+
 	// PagedRequest is set when the request model carries a Page the workflow
 	// must bind from verified scope: a page read exposed as an endpoint.
 	PagedRequest bool
@@ -88,6 +92,7 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 		Action:    operation.Action,
 		Resource:  operation.Resource,
 		Provision: operation.Scope == ScopeProvision,
+		Principal: operation.MachinePrincipal(),
 	}
 
 	switch operation.Response {
@@ -254,6 +259,13 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 			layout = map[string]string{
 				"_gate_gen.go":     "candidate_provision_gate.go",
 				"_workflow_gen.go": "candidate_provision_workflow.go",
+			}
+		}
+
+		if operation.isMachine() {
+			layout = map[string]string{
+				"_gate_gen.go":     "candidate_machine_gate.go",
+				"_workflow_gen.go": "candidate_machine_workflow.go",
 			}
 		}
 

@@ -1,0 +1,123 @@
+// Package machineauth is the contract of machine identity: the signed
+// request, the verified machine and the verifier and enroller interfaces.
+// It is app-local and provisional, not a published Pluto API. The concrete
+// implementation lives in internal/storage/machineauth.
+package machineauth
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// ErrUnauthenticated is the only verification failure: an unknown machine, a
+// wrong state, a stale timestamp, a bad signature and a replayed nonce are
+// indistinguishable to the caller.
+var ErrUnauthenticated = errors.New("machine: unauthenticated")
+
+// ErrInvalidEnrollment is the only enrollment failure: an unknown, expired,
+// used or foreign token and a machine that is no longer pending are
+// indistinguishable to the caller.
+var ErrInvalidEnrollment = errors.New("machine: invalid enrollment")
+
+// Request headers of a signed machine request.
+const (
+	HeaderMachine   = "X-Pluto-Machine-ID"
+	HeaderTimestamp = "X-Pluto-Timestamp"
+	HeaderNonce     = "X-Pluto-Nonce"
+	HeaderSignature = "X-Pluto-Signature"
+
+	// TokenPrefix starts every enrollment token.
+	TokenPrefix = "plt_enr_"
+
+	canonicalVersion = "pluto-machine-v1"
+)
+
+// Wire formats shared by the verifier, the enroller and clients.
+var (
+	NoncePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
+	TokenPattern = regexp.MustCompile(`^plt_enr_[A-Za-z0-9_-]{43}$`)
+	IDPattern    = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
+)
+
+// Request is the verification input taken from one HTTP request.
+type Request struct {
+	Method    string
+	Path      string
+	Query     string
+	Body      []byte
+	MachineID string
+	Timestamp string
+	Nonce     string
+	Signature string
+}
+
+// Canonical is the signed message: newline-joined version, principal,
+// machine id, method, escaped path, raw query, hex SHA-256 of the body, unix
+// timestamp and nonce. Any client language can build it.
+func Canonical(
+	principal, machineID, method, path, query string,
+	body []byte,
+	timestamp int64,
+	nonce string,
+) []byte {
+	digest := sha256.Sum256(body)
+
+	return []byte(strings.Join([]string{
+		canonicalVersion,
+		principal,
+		machineID,
+		method,
+		path,
+		query,
+		hex.EncodeToString(digest[:]),
+		strconv.FormatInt(timestamp, 10),
+		nonce,
+	}, "\n"))
+}
+
+// Verified is a machine whose signature was just verified. Its fields are
+// private and its constructor is a capability: only the generated storage
+// verifier may call NewVerified, so authored code cannot forge one.
+type Verified struct {
+	principal string
+	machineID string
+	tenantID  string
+	key       string
+}
+
+// NewVerified is a capability: only the generated verifier calls it.
+func NewVerified(principal, machineID, tenantID, key string) Verified {
+	return Verified{
+		principal: principal,
+		machineID: machineID,
+		tenantID:  tenantID,
+		key:       key,
+	}
+}
+
+// Principal is the declared principal the machine belongs to.
+func (v Verified) Principal() string { return v.principal }
+
+// MachineID is the verified machine and the subject of its executions.
+func (v Verified) MachineID() string { return v.machineID }
+
+// TenantID is the tenant of the machine row.
+func (v Verified) TenantID() string { return v.tenantID }
+
+// Key is the public key the signature verified against.
+func (v Verified) Key() string { return v.key }
+
+// Verifier verifies signed machine requests of a declared principal.
+type Verifier interface {
+	Verify(context.Context, string, Request) (Verified, error)
+}
+
+// Enroller redeems single-use enrollment tokens.
+type Enroller interface {
+	Enroll(context.Context, string, string, string) (string, error)
+}

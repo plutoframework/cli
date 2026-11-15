@@ -1,0 +1,4 @@
+package gateways
+
+// ValidName reports an acceptable gateway name.
+func ValidName(name string) bool { return name != "" && len(name) <= 80 }

@@ -134,7 +134,7 @@ const (
 
 func (m Manifest) hasSeamDeclarations() bool {
 	if len(m.Tables)+len(m.Queries)+len(m.Ports)+len(m.Models)+
-		len(m.Lookups) != 0 ||
+		len(m.Lookups) != 0 || len(m.Principals) != 0 ||
 		m.Authored != nil || m.Memberships != nil ||
 		m.Database.RuntimeRole != "" {
 		return true
@@ -153,7 +153,8 @@ func (o Operation) usesSeams() bool {
 	return o.Body != "" || o.Resource != "" || o.ResourcePolicy != "" ||
 		len(o.Ports) != 0 || o.Response != "" || o.Item != "" ||
 		o.Output != "" || o.Input != "" || len(o.Query) != 0 ||
-		o.Scope != "" || o.Lookup != "" || o.RateLimit != ""
+		o.Scope != "" || o.Lookup != "" || o.RateLimit != "" ||
+		o.Auth != "" || o.Principal != ""
 }
 
 // validateSeams checks every seam declaration. Published projects may declare
@@ -201,8 +202,16 @@ func validateSeams(m Manifest) error {
 		return err
 	}
 
+	if err := validateMachineSystem(m); err != nil {
+		return err
+	}
+
+	if err := validatePrincipals(m, tables); err != nil {
+		return err
+	}
+
 	for _, operation := range m.Operations {
-		if err := operation.validateSeams(ports, models); err != nil {
+		if err := operation.validateSeams(m, ports, models); err != nil {
 			return fmt.Errorf("operation %s: %w", operation.ID(), err)
 		}
 	}
@@ -587,6 +596,7 @@ func validateMembershipActive(memberships *Memberships) error {
 }
 
 func (o Operation) validateSeams(
+	m Manifest,
 	ports map[string]Port,
 	models map[string]Model,
 ) error {
@@ -597,7 +607,15 @@ func (o Operation) validateSeams(
 	}
 
 	if o.Scope != "" {
-		return o.validateSystemSeams(ports, models)
+		return o.validateSystemSeams(m, ports, models)
+	}
+
+	if o.Principal != "" {
+		return fmt.Errorf("principal requires scope = \"enroll\"")
+	}
+
+	if o.isMachine() {
+		return o.validateMachineOperation(m, ports, models)
 	}
 
 	if o.Body == BodySystem {

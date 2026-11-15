@@ -1,0 +1,25 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/scope"
+)
+
+// execute is the only caller of the authored body. It binds the verified
+// machine to this operation's fixed resource: every data access the body
+// makes rechecks that the machine is still active with the verified key.
+func (operation *{{.Action}}) execute(
+	ctx context.Context,
+	verified machineauth.Verified,
+	request models.{{.Action}}Request,
+) ({{.Authored.Returns}}) {
+	return logic.{{.Action}}(
+		ctx,
+		scope.BindMachine(verified, {{q .Authored.Resource}}),
+		operation.{{lowerFirst .Action}}Ports,
+		request)
+}

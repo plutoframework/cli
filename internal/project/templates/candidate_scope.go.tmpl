@@ -24,7 +24,15 @@ import (
 	auth "github.com/plutoframework/pluto-auth"
 {{- else}}
 {{end}}
+{{- if .HasMachine}}
+	"time"
+{{- end}}
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
+{{- if .HasMachine}}
+
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	machinestore "{{.Module}}/internal/storage/machineauth"
+{{- end}}
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,11 +50,21 @@ type Execution struct {
 	scopeExecution *identitygate.Execution
 	scopeGate      *identitygate.Gate
 	scopeResource  string
+{{- if .HasMachine}}
+
+	// scopeMachine is set instead of scopeExecution for a machine caller.
+	scopeMachine *machineauth.Verified
+{{- end}}
 }
 
 // SubjectID is the verified acting subject and the only legitimate actor
 // source for authored code. Never take an actor from request input.
 func (e Execution) SubjectID() string {
+{{- if .HasMachine}}
+	if e.scopeMachine != nil {
+		return e.scopeMachine.MachineID()
+	}
+{{end}}
 	if e.scopeExecution == nil {
 		return ""
 	}
@@ -56,6 +74,11 @@ func (e Execution) SubjectID() string {
 
 // Tenant is the verified tenant of this execution.
 func (e Execution) Tenant() Tenant {
+{{- if .HasMachine}}
+	if e.scopeMachine != nil {
+		return Tenant{scopeTenant: e.scopeMachine.TenantID()}
+	}
+{{end}}
 	if e.scopeExecution == nil {
 		return Tenant{}
 	}
@@ -144,6 +167,11 @@ func (d DB) within(
 	mode pgx.TxAccessMode,
 	run func(context.Context, Tx) error,
 ) error {
+{{- if .HasMachine}}
+	if e.scopeMachine != nil {
+		return d.withinMachine(ctx, e.scopeMachine, mode, run)
+	}
+{{end}}
 	if d.scopeDBPool == nil || e.scopeExecution == nil ||
 		e.scopeGate == nil || run == nil {
 		return ErrNoTenant
@@ -357,5 +385,80 @@ func BindProvisioning(
 		identity: identity,
 		subject:  subject,
 	}}
+}
+{{end}}{{if .HasMachine}}
+// withinMachine opens a tenant transaction for a verified machine. The live
+// recheck runs inside the transaction before the body's first statement: a
+// machine revoked or re-keyed since verification is denied.
+func (d DB) withinMachine(
+	ctx context.Context,
+	verified *machineauth.Verified,
+	mode pgx.TxAccessMode,
+	run func(context.Context, Tx) error,
+) error {
+	if d.scopeDBPool == nil || verified == nil || run == nil ||
+		verified.TenantID() == "" {
+		return ErrNoTenant
+	}
+
+	tenant := Tenant{scopeTenant: verified.TenantID()}
+
+	tx, err := d.scopeDBPool.BeginTx(ctx, pgx.TxOptions{AccessMode: mode})
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+	}()
+
+	if _, err = tx.Exec(
+		ctx,
+		"SELECT set_config('app.tenant_id', $1, true)",
+		tenant.scopeTenant,
+	); err != nil {
+		return err
+	}
+
+	if err = machinestore.Recheck(ctx, tx, *verified); err != nil {
+		return err
+	}
+
+	if err = run(ctx, Tx{
+		scopeTx:      tx,
+		scopeTenant:  tenant,
+		scopeSubject: verified.MachineID(),
+	}); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// BindMachine is a capability: only generated machine workflows may call it.
+// The verified machine becomes the Execution of the body: its subject is the
+// machine id and its tenant is the tenant of the machine row.
+func BindMachine(verified machineauth.Verified, resource string) Execution {
+	return Execution{scopeMachine: &verified, scopeResource: resource}
+}
+
+// IssueEnrollment mints a single-use enrollment token for a pending machine
+// row of this transaction's tenant, returned once. Call it in the same
+// write transaction that creates the pending row.
+func (t Tx) IssueEnrollment(
+	ctx context.Context,
+	principal, machineID string,
+) (string, time.Time, error) {
+	if t.scopeTx == nil || t.scopeTenant.scopeTenant == "" {
+		return "", time.Time{}, ErrNoTenant
+	}
+
+	return machinestore.IssueEnrollment(
+		ctx,
+		t.scopeTx,
+		t.scopeTenant.scopeTenant,
+		principal,
+		machineID,
+	)
 }
 {{end}}

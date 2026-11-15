@@ -410,6 +410,57 @@ mutations = [
         'role == "disabled" || role == "public" ||',
         "./internal/project#TestSeamManifestRejections",
     ),
+    (
+        "machine permissions separate from user roles",
+        "internal/project/manifest_machine.go",
+        "\t\tif user[permission] {",
+        "\t\tif false && user[permission] {",
+        "./internal/project#TestMachineManifestRejections",
+    ),
+    (
+        "machine operation permission grant",
+        "internal/project/manifest_machine.go",
+        "if !slices.Contains(principal.Permissions, o.Permission) {",
+        "if false && !slices.Contains(principal.Permissions, o.Permission) {",
+        "./internal/project#TestMachineManifestRejections",
+    ),
+    (
+        "machine permission outside the user catalog",
+        "internal/project/operations.go",
+        'permission, scope, machine = "", ScopeMachine, o.MachinePrincipal()',
+        "permission, scope, machine = o.Permission, ScopeMachine, "
+        "o.MachinePrincipal()",
+        "./internal/project#TestMachineManifestValidatesAndRoundTrips",
+    ),
+    (
+        "machine enrollment model shape",
+        "internal/project/manifest_machine.go",
+        "if !slices.Equal(model.Fields, fields) {",
+        "if false {",
+        "./internal/project#TestMachineManifestRejections",
+    ),
+    (
+        "machine endpoint exposure",
+        "internal/project/manifest_machine.go",
+        "\t\tif count != 1 {",
+        "\t\tif count > 1 {",
+        "./internal/project#TestMachineManifestRejections",
+    ),
+    (
+        "machine lookup text comparison",
+        "internal/project/manifest_system.go",
+        'return "::text"',
+        'return ""',
+        "./internal/project#TestMachineLookupMigrationShape",
+    ),
+    (
+        "machine nonce replay protection",
+        "internal/project/templates/candidate_machine.go.tmpl",
+        "ON CONFLICT DO NOTHING",
+        "ON CONFLICT (principal, machine_id, nonce) DO UPDATE SET "
+        "nonce = EXCLUDED.nonce",
+        "./internal/project#TestMachineManagedRender",
+    ),
 ]
 
 if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":

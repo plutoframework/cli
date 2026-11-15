@@ -1,0 +1,25 @@
+package gateways
+
+import (
+	"context"
+	"errors"
+
+	models "example.test/gwapp/internal/models/gateways"
+	rules "example.test/gwapp/internal/rules/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// Create registers a pending gateway of the verified tenant and returns its
+// one-time enrollment token.
+func Create(
+	ctx context.Context,
+	e scope.Execution,
+	ports CreatePorts,
+	in models.NewGateway,
+) (models.CreatedGateway, error) {
+	if !rules.ValidName(in.Name) {
+		return models.CreatedGateway{}, errors.New("invalid gateway name")
+	}
+
+	return ports.Registry.Create(ctx, e, in)
+}

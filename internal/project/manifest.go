@@ -38,6 +38,7 @@ type Manifest struct {
 	Authored           *Authored           `toml:"authored,omitempty"`
 	Memberships        *Memberships        `toml:"memberships,omitempty"`
 	Lookups            []Lookup            `toml:"lookups,omitempty"`
+	Principals         []Principal         `toml:"principals,omitempty"`
 	Migrations         Migrations          `toml:"migrations,omitempty"`
 
 	// Kind is empty for Go applications and KindFrontend for a frontend that
@@ -89,6 +90,10 @@ type Endpoint struct {
 
 	// Scope is copied from the referenced operation; see manifest_system.go.
 	Scope string `toml:"-"`
+
+	// Machine is the principal of a machine-authenticated operation, copied
+	// from the operation; see manifest_machine.go.
+	Machine string `toml:"-"`
 }
 
 var (
