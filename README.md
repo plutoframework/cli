@@ -156,11 +156,12 @@ no factor policy is enabled automatically by this upgrade.
 `pluto migrate --to <profile|schema> --dry-run` plans ordered, versioned
 migrations: manifest transforms, regenerated scaffold files and a precise list of
 manual items for anything edited. Apply from a clean Git tree; see the
-[reference](docs/REFERENCE.md#migrating-existing-applications).
+[reference](docs/CANDIDATE.md#migrating-existing-applications).
 
 ## Read further
 
 - [API and integration reference](docs/REFERENCE.md)
+- [Candidate profile, migration and authored seams](docs/CANDIDATE.md)
 - [Field guide](https://plutoframework.github.io/pluto-site/docs/cli/reference/)
 - [Pluto ecosystem](https://github.com/plutoframework/pluto#the-ecosystem)
 
