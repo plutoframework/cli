@@ -185,7 +185,7 @@ func inspectCandidateBoundaries(
 		}
 
 		operations[operation.ID()] = operation
-		if operation.Body == BodyAuthored {
+		if operation.outsideContracts() {
 			continue
 		}
 

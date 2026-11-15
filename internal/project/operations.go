@@ -28,6 +28,11 @@ type Operation struct {
 	Output         string           `toml:"output,omitempty"`
 	Input          string           `toml:"input,omitempty"`
 	Query          []OperationQuery `toml:"query,omitempty"`
+
+	// Tenant-less system operations; see manifest_system.go.
+	Scope     string `toml:"scope,omitempty"`
+	Lookup    string `toml:"lookup,omitempty"`
+	RateLimit string `toml:"rate_limit,omitempty"`
 }
 
 func (o Operation) ID() string {
@@ -45,6 +50,7 @@ func (o Operation) Endpoint() Endpoint {
 		Action:      o.Action,
 		Permission:  o.Permission,
 		Public:      o.Public,
+		Scope:       o.Scope,
 		Collection:  o.Collection,
 		Method:      method,
 		Path:        "/operation",
@@ -96,6 +102,7 @@ func (m Manifest) OperationEndpoint(entry Endpoint) (Endpoint, error) {
 
 	entry.Permission = operation.Permission
 	entry.Public = operation.Public
+	entry.Scope = operation.Scope
 
 	entry.Collection = operation.Collection
 	if operation.Write {

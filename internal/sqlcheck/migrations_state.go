@@ -21,6 +21,11 @@ type policyState struct {
 	HasCheck    bool
 	UsingOK     bool
 	CheckOK     bool
+
+	// LookupOK is set when the policy is the exact declared lookup policy:
+	// FOR SELECT, permissive, USING (<key> = current_setting(<setting>)) and
+	// no WITH CHECK.
+	LookupOK bool
 }
 
 type triggerState struct {
@@ -42,6 +47,9 @@ type migrationState struct {
 
 	// columns maps declared table names to their tenant column.
 	columns map[string]string
+
+	// lookups are the declared lookups by policy name.
+	lookups map[string]Lookup
 }
 
 func newMigrationState(setting string) *migrationState {
@@ -50,6 +58,7 @@ func newMigrationState(setting string) *migrationState {
 		functions: map[string]bool{},
 		setting:   setting,
 		columns:   map[string]string{},
+		lookups:   map[string]Lookup{},
 	}
 }
 

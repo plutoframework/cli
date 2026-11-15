@@ -1,0 +1,78 @@
+package orgs
+
+import (
+	"context"
+	"strings"
+
+	models "example.test/sysapp/internal/models/orgs"
+	rules "example.test/sysapp/internal/rules/orgs"
+	"example.test/sysapp/internal/scope"
+	queries "example.test/sysapp/internal/storage/queries/orgs"
+)
+
+// TenantStore is the authored organization adapter.
+type TenantStore struct{ db scope.DB }
+
+func NewTenantStore(db scope.DB) *TenantStore { return &TenantStore{db: db} }
+
+// Provision creates the tenant root and its first admin in the one
+// transaction scope.DB.Provision opens for the NEW tenant.
+func (s *TenantStore) Provision(
+	ctx context.Context,
+	p scope.Provisioning,
+	in models.Signup,
+) (models.Org, error) {
+	var out models.Org
+
+	err := s.db.Provision(ctx, p, func(ctx context.Context, tx scope.Tx) error {
+		query := queriesOf(tx)
+
+		row, err := query.CreateOrg(ctx, queries.CreateOrgParams{
+			ID:   tx.Tenant(),
+			Slug: in.Slug,
+			Name: in.Name,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "23505") {
+				return rules.ErrSlugTaken
+			}
+
+			return err
+		}
+
+		if err := query.AddMember(ctx, queries.AddMemberParams{
+			OrgID: tx.Tenant(),
+			ID:    p.SubjectID(),
+			Role:  rules.FirstRole,
+		}); err != nil {
+			return err
+		}
+
+		out = models.Org{
+			ID:   tx.Tenant().String(),
+			Slug: row.Slug,
+			Name: row.Name,
+		}
+
+		return nil
+	})
+
+	return out, err
+}
+
+func (s *TenantStore) CountMembers(
+	ctx context.Context,
+	e scope.Execution,
+) (int64, error) {
+	var count int64
+
+	err := s.db.Read(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		var err error
+
+		count, err = queriesOf(tx).CountMembers(ctx, tx.Tenant())
+
+		return err
+	})
+
+	return count, err
+}

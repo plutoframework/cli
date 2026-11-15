@@ -44,6 +44,9 @@ type queryEnv struct {
 	tables  map[string]Table
 	allowed map[string]bool
 	set     string
+
+	// provision is set for the query set of a provisioning group.
+	provision bool
 }
 
 // bannedWords are statements and functions that make SQL dynamic or let a
@@ -134,7 +137,37 @@ func analyzeQuery(q query, env queryEnv) []Diagnostic {
 		return diagnostics
 	}
 
+	diagnostics = append(diagnostics, checkTenantRootWrite(q, stmt, env)...)
+
 	return append(diagnostics, checkTenantBinding(q, stmt, env)...)
+}
+
+// checkTenantRootWrite lets only a provisioning query set create tenants.
+// Every other set can read and update the root row of the verified tenant but
+// never INSERT a tenant.
+func checkTenantRootWrite(q query, stmt *statement, env queryEnv) []Diagnostic {
+	if stmt.Kind != "insert" || env.provision {
+		return nil
+	}
+
+	for _, ref := range stmt.Refs {
+		if env.tables[ref.Name].TenantRoot {
+			return []Diagnostic{newDiagnostic(
+				q.File,
+				q.Line,
+				fmt.Sprintf(
+					"query %s inserts into tenant root %q outside a "+
+						"provisioning query set.",
+					q.Name,
+					ref.Name,
+				),
+				"Tenants are created only by a scope = \"provision\" "+
+					"operation; move the query to its group.",
+			)}
+		}
+	}
+
+	return nil
 }
 
 func trimTrailingSemicolon(tokens []token) []token {

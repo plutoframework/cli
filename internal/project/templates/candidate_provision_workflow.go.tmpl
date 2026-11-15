@@ -1,0 +1,29 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/scope"
+	auth "github.com/plutoframework/pluto-auth"
+)
+
+// execute is the only caller of the authored body. It hands the body a
+// Provisioning bound to the verified subject; the body can provision one
+// new tenant and nothing else.
+func (operation *{{.Action}}) execute(
+	ctx context.Context,
+	identity *auth.Identity,
+	subject string,
+	request models.{{.Action}}Request,
+) (models.{{.Action}}Data, error) {
+	return logic.{{.Action}}(
+		ctx,
+		scope.BindProvisioning(
+			operation.{{lowerFirst .Action}}Manager,
+			identity,
+			subject),
+		operation.{{lowerFirst .Action}}Ports,
+		request)
+}

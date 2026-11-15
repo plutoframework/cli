@@ -21,7 +21,7 @@ import (
 // init, no package-level variables and no goroutines.
 func {{.Action}}(
 	ctx context.Context,
-	e scope.Execution,
+	e scope.{{if .Authored.Provision}}Provisioning{{else}}Execution{{end}},
 	p {{.Action}}Ports,
 	in models.{{.Action}}Request,
 ) ({{.Authored.Returns}}) {

@@ -100,6 +100,8 @@ func analyzeSet(
 		tables:  tables,
 		allowed: map[string]bool{},
 		set:     set.Group,
+
+		provision: set.Provision,
 	}
 	for _, name := range set.Tables {
 		env.allowed[tableKey(name)] = true

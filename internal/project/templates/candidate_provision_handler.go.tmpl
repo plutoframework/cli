@@ -1,0 +1,58 @@
+package {{.Group}}
+
+import (
+	"errors"
+	"net/http"
+
+	models "{{.Module}}/internal/models/{{.Group}}"
+	operations "{{.Module}}/internal/operations/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/transport"
+	"github.com/plutoframework/pluto-auth/httpauth"
+	"github.com/plutoframework/pluto-auth/methods/password"
+)
+
+type {{.Action}}Operations = operations.{{.Action}}Boundary
+
+// Register{{.Action}} serves a session-only route: the session is verified
+// but no tenant is selected, because the tenant does not exist yet.
+func Register{{.Action}}(
+	reg transport.Registrar,
+	operation {{.Action}}Operations,
+	bodyLimit int64,
+) {
+	reg.Handle(
+		paths.{{.Symbol}},
+		func(w http.ResponseWriter, r *http.Request) {
+			identity, ok := httpauth.IdentityFromContext(r.Context())
+			if !ok || identity == nil {
+				transport.Error(w, r, 401, "unauthenticated")
+
+				return
+			}
+
+			var input models.{{.Action}}Request
+			if !transport.Decode(w, r, &input, bodyLimit) {
+				return
+			}
+
+			output, err := operation.Execute(r.Context(), identity, input)
+			if err != nil {
+				if errors.Is(err, password.ErrLimited) {
+					transport.Error(w, r, 429, "rate_limited")
+
+					return
+				}
+
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			transport.JSON(
+				w,
+				paths.{{.Symbol}}.SuccessStatus,
+				models.{{.Action}}Response{Data: output},
+			)
+		})
+}

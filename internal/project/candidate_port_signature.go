@@ -116,9 +116,11 @@ func parsePortMethod(spec string) (portMethod, error) {
 
 func (m portMethod) checkShape() error {
 	if len(m.Params) == 0 ||
-		m.Params[0] != "scope.Execution" && m.Params[0] != "scope.Tx" {
+		m.Params[0] != "scope.Execution" && m.Params[0] != "scope.Tx" &&
+			m.Params[0] != "scope.Provisioning" {
 		return fmt.Errorf(
-			"method %s must take scope.Execution or scope.Tx first",
+			"method %s must take scope.Execution, scope.Tx or "+
+				"scope.Provisioning first",
 			m.Name,
 		)
 	}

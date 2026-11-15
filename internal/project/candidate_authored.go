@@ -30,6 +30,10 @@ type authoredOp struct {
 	Result     string
 	Pagination bool
 
+	// Provision marks a scope = "provision" body, which receives a
+	// scope.Provisioning instead of a scope.Execution.
+	Provision bool
+
 	// PagedRequest is set when the request model carries a Page the workflow
 	// must bind from verified scope: a page read exposed as an endpoint.
 	PagedRequest bool
@@ -59,9 +63,10 @@ func modelName(id string) string {
 
 func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 	view := authoredOp{
-		ID:       operation.ID(),
-		Action:   operation.Action,
-		Resource: operation.Resource,
+		ID:        operation.ID(),
+		Action:    operation.Action,
+		Resource:  operation.Resource,
+		Provision: operation.Scope == ScopeProvision,
 	}
 
 	switch operation.Response {
@@ -199,10 +204,19 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 		base := "internal/operations/" + operation.Group + "/" +
 			lowerAction(operation.Action)
 
-		for suffix, name := range map[string]string{
+		layout := map[string]string{
 			"_gate_gen.go":     "candidate_authored_gate.go",
 			"_workflow_gen.go": "candidate_authored_workflow.go",
-		} {
+		}
+
+		if operation.Scope == ScopeProvision {
+			layout = map[string]string{
+				"_gate_gen.go":     "candidate_provision_gate.go",
+				"_workflow_gen.go": "candidate_provision_workflow.go",
+			}
+		}
+
+		for suffix, name := range layout {
 			source, err := render(name, opData)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", base+suffix, err)
@@ -279,7 +293,7 @@ func candidateAuthoredScaffold(
 // resource data contract applies.
 func allAuthored(operations []Operation) bool {
 	for _, operation := range operations {
-		if operation.Body != BodyAuthored {
+		if !operation.outsideContracts() {
 			return false
 		}
 	}

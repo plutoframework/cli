@@ -24,6 +24,10 @@ func CheckMigrations(cfg Config) ([]Diagnostic, error) {
 		state.columns[tableKey(table.Name)] = table.TenantColumn
 	}
 
+	for _, lookup := range cfg.Lookups {
+		state.lookups[strings.ToLower(lookup.Policy)] = lookup
+	}
+
 	var diagnostics []Diagnostic
 
 	files, err := migrationFiles(cfg)
@@ -195,6 +199,10 @@ func (s *migrationState) evaluateTable(
 		diagnostics,
 		s.policyDiagnostics(declared, state)...,
 	)
+	diagnostics = append(
+		diagnostics,
+		s.lookupDiagnostics(declared, state)...,
+	)
 
 	if declared.AppendOnly {
 		diagnostics = append(
@@ -224,6 +232,13 @@ func (s *migrationState) policyDiagnostics(
 	for _, name := range names {
 		policy := state.Policies[name]
 		if policy.Restrictive {
+			continue
+		}
+
+		// The declared lookup policy is the one permitted widening: it
+		// admits a single SELECT keyed to a transaction-local setting only
+		// generated code sets.
+		if policy.LookupOK && policy.Command == "select" && !policy.HasCheck {
 			continue
 		}
 
@@ -337,6 +352,68 @@ func (s *migrationState) triggerDiagnostics(
 			"Create a BEFORE UPDATE and BEFORE DELETE trigger that "+
 				"executes a function containing RAISE EXCEPTION and "+
 				"never returning NEW or OLD.",
+		))
+	}
+
+	return diagnostics
+}
+
+// lookupDiagnostics requires every declared lookup of the table to have its
+// exact policy and its key column.
+func (s *migrationState) lookupDiagnostics(
+	declared Table,
+	state *tableState,
+) []Diagnostic {
+	var diagnostics []Diagnostic
+
+	names := make([]string, 0, len(s.lookups))
+	for name := range s.lookups {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	for _, name := range names {
+		lookup := s.lookups[name]
+		if tableKey(lookup.Table) != tableKey(declared.Name) {
+			continue
+		}
+
+		if !state.Columns[tableKey(lookup.Key)] {
+			diagnostics = append(diagnostics, newDiagnostic(
+				state.File,
+				state.Line,
+				fmt.Sprintf(
+					"lookup key %s is not a column of table %s.",
+					lookup.Key,
+					declared.Name,
+				),
+				"Fix the lookup key or add the column.",
+			))
+		}
+
+		policy := state.Policies[name]
+		if policy != nil && policy.LookupOK && policy.Command == "select" &&
+			!policy.HasCheck && !policy.Restrictive {
+			continue
+		}
+
+		diagnostics = append(diagnostics, newDiagnostic(
+			state.File,
+			state.Line,
+			fmt.Sprintf(
+				"table %s has no exact lookup policy %s.",
+				declared.Name,
+				lookup.Policy,
+			),
+			fmt.Sprintf(
+				"Add `CREATE POLICY %s ON %s FOR SELECT USING (%s = "+
+					"current_setting('%s', true))`.",
+				lookup.Policy,
+				declared.Name,
+				lookup.Key,
+				lookup.Setting,
+			),
 		))
 	}
 
