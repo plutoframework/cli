@@ -82,7 +82,8 @@ func TestPublishedToCandidateFreshApplication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if plan.Blocked || len(plan.Manual) != 0 || len(plan.Notes) != 0 {
+	if plan.Blocked || len(scaffoldTestManual(plan)) != 0 ||
+		len(plan.Notes) != 0 {
 		t.Fatalf("fresh app must migrate cleanly: %+v %+v", plan.Manual,
 			plan.Notes)
 	}
@@ -122,6 +123,7 @@ func TestPublishedToCandidateFreshApplication(t *testing.T) {
 
 	for name := range previous {
 		if _, kept := expected[name]; !kept &&
+			!strings.HasSuffix(name, "_test.go") &&
 			readTree(t, root, name) != "<missing>" {
 			t.Fatalf("published-only scaffold %s retained", name)
 		}
@@ -146,6 +148,21 @@ func TestPublishedToCandidateFreshApplication(t *testing.T) {
 	if err != nil || len(again.Steps) != 0 || len(again.Paths()) != 0 {
 		t.Fatalf("migration not idempotent: %v %+v", err, again)
 	}
+}
+
+// scaffoldTestManual returns manual items that are not about pristine scaffold
+// tests, which are kept (never deleted silently) and may dangle against the
+// candidate API until ported.
+func scaffoldTestManual(plan *Plan) []Item {
+	rest := []Item{}
+
+	for _, item := range plan.Manual {
+		if !strings.HasSuffix(item.Path, "_test.go") {
+			rest = append(rest, item)
+		}
+	}
+
+	return rest
 }
 
 func TestPublishedToCandidatePreservesEditsAndReportsThem(t *testing.T) {

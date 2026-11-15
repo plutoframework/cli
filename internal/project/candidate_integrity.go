@@ -78,6 +78,8 @@ func candidateIntegrity(root string, m Manifest) []ArchitectureDiagnostic {
 		}
 	}
 
+	diagnostics = append(diagnostics, migrationOwnership(root, m, files)...)
+
 	return diagnostics
 }
 

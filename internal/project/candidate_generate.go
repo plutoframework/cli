@@ -379,6 +379,8 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		}
 	}
 
+	applyFrameworkMigrations(m, files)
+
 	return files, nil
 }
 

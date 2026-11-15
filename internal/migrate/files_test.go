@@ -95,7 +95,8 @@ func TestReconcileReplacesOnlyPristineScaffold(t *testing.T) {
 		}
 	}
 
-	if !plan.Deletes["internal/a/old_test.go"] || len(plan.Deletes) != 1 {
+	// A pristine test whose imports resolve is kept, never deleted silently.
+	if len(plan.Deletes) != 0 {
 		t.Fatalf("deletes %v", plan.Deletes)
 	}
 

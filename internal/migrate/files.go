@@ -46,6 +46,8 @@ func reconcile(
 
 	sort.Strings(ordered)
 
+	deferred := []string{}
+
 	for _, name := range ordered {
 		current, exists, err := w.Read(name)
 		if err != nil {
@@ -101,6 +103,10 @@ func reconcile(
 					"text and rerun pluto migrate",
 			})
 		case !exists:
+		case pristine && strings.HasSuffix(name, "_test.go"):
+
+			// Decided once every other file has settled; see scaffoldTests.
+			deferred = append(deferred, name)
 		case pristine:
 			if err := w.Delete(name); err != nil {
 				return err
@@ -125,7 +131,7 @@ func reconcile(
 		}
 	}
 
-	return nil
+	return scaffoldTests(w, deferred, previous, next, profile)
 }
 
 func isSQLMigration(name string) bool {

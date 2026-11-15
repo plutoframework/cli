@@ -37,6 +37,7 @@ type Manifest struct {
 	Models             []Model             `toml:"models,omitempty"`
 	Authored           *Authored           `toml:"authored,omitempty"`
 	Memberships        *Memberships        `toml:"memberships,omitempty"`
+	Migrations         Migrations          `toml:"migrations,omitempty"`
 
 	// Kind is empty for Go applications and KindFrontend for a frontend that
 	// lives in its own repository.
@@ -102,6 +103,10 @@ func (m Manifest) Validate() error {
 		return m.validateStandaloneFrontend()
 	default:
 		return fmt.Errorf("kind must be omitted or %q", KindFrontend)
+	}
+
+	if err := m.validateMigrations(); err != nil {
+		return err
 	}
 
 	if err := ValidateBoundaryProfile(

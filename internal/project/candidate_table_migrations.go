@@ -12,7 +12,7 @@ import (
 	"github.com/plutoframework/cli/internal/sqlcheck"
 )
 
-var migrationNumber = regexp.MustCompile(`^(\d+)_`)
+var migrationFilePrefix = regexp.MustCompile(`^(\d+)_`)
 
 // ProposeTableMigrations returns new migration files that give declared
 // tables the forced row-level security policy and append-only triggers that
@@ -94,7 +94,7 @@ func nextMigrationNumber(root string) (int, error) {
 	highest := 0
 
 	for _, entry := range entries {
-		match := migrationNumber.FindStringSubmatch(entry.Name())
+		match := migrationFilePrefix.FindStringSubmatch(entry.Name())
 		if match == nil {
 			continue
 		}
