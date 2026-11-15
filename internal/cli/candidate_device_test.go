@@ -192,11 +192,20 @@ func TestCandidateDeviceEndToEnd(t *testing.T) {
 
 	writeSeam(t, root, "internal/app/device_runtime_test.go", string(runtime))
 
+	stream, err := os.ReadFile(
+		filepath.Join("testdata", "candidate_audit_stream.go.tmpl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(t, root, "internal/app/audit_stream_test.go", string(stream))
+
 	output := external(
 		t, root, "go", "test", "-race", "-json", "-count=1",
-		"-run", "^TestDeviceEndToEnd$", "./internal/app",
+		"-run", "^TestDevice(EndToEnd|Stream)$", "./internal/app",
 	)
-	assertCandidateCaseNames(t, output, "TestDeviceEndToEnd")
+	assertCandidateCaseNames(
+		t, output, "TestDeviceEndToEnd", "TestDeviceStream")
 
 	assertDeviceNegatives(t, root)
 }

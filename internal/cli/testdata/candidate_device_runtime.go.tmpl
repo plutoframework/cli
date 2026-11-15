@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"example.test/auditapp/internal/access"
 	models "example.test/auditapp/internal/models/audit"
 
@@ -523,4 +525,87 @@ func toJSON(value any) string {
 	encoded, _ := json.Marshal(value)
 
 	return string(encoded)
+}
+
+// dialBearer opens the audit stream with a delegated bearer token.
+func dialBearer(
+	t *testing.T,
+	server *httptest.Server,
+	token, tenant string,
+) (*websocket.Conn, int, error) {
+	t.Helper()
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+token)
+	header.Set("Origin", auditOrigin)
+
+	if tenant != "" {
+		header.Set("X-Tenant-ID", tenant)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/audit/watch"
+
+	conn, response, err := websocket.Dial(
+		ctx, url, &websocket.DialOptions{HTTPHeader: header})
+
+	status := 0
+	if response != nil {
+		status = response.StatusCode
+	}
+
+	return conn, status, err
+}
+
+// A delegated token reaches a stream only through the same scope check and
+// live recheck as every other generated gate: scopes narrow before the
+// upgrade, the token's tenant is fixed, and revoking the grant closes the
+// open socket within one recheck interval.
+func TestDeviceStream(t *testing.T) {
+	f := auditSetup(t)
+	server := httptest.NewServer(f.app.Handler())
+	t.Cleanup(server.Close)
+
+	alice := f.enroll(t, "stream-alice@example.test")
+	f.member(t, alice, "north", "recorder")
+	f.member(t, alice, "south", "auditor")
+
+	reader := f.issue(t, alice, "north", "audit.read", "audit.read")
+	writer := f.issue(t, alice, "north", "audit.write", "audit.write")
+
+	// The scope names the permission: the stream opens.
+	conn, status, err := dialBearer(t, server, reader.access, "north")
+	if err != nil {
+		t.Fatalf("scoped stream refused: %v (status %d)", err, status)
+	}
+
+	t.Cleanup(func() { _ = conn.CloseNow() })
+
+	// A scope without audit.read is refused before any upgrade.
+	if _, status, err := dialBearer(
+		t, server, writer.access, "north",
+	); err == nil || status != 403 {
+		t.Fatalf("unscoped stream: status %d err %v", status, err)
+	}
+
+	// The token is bound to its tenant even though the owner is in south.
+	if _, status, err := dialBearer(
+		t, server, reader.access, "south",
+	); err == nil || (status != 403 && status != 401) {
+		t.Fatalf("stream reached another tenant: status %d err %v", status, err)
+	}
+
+	// Revoking the grant ends the open stream at the next recheck.
+	if status, _ := f.call(t, deviceCall{
+		method: "DELETE", path: "/auth/device/grants/" + reader.grant,
+		session: alice.session,
+	}); status != 204 {
+		t.Fatalf("revoke: %d", status)
+	}
+
+	if code := expectClose(t, conn, 8*time.Second); code != 1008 {
+		t.Fatalf("revoked stream closed with %d", code)
+	}
 }

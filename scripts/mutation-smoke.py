@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 root = Path(__file__).resolve().parent.parent
@@ -566,69 +567,13 @@ mutations = [
         "ON CONFLICT (principal, machine_id, nonce) DO UPDATE SET "
         "nonce = EXCLUDED.nonce",
         "./internal/project#TestMachineManagedRender",
-        "device scope names undeclared permission",
-        "internal/project/manifest_authdevice.go",
-        "if !permissions[permission] || seen[permission] {",
-        "if seen[permission] {",
-        "./internal/project#TestAuthDeviceValidation",
-    ),
-    (
-        "device client names undeclared scope",
-        "internal/project/manifest_authdevice.go",
-        "if !scopes[scope] || seen[scope] {",
-        "if seen[scope] {",
-        "./internal/project#TestAuthDeviceValidation",
-    ),
-    (
-        "device verification over plain http",
-        "internal/project/manifest_authdevice.go",
-        'if parsed.Scheme != "https" && (parsed.Scheme != "http" || !loopback) {',
-        'if parsed.Scheme != "https" && (parsed.Scheme != "http" || loopback) {',
-        "./internal/project#TestAuthDeviceValidation",
-    ),
-    (
-        "device refresh outlives the grant",
-        "internal/project/manifest_authdevice.go",
-        "if d.Access > d.Refresh || d.Refresh > d.Max {",
-        "if false {",
-        "./internal/project#TestAuthDeviceValidation",
-    ),
-    (
-        "device client claims interactive actor",
-        "internal/project/manifest_authdevice.go",
-        'if client.ActorType == "user" {',
-        "if false {",
-        "./internal/project#TestAuthDeviceValidation",
-    ),
-    (
-        "device scope check removed from authored gate",
-        "internal/project/templates/candidate_authored_gate.go.tmpl",
-        "if err := caller.Permits({{q .Authored.Permission}}); err != nil {",
-        "if false {",
-        "./internal/project#TestCandidateDeviceGeneration",
-    ),
-    (
-        "device scope check removed from operation gate",
-        "internal/project/templates/candidate_gate.go.tmpl",
-        "if err := caller.Permits({{q .Contract.Permission}}); err != nil {",
-        "if false {",
-        "./internal/project#TestCandidateDeviceGeneration",
-    ),
-    (
-        "device delegate may provision tenants",
-        "internal/project/templates/candidate_provision_gate.go.tmpl",
-        "if _, delegated := identity.Delegation(); delegated {",
-        "if false {",
-        "./internal/project#TestCandidateDeviceGeneration",
-    ),
-    (
-        "device grant importable by authored code",
-        "internal/project/candidate_boundary.go",
-        'strings.HasPrefix(path, "github.com/plutoframework/pluto-auth/device") ||',
-        "false ||",
-        "./internal/project#TestDeviceGrantIsCriticalForAuthoredCode",
     ),
 ]
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mutation_cases_device import cases as device_cases  # noqa: E402
+
+mutations.extend(device_cases)
 
 mutations.extend(
     [
@@ -923,8 +868,8 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
             (
                 "path parameter workflow resource key",
                 "internal/project/templates/candidate_authored_workflow.go.tmpl",
-                'request.ResourceID()),',
-                '"x"),',
+                '+\\":\\"+request.ResourceID()"}}',
+                '+\\":\\"+x"}}',
                 "TestCandidateGatewayEndToEnd",
             ),
             (

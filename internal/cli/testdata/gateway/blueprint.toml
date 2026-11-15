@@ -490,3 +490,21 @@ table = "gateways.users"
 tenant_column = "org_id"
 subject_column = "id"
 role_column = "role"
+
+[auth.device]
+verification_uri = "https://app.example.test/device"
+poll_interval = "1s"
+
+[[auth.device.scopes]]
+name = "gateways.manage"
+permissions = ["gateways.manage"]
+
+[[auth.device.scopes]]
+name = "audit.record"
+permissions = ["audit.record"]
+
+[[auth.device.clients]]
+id = "gryt-cli"
+name = "gryt CLI"
+actor_type = "agent"
+scopes = ["gateways.manage", "audit.record"]

@@ -124,7 +124,7 @@ func (m Manifest) tableByID(id string) (Table, bool) {
 
 func validateAuthEvents(m Manifest) error {
 	if !m.AuthEventsOn() {
-		if m.Auth != nil {
+		if m.Auth != nil && !m.DeviceOn() {
 			return fmt.Errorf("[auth] declares nothing; remove it")
 		}
 

@@ -120,9 +120,10 @@ func TestCandidateGatewayEndToEnd(t *testing.T) {
 	root := gatewayApp(t)
 
 	for fixture, target := range map[string]string{
-		"candidate_machine_helpers.go.tmpl":      "internal/app/gateway_helpers_test.go",
-		"candidate_gateway_runtime.go.tmpl":      "internal/app/gateway_runtime_test.go",
-		"candidate_gateway_path_runtime.go.tmpl": "internal/app/gateway_path_test.go",
+		"candidate_machine_helpers.go.tmpl":        "internal/app/gateway_helpers_test.go",
+		"candidate_gateway_runtime.go.tmpl":        "internal/app/gateway_runtime_test.go",
+		"candidate_gateway_path_runtime.go.tmpl":   "internal/app/gateway_path_test.go",
+		"candidate_gateway_device_runtime.go.tmpl": "internal/app/gateway_device_test.go",
 	} {
 		source, err := os.ReadFile(filepath.Join("testdata", fixture))
 		if err != nil {
@@ -157,6 +158,7 @@ func TestCandidateGatewayEndToEnd(t *testing.T) {
 		"TestGatewayPathGate",
 		"TestGatewayPathEdit",
 		"TestGatewayPathClearBeats",
+		"TestGatewayDelegatedPath",
 	)
 
 	assertPathResourceBinding(t, root)
