@@ -269,13 +269,6 @@ func seamOperation(m Manifest, o Operation) (SeamOperation, error) {
 		}
 	}
 
-	if o.Response == ResponseStream {
-		return out, fmt.Errorf(
-			"operation %s: stream responses are a later phase",
-			o.ID(),
-		)
-	}
-
 	// A provision endpoint decodes a JSON body into its declared input model;
 	// it has no query parser.
 	if o.Scope == ScopeProvision || o.Scope == ScopeEnroll ||
@@ -283,7 +276,7 @@ func seamOperation(m Manifest, o Operation) (SeamOperation, error) {
 		out.Endpoint = false
 	}
 
-	if out.Endpoint && (o.Write || out.Input != "") {
+	if out.Endpoint && !o.isStream() && (o.Write || out.Input != "") {
 		return out, fmt.Errorf(
 			"operation %s: authored endpoints must be reads without input "+
 				"models; expose writes through generated bodies",

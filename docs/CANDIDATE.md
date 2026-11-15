@@ -401,3 +401,118 @@ tables; enable login and set the credential in the deployment. Generated
 start when the connected role is a superuser, has BYPASSRLS, owns or inherits
 ownership of a declared table, is not the declared runtime role, or a declared
 table lacks forced row-level security. There is no override.
+
+## Streams (WebSocket)
+
+An authored operation with `response = "stream"` is a long-lived bidirectional
+channel for gateway job pushes, relay fan-out or live replay. It is exposed
+only through one endpoint with `transport = "websocket"`; the body never sees a
+connection.
+
+```toml
+[[models]]
+id = "audit.Cursor"                 # client -> server
+fields = ["seq:int64"]
+
+[[models]]
+id = "audit.Tick"                   # server -> client
+fields = ["seq:int64", "type:string"]
+
+[[operations]]
+group = "audit"
+action = "Watch"
+permission = "audit.read"
+idempotency = "none"
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+response = "stream"
+item = "audit.Tick"                 # server message; required
+input = "audit.Cursor"              # client message; omit for push-only
+query = [{ name = "after", type = "int64" }]
+
+[operations.stream]                 # optional; these are the defaults
+max_message_bytes = 65536           # 1..1048576, both directions
+write_seconds = 10                  # slow-consumer deadline per Send
+ping_seconds = 20
+idle_seconds = 60                   # must exceed ping_seconds
+recheck_seconds = 15                # gate recheck interval
+max_connections = 256               # per operation, per process
+
+[[endpoints]]
+group = "audit"
+action = "Watch"
+operation = "audit.Watch"
+transport = "websocket"
+origins = ["app.example.com"]       # optional browser host patterns
+method = "GET"
+path = "/api/audit/watch"
+name = "Watch audit"
+description = "Replay audit events over a WebSocket."
+```
+
+The body is `func Watch(ctx, e scope.Execution, p WatchPorts, in
+models.WatchRequest, stream scope.Stream[models.Cursor, models.Tick]) error`.
+`stream.Send(ctx, msg)` writes one JSON text frame; `stream.Receive(ctx)`
+returns the next client message decoded strictly (one object, unknown fields
+and trailing data rejected) or `scope.ErrStreamClosed` when the stream ends,
+which a loop treats as its normal end. Returning nil closes normally. Push-only
+streams (no `input`) use `scope.Stream[scope.NoMessage, Out]`; any client data
+message disconnects the peer. Query parameters are the usual typed `query`
+declarations and arrive in `in`.
+
+Generated code owns everything else:
+
+- Authentication and the gate run before the upgrade (`Prepare`): a denied
+  caller gets an ordinary 401/403/400 and never a socket; a full operation gets
+  503 `stream_capacity`. Serve then reruns the gate and runs the body inside
+  it, so `scope.DB` and every adapter call recheck identity, membership,
+  permission and resource per access, exactly as for HTTP bodies.
+- Origin: a request carrying an `Origin` header must be same-host or match
+  `origins` (host patterns; `*.example.com` allowed, a bare `*` is rejected).
+  Clients without an Origin header are service clients, not browsers. The
+  session transport's trusted origin may differ from the Host seen behind a
+  proxy; list it in `origins`.
+- Tenant: the `X-Tenant-ID` header, or for browsers (no custom headers on a
+  WebSocket) the `tenant` query parameter, verified like any tenant selection.
+  Credentials are the session cookie or bearer token, so a machine principal
+  works wherever the application accepts it for HTTP (the stream only needs an
+  `access.Caller`).
+- Limits: read limit and outbound size check at `max_message_bytes`; text
+  frames only; `Send` blocks while the peer is slow and fails the stream after
+  `write_seconds` (backpressure, no unbounded queue); the inbound queue holds
+  16 messages, so a body that declares input must keep calling `Receive`.
+- Liveness: the runtime pings every `ping_seconds` and closes (1001) a peer
+  that has not answered within `idle_seconds`. Quiet but responsive streams
+  stay open.
+- Revocation: every `recheck_seconds` the live gate is re-verified. Any
+  failure, including a transient one, closes the stream (1008 for denied or
+  unauthenticated, 1011 otherwise) and cancels the body's context, so a
+  suspended member, expired session or removed role loses the stream within
+  one interval.
+- Close codes are fixed strings, never error text: 1000 done, 1001 idle or
+  going away, 1003 binary frame, 1007 invalid message, 1008 unauthorized or
+  unexpected message, 1009 too big, 1011 internal error.
+
+A stream may write (`write = true`, `idempotency = "exempt"` with a
+`replay_reason`; the upgrade is still a GET protected by the Origin check).
+Cross-tenant data stays impossible: tenant comes only from the verified
+execution and RLS binds every transaction.
+
+Test bodies with `scopetest.RunStream(ctx, harness, subject, tenant, resource,
+drive, body)`: it runs the body under a real gate execution through the same
+runtime over an in-memory peer (`Send`, `SendRaw`, `Receive`, `Close`).
+
+Generated OpenAPI documents the upgrade as a GET with a 101 response and an
+`x-websocket` extension holding the message schemas, the size limit and the
+allowed origins. Blueprints and `pluto generate` need the WebSocket module:
+blueprints pin `github.com/coder/websocket` v1.8.14 in go.mod/go.sum; after
+adding a stream by editing pluto.toml run `go mod tidy`. Authored code may not
+declare any websocket library in `[[authored.dependencies]]`, and the library
+is imported only by generated files.
+
+Limits of this phase: connection caps are per process; streams are not closed
+by `http.Server.Shutdown` (hijacked connections), so rely on the process exit
+or the recheck interval; there is no per-subject connection quota or message
+rate limit beyond the size, write and idle bounds.

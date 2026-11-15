@@ -41,6 +41,9 @@ var _ func(
 	{{if .Provision}}scope.Provisioning{{else}}scope.Execution{{end}},
 	{{.Action}}Ports,
 	models.{{.Action}}Request,
+{{- if .IsStream}}
+	scope.Stream[{{.StreamIn}}, {{.StreamOut}}],
+{{- end}}
 ) ({{.Returns}}) = {{.Action}}
 
 {{end}}

@@ -23,10 +23,6 @@ func CandidateManagedPaths(m Manifest) (map[string]bool, error) {
 }
 
 func candidateManaged(m Manifest) (map[string][]byte, error) {
-	if err := refuseUngeneratedAuthored(m); err != nil {
-		return nil, err
-	}
-
 	files, err := managedPublished(m)
 	if err != nil {
 		return nil, err
@@ -225,6 +221,9 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		if system, ok := m.Operation(entry.Operation); ok &&
 			system.Scope != "" {
 			source, err = systemHandler(m, system)
+		} else if authored, ok := m.Operation(entry.Operation); ok &&
+			authored.isStream() {
+			source, err = streamHandler(m, authored, entry)
 		} else if authored, ok := m.Operation(entry.Operation); ok &&
 			authored.isMachine() {
 			source, err = machineHandler(m, authored)

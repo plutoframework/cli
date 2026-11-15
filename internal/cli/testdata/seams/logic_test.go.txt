@@ -3,7 +3,9 @@ package audit_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"example.test/auditapp/internal/domain"
 	logic "example.test/auditapp/internal/logic/audit"
@@ -20,6 +22,16 @@ type events struct {
 	tenant  string
 	subject string
 	appends int
+
+	mutex   sync.Mutex
+	entries []models.Entry
+}
+
+func (e *events) add(seq int64, kind string) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	e.entries = append(e.entries, models.Entry{Seq: seq, Type: kind})
 }
 
 func (e *events) Append(
@@ -53,12 +65,22 @@ func (e *events) Query(
 }
 
 func (e *events) Scan(
-	context.Context,
-	scope.Execution,
-	int64,
-	int64,
+	_ context.Context,
+	_ scope.Execution,
+	after, limit int64,
 ) ([]models.Entry, error) {
-	return nil, nil
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	var batch []models.Entry
+
+	for _, entry := range e.entries {
+		if entry.Seq > after && int64(len(batch)) < limit {
+			batch = append(batch, entry)
+		}
+	}
+
+	return batch, nil
 }
 
 func harness(t *testing.T) *scopetest.Harness {
@@ -147,5 +169,125 @@ func TestBodiesRunOnlyWithGateMintedScope(t *testing.T) {
 
 	if _, err := forged.Value(); err == nil {
 		t.Fatal("scanned tenant became usable")
+	}
+}
+
+// The stream body runs through the same scope.RunStream production uses, so
+// strict decoding, close handling and the gate recheck apply to it in tests.
+func TestWatchReplaysAndResumesOverTypedStream(t *testing.T) {
+	h := harness(t)
+	port := &events{}
+
+	for seq, kind := range []string{"a", "b", "c"} {
+		port.add(int64(seq+1), kind)
+	}
+
+	var got []models.Tick
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := scopetest.RunStream(
+		ctx, h, "alice", "north", "audit.events",
+		func(ctx context.Context, peer scopetest.Peer[models.Cursor, models.Tick]) {
+			for range 3 {
+				tick, err := peer.Receive(ctx)
+				if err != nil {
+					t.Error(err)
+
+					return
+				}
+
+				got = append(got, tick)
+			}
+
+			port.add(4, "d")
+
+			if err := peer.Send(ctx, models.Cursor{Seq: 3}); err != nil {
+				t.Error(err)
+
+				return
+			}
+
+			tick, err := peer.Receive(ctx)
+			if err != nil {
+				t.Error(err)
+
+				return
+			}
+
+			got = append(got, tick)
+		},
+		func(
+			ctx context.Context,
+			e scope.Execution,
+			stream scope.Stream[models.Cursor, models.Tick],
+		) error {
+			return logic.Watch(
+				ctx, e, logic.WatchPorts{Events: port},
+				models.WatchRequest{}, stream,
+			)
+		},
+	)
+	if err != nil || len(got) != 4 || got[3].Type != "d" || got[3].Seq != 4 {
+		t.Fatalf("err=%v got=%+v", err, got)
+	}
+}
+
+func TestWatchRejectsMalformedClientMessages(t *testing.T) {
+	h := harness(t)
+
+	for name, payload := range map[string]string{
+		"unknown field": `{"seq":1,"extra":true}`,
+		"array":         `[1]`,
+		"trailing":      `{"seq":1}{"seq":2}`,
+		"wrong type":    `{"seq":"one"}`,
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+		err := scopetest.RunStream(
+			ctx, h, "alice", "north", "audit.events",
+			func(ctx context.Context, peer scopetest.Peer[models.Cursor, models.Tick]) {
+				_ = peer.SendRaw(ctx, []byte(payload))
+			},
+			func(
+				ctx context.Context,
+				e scope.Execution,
+				stream scope.Stream[models.Cursor, models.Tick],
+			) error {
+				return logic.Watch(
+					ctx, e, logic.WatchPorts{Events: &events{}},
+					models.WatchRequest{}, stream,
+				)
+			},
+		)
+
+		cancel()
+
+		if !errors.Is(err, scope.ErrStreamMessage) {
+			t.Fatalf("%s: want ErrStreamMessage, got %v", name, err)
+		}
+	}
+}
+
+func TestStreamNeverRunsForNonMembers(t *testing.T) {
+	h := harness(t)
+	called := false
+
+	err := scopetest.RunStream(
+		context.Background(), h, "mallory", "north", "audit.events",
+		func(context.Context, scopetest.Peer[models.Cursor, models.Tick]) {},
+		func(
+			context.Context,
+			scope.Execution,
+			scope.Stream[models.Cursor, models.Tick],
+		) error {
+			called = true
+
+			return nil
+		},
+	)
+	if err == nil || called {
+		t.Fatalf("non-member reached the stream body: %v", err)
 	}
 }

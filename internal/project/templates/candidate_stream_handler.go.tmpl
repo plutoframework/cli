@@ -1,0 +1,137 @@
+package {{.Group}}
+
+import (
+	"errors"
+	"net/http"
+
+	"{{.Module}}/internal/access"
+	commonDomain "{{.Module}}/internal/domain"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	operations "{{.Module}}/internal/operations/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/scope"
+	"{{.Module}}/internal/transport"
+
+	auth "github.com/plutoframework/pluto-auth"
+
+	"github.com/coder/websocket"
+	"github.com/go-chi/chi/v5"
+)
+
+type {{.Action}}Operations = operations.{{.Action}}Boundary
+
+// {{.Action}}Origins are the browser host patterns allowed to open this
+// stream, from pluto.toml. With none, only the serving host is allowed;
+// clients that send no Origin header are service clients, not browsers.
+var {{.Action}}Origins = []string{
+{{- range .Origins}}
+	{{q .}},
+{{- end}}
+}
+
+// {{.Action}}Router lets clients that cannot set headers on a WebSocket
+// (browsers) select the tenant with a tenant query parameter. It runs before
+// the registrar, so the selection is verified by the same authentication and
+// gate as the X-Tenant-ID header, which wins when both are present.
+type {{.Action}}Router struct {
+	chi.Router
+}
+
+func (router {{.Action}}Router) Method(
+	method, pattern string,
+	handler http.Handler,
+) {
+	router.Router.Method(
+		method,
+		pattern,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query()
+
+			if tenant := query.Get("tenant"); tenant != "" &&
+				r.Header.Get("X-Tenant-ID") == "" {
+				r.Header.Set("X-Tenant-ID", tenant)
+			}
+
+			query.Del("tenant")
+
+			r.URL.RawQuery = query.Encode()
+
+			handler.ServeHTTP(w, r)
+		}))
+}
+
+// Register{{.Action}} serves the WebSocket upgrade of {{.Group}}.{{.Action}}.
+// Authentication and the gate run before the upgrade, so a denied caller
+// receives an ordinary HTTP error and never a connection. The tenant is
+// selected by the X-Tenant-ID header or the tenant query parameter.
+func Register{{.Action}}(
+	reg transport.Registrar,
+	operation {{.Action}}Operations,
+	bodyLimit int64,
+) {
+	_ = bodyLimit
+	reg.Router = {{.Action}}Router{Router: reg.Router}
+
+	reg.Handle(
+		paths.{{.Symbol}},
+		func(w http.ResponseWriter, r *http.Request) {
+			caller, err := access.CallerFromHTTP(
+				r.Context(),
+				r.Header.Get("X-Tenant-ID"))
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			input, err := models.Parse{{.Action}}Query(r.URL.Query())
+			if err != nil {
+				var rejected *models.QueryError
+				if errors.As(err, &rejected) {
+					transport.Error(w, r, 400, rejected.Code)
+
+					return
+				}
+
+				transport.Error(w, r, 400, "invalid_query_parameter")
+
+				return
+			}
+
+			intent, err := operation.Prepare(r.Context(), caller, input)
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			release, admitted := operation.Admit()
+			if !admitted {
+				transport.Error(w, r, 503, "stream_capacity")
+
+				return
+			}
+
+			defer release()
+
+			conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				OriginPatterns: {{.Action}}Origins,
+			})
+			if err != nil {
+				return
+			}
+
+			defer func() { _ = conn.CloseNow() }()
+
+			err = operation.Serve(r.Context(), intent, scope.NewWire(conn))
+			switch {
+			case err == nil:
+			case errors.Is(err, commonDomain.ErrUnauthenticated),
+				errors.Is(err, auth.ErrUnauthenticated),
+				errors.Is(err, commonDomain.ErrForbidden):
+				_ = conn.Close(websocket.StatusPolicyViolation, "unauthorized")
+			default:
+				_ = conn.Close(websocket.StatusInternalError, "internal_error")
+			}
+		})
+}

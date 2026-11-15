@@ -107,15 +107,6 @@ func TestSeamModelsRejectBadDeclarations(t *testing.T) {
 				}
 			}
 		},
-		"stream": func(m *Manifest) {
-			for index := range m.Operations {
-				if m.Operations[index].ID() == "audit.Verify" {
-					m.Operations[index].Response = ResponseStream
-					m.Operations[index].Item = "audit.Entry"
-					m.Operations[index].Output = ""
-				}
-			}
-		},
 		"other group model": func(m *Manifest) {
 			m.Models = append(m.Models, Model{
 				ID: "other.Thing", Fields: []string{"a:string"},

@@ -1,0 +1,73 @@
+package audit
+
+import (
+	"context"
+	"errors"
+
+	models "example.test/auditapp/internal/models/audit"
+	"example.test/auditapp/internal/scope"
+)
+
+const watchBatch = 100
+
+// Watch replays audit events after the requested sequence number, then sends
+// everything newer each time the client sends a {seq} cursor. The tenant and
+// subject come only from the verified Execution; the generated stream closes
+// when the gate is revoked.
+func Watch(
+	ctx context.Context,
+	e scope.Execution,
+	p WatchPorts,
+	in models.WatchRequest,
+	stream scope.Stream[models.Cursor, models.Tick],
+) error {
+	var next int64
+
+	if in.After != nil {
+		next = *in.After
+	}
+
+	for {
+		if err := replay(ctx, e, p, stream, next); err != nil {
+			return err
+		}
+
+		cursor, err := stream.Receive(ctx)
+		if errors.Is(err, scope.ErrStreamClosed) {
+			return nil
+		}
+
+		if err != nil {
+			return err
+		}
+
+		next = max(cursor.Seq, 0)
+	}
+}
+
+func replay(
+	ctx context.Context,
+	e scope.Execution,
+	p WatchPorts,
+	stream scope.Stream[models.Cursor, models.Tick],
+	from int64,
+) error {
+	for {
+		batch, err := p.Events.Scan(ctx, e, from, watchBatch)
+		if err != nil {
+			return err
+		}
+
+		for _, entry := range batch {
+			if err := stream.Send(ctx, models.Tick{Seq: entry.Seq, Type: entry.Type}); err != nil {
+				return err
+			}
+
+			from = entry.Seq
+		}
+
+		if len(batch) < watchBatch {
+			return nil
+		}
+	}
+}

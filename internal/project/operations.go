@@ -29,6 +29,9 @@ type Operation struct {
 	Input          string           `toml:"input,omitempty"`
 	Query          []OperationQuery `toml:"query,omitempty"`
 
+	// Stream bounds a response = "stream" operation; see manifest_stream.go.
+	Stream *StreamLimits `toml:"stream,omitempty"`
+
 	// Tenant-less system operations; see manifest_system.go.
 	Scope     string `toml:"scope,omitempty"`
 	Lookup    string `toml:"lookup,omitempty"`
@@ -110,7 +113,10 @@ func (m Manifest) OperationEndpoint(entry Endpoint) (Endpoint, error) {
 		)
 	}
 
-	if operation.Write && !entry.isWrite() {
+	// A websocket stream is always opened with GET; the operation's own
+	// write flag still governs what its body may change.
+	if operation.Write && !entry.isWrite() &&
+		entry.Transport != TransportWebSocket {
 		return entry, fmt.Errorf(
 			"write operation %s cannot be exposed through a read-only HTTP "+
 				"method",
