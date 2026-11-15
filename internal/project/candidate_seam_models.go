@@ -276,6 +276,12 @@ func seamOperation(m Manifest, o Operation) (SeamOperation, error) {
 		)
 	}
 
+	// A provision endpoint decodes a JSON body into its declared input model;
+	// it has no query parser.
+	if o.Scope == ScopeProvision {
+		out.Endpoint = false
+	}
+
 	if out.Endpoint && (o.Write || out.Input != "") {
 		return out, fmt.Errorf(
 			"operation %s: authored endpoints must be reads without input "+
@@ -321,7 +327,7 @@ func candidateSeamModels(m Manifest) (map[string][]byte, error) {
 	order := []string{}
 
 	for _, operation := range m.Operations {
-		if !operation.isAuthored() {
+		if !operation.usesSeamWire() {
 			continue
 		}
 

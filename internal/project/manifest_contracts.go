@@ -221,7 +221,7 @@ func ValidateManifestContracts(m Manifest) error {
 	}
 
 	for id, operation := range operations {
-		if operation.Body == BodyAuthored {
+		if operation.outsideContracts() {
 			continue
 		}
 
@@ -250,7 +250,7 @@ func ValidateManifestContracts(m Manifest) error {
 			)
 		}
 
-		if operations[endpoint.Operation].Body == BodyAuthored {
+		if operations[endpoint.Operation].outsideContracts() {
 			continue
 		}
 

@@ -4,6 +4,11 @@ package sqlcheck
 // `<column> = current_setting('<setting>'[, true|false])`, in either order,
 // ignoring parentheses, `::type` casts and a scalar SELECT wrapper.
 func (s *migrationState) tenantExpression(tokens []token, column string) bool {
+	return settingExpression(tokens, column, s.setting)
+}
+
+// settingExpression is tenantExpression for an arbitrary setting name.
+func settingExpression(tokens []token, column, setting string) bool {
 	if column == "" {
 		return false
 	}
@@ -35,8 +40,8 @@ func (s *migrationState) tenantExpression(tokens []token, column string) bool {
 
 		left, right := flat[:i], flat[i+1:]
 
-		return columnOnly(left, column) && s.settingCall(right) ||
-			columnOnly(right, column) && s.settingCall(left)
+		return columnOnly(left, column) && settingCall(right, setting) ||
+			columnOnly(right, column) && settingCall(left, setting)
 	}
 
 	return false
@@ -58,7 +63,7 @@ func columnOnly(tokens []token, column string) bool {
 }
 
 // settingCall matches current_setting('<setting>'[, true|false]).
-func (s *migrationState) settingCall(tokens []token) bool {
+func settingCall(tokens []token, setting string) bool {
 	if len(tokens) < 2 || !tokens[0].is("current_setting") ||
 		tokens[1].Kind != tokString {
 		return false
@@ -66,7 +71,7 @@ func (s *migrationState) settingCall(tokens []token) bool {
 
 	name := tokens[1].Text
 	if len(name) < 2 || name[0] != '\'' ||
-		tableKey(name[1:len(name)-1]) != s.setting {
+		tableKey(name[1:len(name)-1]) != setting {
 		return false
 	}
 

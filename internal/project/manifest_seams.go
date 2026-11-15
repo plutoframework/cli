@@ -14,6 +14,7 @@ import (
 const (
 	BodyAuthored  = "authored"
 	BodyGenerated = "generated"
+	BodySystem    = "system"
 
 	ResponsePage   = "page"
 	ResponseObject = "object"
@@ -28,6 +29,10 @@ type Table struct {
 	TenantColumn string `toml:"tenant_column"`
 	AppendOnly   bool   `toml:"append_only,omitempty"`
 	RowSecurity  bool   `toml:"row_security"`
+
+	// TenantRoot marks the table whose rows are the tenants themselves: its
+	// tenant_column is its own identifier. At most one table is the root.
+	TenantRoot bool `toml:"tenant_root,omitempty"`
 }
 
 func (t Table) ID() string {
@@ -122,7 +127,8 @@ const (
 )
 
 func (m Manifest) hasSeamDeclarations() bool {
-	if len(m.Tables)+len(m.Queries)+len(m.Ports)+len(m.Models) != 0 ||
+	if len(m.Tables)+len(m.Queries)+len(m.Ports)+len(m.Models)+
+		len(m.Lookups) != 0 ||
 		m.Authored != nil || m.Memberships != nil ||
 		m.Database.RuntimeRole != "" {
 		return true
@@ -140,7 +146,8 @@ func (m Manifest) hasSeamDeclarations() bool {
 func (o Operation) usesSeams() bool {
 	return o.Body != "" || o.Resource != "" || o.ResourcePolicy != "" ||
 		len(o.Ports) != 0 || o.Response != "" || o.Item != "" ||
-		o.Output != "" || o.Input != "" || len(o.Query) != 0
+		o.Output != "" || o.Input != "" || len(o.Query) != 0 ||
+		o.Scope != "" || o.Lookup != "" || o.RateLimit != ""
 }
 
 // validateSeams checks every seam declaration. Published projects may declare
@@ -190,7 +197,7 @@ func validateSeams(m Manifest) error {
 		}
 	}
 
-	return nil
+	return validateSystem(m, tables, models)
 }
 
 func validateTables(tables []Table) (map[string]Table, error) {
@@ -227,7 +234,7 @@ func validateTables(tables []Table) (map[string]Table, error) {
 		seen[table.ID()] = table
 	}
 
-	return seen, nil
+	return seen, validateTenantRoots(tables)
 }
 
 func validateQuerySets(sets []QuerySet, tables map[string]Table) error {
@@ -570,9 +577,17 @@ func (o Operation) validateSeams(
 	models map[string]Model,
 ) error {
 	switch o.Body {
-	case "", BodyGenerated, BodyAuthored:
+	case "", BodyGenerated, BodyAuthored, BodySystem:
 	default:
 		return fmt.Errorf("body must be authored or generated")
+	}
+
+	if o.Scope != "" {
+		return o.validateSystemSeams(ports, models)
+	}
+
+	if o.Body == BodySystem {
+		return fmt.Errorf("body = \"system\" requires scope = \"lookup\"")
 	}
 
 	if o.Body != BodyAuthored {
@@ -668,7 +683,8 @@ func (o Operation) validateModelRefs(models map[string]Model) error {
 		return fmt.Errorf("response must be page, object or stream")
 	}
 
-	if o.Response != "" && o.Body != BodyAuthored && o.Body != BodyGenerated {
+	if o.Response != "" && o.Body != BodyAuthored && o.Body != BodyGenerated &&
+		o.Body != BodySystem {
 		return fmt.Errorf("response requires an explicit body")
 	}
 
@@ -688,7 +704,7 @@ func (o Operation) validateQuery() error {
 		return nil
 	}
 
-	if o.Write || o.Public {
+	if o.Write || o.Public && o.Scope != ScopeLookup {
 		return fmt.Errorf("query parameters require a protected read")
 	}
 

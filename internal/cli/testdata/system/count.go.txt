@@ -1,0 +1,20 @@
+package orgs
+
+import (
+	"context"
+
+	models "example.test/sysapp/internal/models/orgs"
+	"example.test/sysapp/internal/scope"
+)
+
+// Count reports the members of the verified tenant.
+func Count(
+	ctx context.Context,
+	e scope.Execution,
+	ports CountPorts,
+	_ models.CountRequest,
+) (models.MemberCount, error) {
+	count, err := ports.Tenants.CountMembers(ctx, e)
+
+	return models.MemberCount{Count: count}, err
+}

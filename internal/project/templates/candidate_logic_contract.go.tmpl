@@ -29,7 +29,7 @@ type {{.Action}}Ports struct {
 {{range .AuthoredGroup.Ops -}}
 var _ func(
 	context.Context,
-	scope.Execution,
+	{{if .Provision}}scope.Provisioning{{else}}scope.Execution{{end}},
 	{{.Action}}Ports,
 	models.{{.Action}}Request,
 ) ({{.Returns}}) = {{.Action}}

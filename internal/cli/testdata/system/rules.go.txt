@@ -1,0 +1,34 @@
+package orgs
+
+// FirstRole is the role of the subject that provisions a tenant.
+const FirstRole = "admin"
+
+// TakenError reports a rejected organization slug.
+type TakenError string
+
+func (e TakenError) Error() string { return string(e) }
+
+// ErrSlugTaken reports a slug that another organization already owns.
+const ErrSlugTaken = TakenError("organization slug is taken")
+
+// ValidSlug reports a well-formed organization slug: 2 to 31 lowercase
+// letters, digits and hyphens, starting with a letter.
+func ValidSlug(slug string) bool {
+	if len(slug) < 2 || len(slug) > 31 || slug[0] < 'a' || slug[0] > 'z' {
+		return false
+	}
+
+	for _, r := range slug {
+		letter := r >= 'a' && r <= 'z'
+		digit := r >= '0' && r <= '9'
+
+		if !letter && !digit && r != '-' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// ValidName reports an acceptable organization name.
+func ValidName(name string) bool { return name != "" && len(name) <= 80 }

@@ -37,6 +37,7 @@ type Manifest struct {
 	Models             []Model             `toml:"models,omitempty"`
 	Authored           *Authored           `toml:"authored,omitempty"`
 	Memberships        *Memberships        `toml:"memberships,omitempty"`
+	Lookups            []Lookup            `toml:"lookups,omitempty"`
 	Migrations         Migrations          `toml:"migrations,omitempty"`
 
 	// Kind is empty for Go applications and KindFrontend for a frontend that
@@ -85,6 +86,9 @@ type Endpoint struct {
 	Permission     string `toml:"permission,omitempty"`
 	Feature        string `toml:"feature,omitempty"`
 	ClientVisible  bool   `toml:"feature_client_visible"`
+
+	// Scope is copied from the referenced operation; see manifest_system.go.
+	Scope string `toml:"-"`
 }
 
 var (
@@ -346,14 +350,14 @@ func (e Endpoint) Validate(multi bool) error {
 		}
 	}
 
-	if e.Public && (e.Permission != "" || multi) {
+	if e.Public && (e.Permission != "" || multi && e.Scope == "") {
 		return fmt.Errorf(
 			"public endpoints cannot require permissions or multi-tenant " +
 				"scope",
 		)
 	}
 
-	if !e.Public && e.isWrite() && e.Permission == "" {
+	if !e.Public && e.isWrite() && e.Permission == "" && e.Scope == "" {
 		return fmt.Errorf("authenticated writes require an explicit " +
 			"permission")
 	}

@@ -1,0 +1,123 @@
+[[roles]]
+id = "admin"
+name = "Administrator"
+description = "Administers the organization."
+permissions = ["members.read"]
+
+[[tables]]
+group = "orgs"
+name = "orgs"
+tenant_column = "id"
+tenant_root = true
+row_security = true
+
+[[tables]]
+group = "orgs"
+name = "users"
+tenant_column = "org_id"
+row_security = true
+
+[[queries]]
+group = "orgs"
+files = ["db/queries/orgs/*.sql"]
+tables = ["orgs", "users"]
+
+[[lookups]]
+id = "orgs.BySlug"
+table = "orgs"
+key = "slug"
+columns = ["id", "slug", "name"]
+
+[[ports]]
+id = "orgs.Tenants"
+adapter = "orgs.TenantStore"
+methods = [
+  "Provision(scope.Provisioning, models.Signup) (models.Org, error)",
+  "CountMembers(scope.Execution) (int64, error)",
+]
+
+[[models]]
+id = "orgs.Signup"
+fields = ["slug:string", "name:string"]
+
+[[models]]
+id = "orgs.Org"
+fields = ["id:string", "slug:string", "name:string"]
+
+[[models]]
+id = "orgs.MemberCount"
+fields = ["count:int64"]
+
+[[operations]]
+group = "orgs"
+action = "Provision"
+scope = "provision"
+write = true
+idempotency = "exempt"
+replay_reason = "A signup mints a new tenant; replays are rate limited."
+rate_limit = "3/1h"
+body = "authored"
+ports = ["orgs.Tenants"]
+response = "object"
+input = "orgs.Signup"
+output = "orgs.Org"
+
+[[operations]]
+group = "orgs"
+action = "Lookup"
+scope = "lookup"
+lookup = "orgs.BySlug"
+public = true
+idempotency = "none"
+rate_limit = "30/1m"
+body = "system"
+response = "object"
+output = "orgs.Org"
+query = [{ name = "slug", type = "string", max = 63 }]
+
+[[operations]]
+group = "orgs"
+action = "Count"
+permission = "members.read"
+idempotency = "none"
+body = "authored"
+resource = "orgs.members"
+resource_policy = "tenant"
+ports = ["orgs.Tenants"]
+response = "object"
+output = "orgs.MemberCount"
+
+[[endpoints]]
+group = "orgs"
+action = "Provision"
+operation = "orgs.Provision"
+method = "POST"
+path = "/api/orgs"
+name = "Provision organization"
+description = "Create an organization with the caller as first admin."
+
+[[endpoints]]
+group = "orgs"
+action = "Lookup"
+operation = "orgs.Lookup"
+method = "GET"
+path = "/api/orgs/lookup"
+name = "Look up organization"
+description = "Resolve an organization by slug."
+
+[[endpoints]]
+group = "orgs"
+action = "Count"
+operation = "orgs.Count"
+method = "GET"
+path = "/api/orgs/members/count"
+name = "Count members"
+description = "Count the organization's members."
+
+[authored]
+
+[memberships]
+table = "orgs.users"
+tenant_column = "org_id"
+subject_column = "id"
+role_column = "role"

@@ -56,6 +56,7 @@ func addAuthoredRules(
 
 	scopeNamespace := module + "/" + scopeDir
 	bindOwners := []string{scopetestFile}
+	provisionOwners := []string{}
 
 	for _, operation := range m.Operations {
 		if operation.Body != BodyAuthored {
@@ -70,7 +71,12 @@ func addAuthoredRules(
 			lowerAction(operation.Action) + ".go"
 		logicNamespace := module + "/" + rolesLogicDir + operation.Group
 
-		bindOwners = append(bindOwners, workflow)
+		if operation.Scope == ScopeProvision {
+			provisionOwners = append(provisionOwners, workflow)
+		} else {
+			bindOwners = append(bindOwners, workflow)
+		}
+
 		rules.managed[gate] = true
 		rules.managed[workflow] = true
 		rules.managed[rolesLogicDir+operation.Group+"/contract_gen.go"] = true
@@ -97,6 +103,11 @@ func addAuthoredRules(
 	rules.addCapability(scopeNamespace, "Bind", bindOwners...)
 	rules.addCapability(
 		scopeNamespace,
+		"BindProvisioning",
+		provisionOwners...,
+	)
+	rules.addCapability(
+		scopeNamespace,
 		"NewDB",
 		candidateFactory,
 		candidateAdaptersFile,
@@ -111,7 +122,9 @@ func addAuthoredRules(
 
 	rules.addCapability(scopeNamespace, "Queries", queryOwners...)
 
-	for _, name := range []string{"Execution", "Tenant", "DB", "Tx"} {
+	for _, name := range []string{
+		"Execution", "Tenant", "DB", "Tx", "Provisioning",
+	} {
 		rules.protectedTypes[scopeNamespace+"."+name] = true
 	}
 
@@ -122,6 +135,7 @@ func addAuthoredRules(
 		"scopeTenant",
 		"scopeDBPool",
 		"scopeTx",
+		"scopeProvision",
 	} {
 		if rules.globalPrivate[name] == nil {
 			rules.globalPrivate[name] = map[string]bool{}

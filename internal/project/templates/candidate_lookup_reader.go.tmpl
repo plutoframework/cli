@@ -1,0 +1,81 @@
+package {{.Group}}
+
+import (
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	models "{{.Module}}/internal/models/{{.Group}}"
+)
+
+// ErrAmbiguous{{.Action}} reports a lookup key that is not unique.
+var ErrAmbiguous{{.Action}} = errors.New("{{.Lookup.ID}}: key is not unique")
+
+// {{.Action}}Reader implements the generated lookup {{.Lookup.ID}}. It binds
+// the one-row policy setting for a single read-only transaction and reads
+// only the security-invoker view that exposes the declared columns.
+type {{.Action}}Reader struct {
+	{{lowerFirst .Action}}Pool *pgxpool.Pool
+}
+
+func New{{.Action}}Reader(pool *pgxpool.Pool) *{{.Action}}Reader {
+	return &{{.Action}}Reader{ {{lowerFirst .Action}}Pool: pool}
+}
+
+const (
+	{{lowerFirst .Action}}Bind  = {{q .LookupBind}}
+	{{lowerFirst .Action}}Query = {{q .LookupQuery}}
+)
+
+func (reader *{{.Action}}Reader) Read(
+	ctx context.Context,
+	key string,
+) (models.{{.Action}}Data, bool, error) {
+	var output models.{{.Action}}Data
+
+	if reader == nil || reader.{{lowerFirst .Action}}Pool == nil || key == "" {
+		return output, false, errors.New("lookup is not configured")
+	}
+
+	tx, err := reader.{{lowerFirst .Action}}Pool.BeginTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return output, false, err
+	}
+
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if _, err := tx.Exec(
+		ctx,
+		{{lowerFirst .Action}}Bind,
+		key); err != nil {
+		return output, false, err
+	}
+
+	rows, err := tx.Query(ctx, {{lowerFirst .Action}}Query, key)
+	if err != nil {
+		return output, false, err
+	}
+
+	defer rows.Close()
+
+	if !rows.Next() {
+		return output, false, rows.Err()
+	}
+
+	if err := rows.Scan({{range $index, $field := .LookupFields}}{{if $index}}, {{end}}&output.{{$field}}{{end}}); err != nil {
+		return models.{{.Action}}Data{}, false, err
+	}
+
+	if rows.Next() {
+		return models.{{.Action}}Data{}, false, ErrAmbiguous{{.Action}}
+	}
+
+	if err := rows.Err(); err != nil {
+		return models.{{.Action}}Data{}, false, err
+	}
+
+	return output, true, nil
+}

@@ -358,6 +358,11 @@ func (s *migrationState) applyPolicy(
 		state.Policies[name] = policy
 	}
 
+	lookup, isLookup := s.lookups[strings.ToLower(name)]
+	if isLookup && tableKey(lookup.Table) != tableKey(table) {
+		isLookup = false
+	}
+
 	for ; at < len(st); at++ {
 		switch {
 		case st[at].is("as") && at+1 < len(st):
@@ -370,6 +375,14 @@ func (s *migrationState) applyPolicy(
 				st[at+2:skipParens(st, at+1)-1],
 				tableKey(s.columns[table]),
 			)
+
+			if isLookup {
+				policy.LookupOK = settingExpression(
+					st[at+2:skipParens(st, at+1)-1],
+					tableKey(lookup.Key),
+					strings.ToLower(lookup.Setting),
+				)
+			}
 		case st[at].is("check") && at > 0 && st[at-1].is("with") &&
 			at+1 < len(st) && st[at+1].punct("("):
 			policy.HasCheck = true

@@ -296,3 +296,95 @@ func TestCheckMigrationsCustomSetting(t *testing.T) {
 		t.Fatalf("custom setting must be enforced: %v", got)
 	}
 }
+
+const lookupMigration = `
+CREATE TABLE orgs (id text PRIMARY KEY, slug text NOT NULL, name text);
+ALTER TABLE orgs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orgs FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON orgs
+    USING (id = current_setting('app.tenant_id', true))
+    WITH CHECK (id = current_setting('app.tenant_id', true));
+`
+
+func lookupConfig(t *testing.T, extra string) Config {
+	t.Helper()
+
+	cfg := migrationConfig(t, map[string]string{
+		"001_orgs.sql": lookupMigration + extra,
+	})
+	cfg.Tables = []Table{{
+		Name:         "orgs",
+		TenantColumn: "id",
+		TenantRoot:   true,
+	}}
+	cfg.Lookups = []Lookup{{
+		Table:   "orgs",
+		Key:     "slug",
+		Policy:  "pluto_lookup_orgs_byslug",
+		Setting: "app.lookup_orgs_byslug",
+	}}
+
+	return cfg
+}
+
+func TestCheckMigrationsLookupPolicy(t *testing.T) {
+	good := `CREATE POLICY pluto_lookup_orgs_byslug ON orgs FOR SELECT
+    USING (slug = current_setting('app.lookup_orgs_byslug', true));`
+
+	for name, test := range map[string]struct {
+		extra string
+		want  string
+	}{
+		"exact policy": {extra: good},
+		"missing":      {want: "no exact lookup policy"},
+		"for all": {
+			extra: strings.Replace(good, "FOR SELECT", "FOR ALL", 1),
+			want:  "no exact lookup policy",
+		},
+		"wrong column": {
+			extra: strings.Replace(good, "slug =", "name =", 1),
+			want:  "no exact lookup policy",
+		},
+		"wrong setting": {
+			extra: strings.Replace(good, "lookup_orgs_byslug", "other", 2),
+			want:  "no exact lookup policy",
+		},
+		"with check": {
+			extra: strings.TrimSuffix(good, ";") + " WITH CHECK (true);",
+			want:  "no exact lookup policy",
+		},
+		"restrictive": {
+			extra: strings.Replace(good, "FOR SELECT",
+				"AS RESTRICTIVE FOR SELECT", 1),
+			want: "no exact lookup policy",
+		},
+		"another wide policy": {
+			extra: good + "\nCREATE POLICY wide ON orgs USING (true);",
+			want:  "widens access",
+		},
+		"lookup-shaped but undeclared name": {
+			extra: strings.Replace(good, "pluto_lookup_orgs_byslug",
+				"sneaky", 1),
+			want: "widens access",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := CheckMigrations(lookupConfig(t, test.extra))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if test.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("want clean, got %v", got)
+				}
+
+				return
+			}
+
+			if !strings.Contains(messages(got), test.want) {
+				t.Fatalf("want %q, got %v", test.want, got)
+			}
+		})
+	}
+}

@@ -1,0 +1,705 @@
+package app_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"example.test/sysapp/internal/app"
+	"example.test/sysapp/internal/auth/credentials"
+	"example.test/sysapp/internal/config"
+	"example.test/sysapp/internal/storage/identity"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/plutoframework/pluto-auth/httpauth"
+	"github.com/plutoframework/pluto-auth/methods/password"
+	authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+	"github.com/plutoframework/pluto-core/cache"
+	jobs "github.com/plutoframework/pluto-jobs"
+)
+
+const sysOrigin = "http://127.0.0.1:8080"
+
+type sysSender struct {
+	mutex sync.Mutex
+	items []password.Notification
+}
+
+func (s *sysSender) Send(
+	ctx context.Context,
+	notification password.Notification,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.items = append(s.items, notification)
+
+	return nil
+}
+
+func (s *sysSender) token(t *testing.T, purpose password.Purpose) string {
+	t.Helper()
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for index := len(s.items) - 1; index >= 0; index-- {
+		if s.items[index].Purpose == purpose {
+			return s.items[index].Token
+		}
+	}
+
+	t.Fatal("missing delivery")
+
+	return ""
+}
+
+type sysFixture struct {
+	admin   *pgxpool.Pool
+	runtime *pgxpool.Pool
+	app     *app.CandidateRuntime
+	sender  *sysSender
+	schema  string
+}
+
+// sysSetup applies the migrations as the database owner, then runs the whole
+// application as a separate login role that owns nothing, is not a superuser
+// and cannot bypass row-level security: the deployment the design requires.
+func sysSetup(t *testing.T) *sysFixture {
+	t.Helper()
+
+	address := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
+	if address == "" {
+		t.Fatal("audit fixture needs PLUTO_CLI_TEST_DATABASE_URL")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	defer cancel()
+
+	admin, err := pgxpool.New(ctx, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(admin.Close)
+
+	suffix := strings.ToLower(jobs.NewID())
+	schema := "sys_" + suffix
+	role := "sys_rt_" + suffix
+	quoted := pgx.Identifier{schema}.Sanitize()
+	quotedRole := pgx.Identifier{role}.Sanitize()
+
+	for _, statement := range []string{
+		"CREATE SCHEMA " + quoted,
+		"CREATE ROLE " + quotedRole + " LOGIN PASSWORD 'runtime' " +
+			"NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+	} {
+		if _, err := admin.Exec(ctx, statement); err != nil {
+			t.Fatal(statement, err)
+		}
+	}
+
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second,
+		)
+		defer cancel()
+
+		_, _ = admin.Exec(cleanup, "DROP SCHEMA "+quoted+" CASCADE")
+		_, _ = admin.Exec(cleanup, "DROP ROLE "+quotedRole)
+	})
+
+	owner, err := pgxpool.ParseConfig(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	owner.ConnConfig.RuntimeParams["search_path"] = schema
+
+	migrator, err := pgxpool.NewWithConfig(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(migrator.Close)
+
+	migrations, err := filepath.Glob(
+		filepath.Join("..", "..", "db", "migrations", "*.sql"),
+	)
+	if err != nil || len(migrations) == 0 {
+		t.Fatal("missing migrations", err)
+	}
+
+	sort.Strings(migrations)
+
+	for _, path := range migrations {
+		migration, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := migrator.Exec(ctx, string(migration)); err != nil {
+			t.Fatal(path, err)
+		}
+	}
+
+	for _, statement := range []string{
+		"GRANT USAGE ON SCHEMA " + quoted + " TO " + quotedRole,
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA " +
+			quoted + " TO " + quotedRole,
+		"GRANT USAGE ON ALL SEQUENCES IN SCHEMA " + quoted + " TO " +
+			quotedRole,
+	} {
+		if _, err := migrator.Exec(ctx, statement); err != nil {
+			t.Fatal(statement, err)
+		}
+	}
+
+	settings, err := pgxpool.ParseConfig(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings.ConnConfig.User = role
+	settings.ConnConfig.Password = "runtime"
+	settings.ConnConfig.RuntimeParams["search_path"] = schema
+	settings.MaxConns = 24
+
+	pool, err := pgxpool.NewWithConfig(ctx, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(pool.Close)
+
+	var super, bypass bool
+
+	if err := pool.QueryRow(
+		ctx,
+		"SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = "+
+			"current_user",
+	).Scan(&super, &bypass); err != nil || super || bypass {
+		t.Fatalf(
+			"runtime role must not bypass RLS: %v %v %v",
+			super,
+			bypass,
+			err,
+		)
+	}
+
+	cfg, err := config.LoadFrom(
+		func(key string) (string, bool) {
+			return address, key == config.Prefix+"DATABASE_URL"
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	limiter, err := identity.NewAttemptLimiter(pool, 1000, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sender := &sysSender{}
+
+	runtime, err := app.NewCandidateRuntime(
+		ctx,
+		cfg,
+		pool,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cache.Disabled{},
+		"test",
+		map[string]string{},
+		credentials.Integrations{
+			Sender:  sender,
+			Limiter: limiter,
+			Ingress: func(next http.Handler) http.Handler {
+				return next
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &sysFixture{
+		admin:   migrator,
+		runtime: pool,
+		app:     runtime,
+		sender:  sender,
+		schema:  schema,
+	}
+}
+
+func (f *sysFixture) request(
+	t *testing.T,
+	method, path, cookie, tenant string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(method, path, nil)
+	request.Header.Set("Origin", sysOrigin)
+
+	if tenant != "" {
+		request.Header.Set("X-Tenant-ID", tenant)
+	}
+
+	if cookie != "" {
+		request.AddCookie(
+			&http.Cookie{Name: httpauth.CookieName, Value: cookie},
+		)
+	}
+
+	response := httptest.NewRecorder()
+	f.app.Handler().ServeHTTP(response, request)
+
+	return response
+}
+
+func (f *sysFixture) post(
+	t *testing.T,
+	path, body string,
+	want int,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		path,
+		strings.NewReader(body),
+	)
+	request.Header.Set("Origin", sysOrigin)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	f.app.Handler().ServeHTTP(response, request)
+
+	if response.Code != want {
+		t.Fatalf("%s status=%d want=%d %s", path, response.Code, want,
+			response.Body.String())
+	}
+
+	return response
+}
+
+type sysUser struct {
+	id, session string
+}
+
+// enroll creates a verified password account and signs it in.
+func (f *sysFixture) enroll(t *testing.T, email string) sysUser {
+	t.Helper()
+
+	input := fmt.Sprintf(
+		`{"email":%q,"password":"synthetic long passphrase"}`,
+		email,
+	)
+
+	f.post(t, "/auth/enroll", input, 202)
+	f.post(t, "/auth/verification", fmt.Sprintf(`{"email":%q}`, email), 202)
+
+	verification, _ := json.Marshal(
+		map[string]string{"token": f.sender.token(t, password.VerifyEmail)},
+	)
+	f.post(t, "/auth/verify", string(verification), 200)
+
+	response := f.post(t, "/auth/signin", input, 200)
+
+	var session string
+
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == httpauth.CookieName {
+			session = cookie.Value
+		}
+	}
+
+	store, err := authpostgres.NewLocal(f.runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	account, err := store.LookupAccount(t.Context(), email)
+	if err != nil || account.ID == "" || session == "" {
+		t.Fatal("enrollment failed", err)
+	}
+
+	return sysUser{id: account.ID, session: session}
+}
+
+
+func (f *sysFixture) call(
+	method, path, body, cookie, tenant string,
+) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Origin", sysOrigin)
+
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+
+	if tenant != "" {
+		request.Header.Set("X-Tenant-ID", tenant)
+	}
+
+	if cookie != "" {
+		request.AddCookie(
+			&http.Cookie{Name: httpauth.CookieName, Value: cookie},
+		)
+	}
+
+	response := httptest.NewRecorder()
+	f.app.Handler().ServeHTTP(response, request)
+
+	return response
+}
+
+func (f *sysFixture) expect(
+	t *testing.T,
+	response *httptest.ResponseRecorder,
+	want int,
+) {
+	t.Helper()
+
+	if response.Code != want {
+		t.Fatalf("status=%d want=%d %s", response.Code, want,
+			response.Body.String())
+	}
+}
+
+type sysOrg struct {
+	Data struct {
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	} `json:"data"`
+}
+
+func (f *sysFixture) provision(
+	t *testing.T,
+	user sysUser,
+	slug string,
+	want int,
+) sysOrg {
+	t.Helper()
+
+	response := f.call(
+		"POST",
+		"/api/orgs",
+		fmt.Sprintf(`{"slug":%q,"name":"Org %s"}`, slug, slug),
+		user.session,
+		"",
+	)
+	f.expect(t, response, want)
+
+	var org sysOrg
+	if want == 200 {
+		if err := json.Unmarshal(response.Body.Bytes(), &org); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return org
+}
+
+func (f *sysFixture) count(
+	t *testing.T,
+	user sysUser,
+	tenant string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return f.call("GET", "/api/orgs/members/count", "", user.session, tenant)
+}
+
+// Signup provisions an organization and its first admin atomically; the
+// admin then uses tenant routes, while a stranger cannot.
+func TestSystemProvisionThenTenantRoutes(t *testing.T) {
+	f := sysSetup(t)
+	alice := f.enroll(t, "alice@example.test")
+	bob := f.enroll(t, "bob@example.test")
+
+	// Provisioning needs a verified session but no tenant or membership.
+	f.expect(t, f.call("POST", "/api/orgs", `{"slug":"acme","name":"Acme"}`,
+		"", ""), 401)
+	f.expect(t, f.call("POST", "/api/orgs", `{"slug":"acme","name":"Acme"}`,
+		"forged-session", ""), 401)
+
+	acme := f.provision(t, alice, "acme", 200)
+	if acme.Data.ID == "" || acme.Data.Slug != "acme" {
+		t.Fatalf("unexpected org %+v", acme)
+	}
+
+	// The new tenant id is minted by generated code: a UUID, never input.
+	if len(acme.Data.ID) != 36 {
+		t.Fatalf("tenant id is not a minted uuid: %s", acme.Data.ID)
+	}
+
+	// The first admin can use tenant routes at once.
+	response := f.count(t, alice, acme.Data.ID)
+	f.expect(t, response, 200)
+
+	if !strings.Contains(response.Body.String(), `"count":1`) {
+		t.Fatalf("unexpected member count: %s", response.Body.String())
+	}
+
+	// Another verified user has no membership in that tenant.
+	if got := f.count(t, bob, acme.Data.ID).Code; got != 401 && got != 403 {
+		t.Fatalf("stranger reached the tenant route: %d", got)
+	}
+
+	// Both users can provision their own tenants; slugs stay unique.
+	f.provision(t, alice, "acme", 409)
+
+	globex := f.provision(t, bob, "globex", 200)
+	f.expect(t, f.count(t, bob, globex.Data.ID), 200)
+
+	if got := f.count(t, alice, globex.Data.ID).Code; got != 401 && got != 403 {
+		t.Fatalf("alice reached globex: %d", got)
+	}
+
+	// Invalid bodies fail before any tenant exists.
+	f.expect(t, f.call("POST", "/api/orgs", `{"slug":"Bad Slug","name":"x"}`,
+		alice.session, ""), 400)
+	f.expect(t, f.call("POST", "/api/orgs", `{"slug":"ok","name":"x","id":"1"}`,
+		alice.session, ""), 400)
+
+	var orgs int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM orgs",
+	).Scan(&orgs); err != nil || orgs != 2 {
+		t.Fatalf("rejected requests created tenants: %d %v", orgs, err)
+	}
+}
+
+// Provisioning is rate limited per verified subject and fails closed.
+func TestSystemProvisionRateLimit(t *testing.T) {
+	f := sysSetup(t)
+	user := f.enroll(t, "carol@example.test")
+
+	for _, slug := range []string{"one", "two", "three"} {
+		f.provision(t, user, slug, 200)
+	}
+
+	f.provision(t, user, "four", 429)
+}
+
+// A provisioning authority creates exactly one tenant, even for a body that
+// asks twice.
+func TestSystemProvisionOnce(t *testing.T) {
+	f := sysSetup(t)
+	user := f.enroll(t, "gina@example.test")
+
+	f.provision(t, user, "double", 200)
+
+	var orgs int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM orgs",
+	).Scan(&orgs); err != nil || orgs != 1 {
+		t.Fatalf("provisioning created %d organizations: %v", orgs, err)
+	}
+}
+
+// Lookup resolves a tenant by slug before login, returns only the declared
+// columns and is rate limited.
+func TestSystemLookup(t *testing.T) {
+	f := sysSetup(t)
+	user := f.enroll(t, "dave@example.test")
+	org := f.provision(t, user, "initech", 200)
+
+	response := f.call("GET", "/api/orgs/lookup?slug=initech", "", "", "")
+	f.expect(t, response, 200)
+
+	var found sysOrg
+	if err := json.Unmarshal(response.Body.Bytes(), &found); err != nil {
+		t.Fatal(err)
+	}
+
+	if found.Data != org.Data {
+		t.Fatalf("lookup %+v != provisioned %+v", found.Data, org.Data)
+	}
+
+	var raw struct {
+		Data map[string]any `json:"data"`
+	}
+
+	body := response.Body.String()
+	leaked := strings.Contains(body, "billing") ||
+		strings.Contains(body, "private@example.test")
+
+	if err := json.Unmarshal(response.Body.Bytes(), &raw); err != nil ||
+		len(raw.Data) != 3 || leaked {
+		t.Fatalf("lookup leaked columns: %s", body)
+	}
+
+	lookup := func(query string) *httptest.ResponseRecorder {
+		return f.call("GET", "/api/orgs/lookup"+query, "", "", "")
+	}
+
+	f.expect(t, lookup("?slug=missing"), 404)
+	f.expect(t, lookup(""), 400)
+	f.expect(t, lookup("?slug=a&slug=b"), 400)
+	f.expect(t, lookup("?slug=initech&x=1"), 400)
+	f.expect(t, lookup("?slug="+strings.Repeat("a", 64)), 400)
+}
+
+func TestSystemLookupRateLimit(t *testing.T) {
+	f := sysSetup(t)
+
+	for attempt := 1; attempt <= 30; attempt++ {
+		f.expect(t, f.call("GET", "/api/orgs/lookup?slug=nobody", "", "", ""),
+			404)
+	}
+
+	f.expect(t, f.call("GET", "/api/orgs/lookup?slug=nobody", "", "", ""), 429)
+}
+
+// Row-level security, not Go code, is what stops a provisioning body from
+// writing into an existing tenant or a lookup from reading more than its one
+// row. These run as the non-owner runtime role.
+func TestSystemRowLevelBoundaries(t *testing.T) {
+	f := sysSetup(t)
+	alice := f.enroll(t, "erin@example.test")
+	bob := f.enroll(t, "frank@example.test")
+	acme := f.provision(t, alice, "acme", 200).Data.ID
+	globex := f.provision(t, bob, "globex", 200).Data.ID
+
+	run := func(
+		setting, value string,
+		check func(ctx context.Context, tx pgx.Tx),
+	) {
+		t.Helper()
+
+		tx, err := f.runtime.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		defer func() {
+			_ = tx.Rollback(t.Context())
+		}()
+
+		if setting != "" {
+			if _, err := tx.Exec(
+				t.Context(),
+				"SELECT set_config($1, $2, true)",
+				setting,
+				value,
+			); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		check(t.Context(), tx)
+	}
+
+	rows := func(ctx context.Context, tx pgx.Tx, query string) int {
+		t.Helper()
+
+		var count int
+		if err := tx.QueryRow(ctx, query).Scan(&count); err != nil {
+			t.Fatal(query, err)
+		}
+
+		return count
+	}
+
+	denied := func(ctx context.Context, tx pgx.Tx, query string, args ...any) {
+		t.Helper()
+
+		if _, err := tx.Exec(ctx, "SAVEPOINT attempt"); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := tx.Exec(ctx, query, args...); err == nil {
+			t.Fatalf("%s was allowed", query)
+		}
+
+		if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT attempt"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const (
+		insertUser = "INSERT INTO users (org_id, id, role) " +
+			"VALUES ($1, 'x', 'admin')"
+		insertOrg = "INSERT INTO orgs (id, slug, name) VALUES ($1, $2, 'N')"
+	)
+
+	// A provisioning transaction is bound to the new tenant alone.
+	run("app.tenant_id", acme, func(ctx context.Context, tx pgx.Tx) {
+		if got := rows(ctx, tx, "SELECT count(*) FROM orgs"); got != 1 {
+			t.Fatalf("tenant transaction sees %d orgs", got)
+		}
+
+		denied(ctx, tx, insertUser, globex)
+		denied(ctx, tx, insertOrg, globex, "z")
+		denied(ctx, tx, insertOrg, acme, "y")
+	})
+
+	// No setting at all sees nothing.
+	run("", "", func(ctx context.Context, tx pgx.Tx) {
+		for _, table := range []string{"orgs", "users"} {
+			if got := rows(ctx, tx, "SELECT count(*) FROM "+table); got != 0 {
+				t.Fatalf("unbound transaction sees %d %s rows", got, table)
+			}
+		}
+	})
+
+	// The lookup setting admits exactly one organization row, read-only, and
+	// no other table.
+	run("app.lookup_orgs_byslug", "acme", func(ctx context.Context, tx pgx.Tx) {
+		if got := rows(ctx, tx, "SELECT count(*) FROM orgs"); got != 1 {
+			t.Fatalf("lookup transaction sees %d orgs", got)
+		}
+
+		if got := rows(ctx, tx, "SELECT count(*) FROM users"); got != 0 {
+			t.Fatalf("lookup transaction sees %d users", got)
+		}
+
+		if got := rows(
+			ctx,
+			tx,
+			"SELECT count(*) FROM orgs WHERE slug = 'globex'",
+		); got != 0 {
+			t.Fatalf("lookup transaction sees another organization: %d", got)
+		}
+
+		var columns int
+		if err := tx.QueryRow(
+			ctx,
+			"SELECT count(*) FROM information_schema.columns WHERE "+
+				"table_name = 'pluto_lookup_orgs_byslug'",
+		).Scan(&columns); err != nil || columns != 3 {
+			t.Fatalf("lookup view exposes %d columns: %v", columns, err)
+		}
+
+		tag, err := tx.Exec(ctx, "UPDATE orgs SET name = 'owned'")
+		if err != nil || tag.RowsAffected() != 0 {
+			t.Fatalf("lookup transaction updated rows: %v %v", tag, err)
+		}
+
+		denied(ctx, tx, insertOrg, "n", "n")
+	})
+}
