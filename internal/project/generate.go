@@ -49,6 +49,12 @@ type templateData struct {
 	LookupQuery  string
 	LookupBind   string
 	LookupFields []string
+
+	// Auth event hook constants; see manifest_authevents.go.
+	LoginKind     string
+	OIDCLoginKind string
+	LogoutKind    string
+	MaxTenants    int
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {
@@ -84,7 +90,11 @@ func dataFor(m Manifest, e Endpoint) templateData {
 		Params:           params,
 		Body: e.Method == "POST" || e.Method == "PUT" ||
 			e.Method == "PATCH",
-		TestPath: testPath,
+		TestPath:      testPath,
+		LoginKind:     AuthEventLogin,
+		OIDCLoginKind: AuthEventOIDCLogin,
+		LogoutKind:    AuthEventLogout,
+		MaxTenants:    maxAuthEventTenants,
 	}
 }
 

@@ -2,25 +2,25 @@
 id = "auditor"
 name = "Auditor"
 description = "Reads the audit trail."
-permissions = ["audit.read"]
+permissions = ["audit.read", "audit.record"]
 
 [[roles]]
 id = "recorder"
 name = "Recorder"
 description = "Reads and appends audit events."
-permissions = ["audit.read", "audit.write"]
+permissions = ["audit.read", "audit.write", "audit.record"]
 
 [[roles]]
 id = "approver"
 name = "Approver"
 description = "Approves requests; audit entries are written on its behalf."
-permissions = ["approvals.write"]
+permissions = ["approvals.write", "audit.record"]
 
 [[roles]]
 id = "admin"
 name = "Administrator"
 description = "Administers the organization."
-permissions = ["members.read"]
+permissions = ["members.read", "audit.record"]
 
 [[tables]]
 group = "orgs"
@@ -99,6 +99,10 @@ id = "audit.NewEvent"
 fields = ["type:string", "payload:json"]
 
 [[models]]
+id = "audit.AuthEvent"
+fields = ["event:string"]
+
+[[models]]
 id = "audit.Verification"
 fields = ["valid:bool", "checked:int64"]
 
@@ -145,6 +149,20 @@ resource = "audit.events"
 resource_policy = "tenant"
 ports = ["audit.Events"]
 input = "audit.NewEvent"
+
+# Run only by the generated [auth.events] hook; no endpoint reaches it.
+[[operations]]
+group = "audit"
+action = "RecordAuthEvent"
+permission = "audit.record"
+write = true
+idempotency = "exempt"
+replay_reason = "Authentication events are recorded once per sign-in."
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+input = "audit.AuthEvent"
 
 [[operations]]
 group = "approvals"
@@ -264,6 +282,9 @@ name = "Count members"
 description = "Count the organization's members."
 
 [authored]
+
+[auth.events]
+operation = "audit.RecordAuthEvent"
 
 [memberships]
 table = "orgs.users"

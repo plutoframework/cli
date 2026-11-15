@@ -134,7 +134,7 @@ const (
 
 func (m Manifest) hasSeamDeclarations() bool {
 	if len(m.Tables)+len(m.Queries)+len(m.Ports)+len(m.Models)+
-		len(m.Lookups) != 0 ||
+		len(m.Lookups) != 0 || m.Auth != nil ||
 		m.Authored != nil || m.Memberships != nil ||
 		m.Database.RuntimeRole != "" {
 		return true
@@ -207,7 +207,11 @@ func validateSeams(m Manifest) error {
 		}
 	}
 
-	return validateSystem(m, tables, models)
+	if err := validateSystem(m, tables, models); err != nil {
+		return err
+	}
+
+	return validateAuthEvents(m)
 }
 
 func validateTables(tables []Table) (map[string]Table, error) {

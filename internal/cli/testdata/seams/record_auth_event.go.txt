@@ -1,0 +1,36 @@
+package audit
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"example.test/auditapp/internal/domain"
+	models "example.test/auditapp/internal/models/audit"
+	rules "example.test/auditapp/internal/rules/audit"
+	"example.test/auditapp/internal/scope"
+)
+
+// RecordAuthEvent appends one authentication event to the audit log of the
+// verified tenant, attributed to the verified subject. Only the generated
+// [auth.events] hook runs it; the event kind is the sole input.
+func RecordAuthEvent(
+	ctx context.Context,
+	e scope.Execution,
+	p RecordAuthEventPorts,
+	in models.RecordAuthEventRequest,
+) error {
+	if !rules.ValidAuthEvent(in.Event) {
+		return fmt.Errorf("%w: event", domain.ErrInvalidInput)
+	}
+
+	payload, err := json.Marshal(map[string]string{"event": in.Event})
+	if err != nil {
+		return err
+	}
+
+	return p.Events.Append(ctx, e, models.NewEvent{
+		Type:    "auth." + in.Event,
+		Payload: payload,
+	})
+}

@@ -1,0 +1,313 @@
+package app
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"time"
+
+	auth "github.com/plutoframework/pluto-auth"
+	"github.com/plutoframework/pluto-auth/httpauth"
+
+	"{{.Module}}/internal/access"
+	"{{.Module}}/internal/transport"
+)
+
+// authEventsClosed is the declared [auth.events] on_error policy: a failed
+// record denies the sign-in (and revokes its session) or the sign-out.
+const authEventsClosed = {{if .Manifest.Auth.Events.Closed}}true{{else}}false{{end}}
+
+// authEventTimeout bounds one event, whatever the organizations count.
+const authEventTimeout = 10 * time.Second
+
+// authEventCapture bounds the buffered sign-in response.
+const authEventCapture = 64 * 1024
+
+var errAuthEventCapture = errors.New("authentication response too large")
+
+// authEventTenants resolves the organizations of a subject the hook has
+// already verified through a live session.
+type authEventTenants interface {
+	Tenants(context.Context, string) ([]string, error)
+}
+
+// authEventRecorder runs the declared operation {{.Manifest.Auth.Events.Operation}}.
+// The caller carries the verified session and exactly one organization.
+type authEventRecorder func(context.Context, access.Caller, string) error
+
+// authEvents records managed authentication events: sign-in, OIDC sign-in and
+// sign-out. It is generated glue, not an authored seam. The organization of
+// an event is never read from the request: the subject is verified through a
+// live session, its organizations come from its active memberships, and each
+// record runs the declared operation in that organization through the same
+// identity gate as any request (membership, permission, row-level security).
+//
+// Events with no verified subject and organization (sign-up, verification,
+// recovery, failed sign-in, a subject with no organization yet) are not
+// recorded anywhere: there is no scope to record into without letting a
+// stranger choose or probe one. They are logged by kind only.
+type authEvents struct {
+	manager   *auth.Manager
+	transport *httpauth.Transport
+	tenants   authEventTenants
+	ingress   func(http.Handler) http.Handler
+	record    authEventRecorder
+	logger    *slog.Logger
+}
+
+func newAuthEvents(
+	authentication transport.Authentication,
+	tenants authEventTenants,
+	ingress func(http.Handler) http.Handler,
+	record authEventRecorder,
+	logger *slog.Logger,
+) (authEvents, error) {
+	events := authEvents{
+		manager:   authentication.Manager,
+		transport: authentication.HTTP,
+		tenants:   tenants,
+		ingress:   ingress,
+		record:    record,
+		logger:    logger,
+	}
+
+	if events.manager == nil || events.transport == nil ||
+		tenants == nil || ingress == nil || record == nil || logger == nil {
+		return authEvents{}, errors.New("invalid authentication events")
+	}
+
+	return events, nil
+}
+
+// signedIn records an event after the wrapped handler issued a session. The
+// response is held back until the record is written: when the policy is
+// closed and the record fails, the session is revoked and no credential
+// reaches the client.
+func (e authEvents) signedIn(kind string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured := &authEventResponse{header: http.Header{}}
+		next.ServeHTTP(captured, r)
+
+		token, issued := e.issuedToken(captured)
+		if !issued {
+			captured.flush(w)
+
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(
+			context.WithoutCancel(r.Context()),
+			authEventTimeout,
+		)
+		defer cancel()
+
+		// A response that could not be held is never delivered with a
+		// session the record did not cover.
+		if captured.failed {
+			_ = e.manager.Revoke(ctx, token)
+
+			authEventUnavailable(w)
+
+			return
+		}
+
+		if err := e.recordFor(ctx, token, kind); err != nil {
+			e.logger.Error("authentication event not recorded", "event", kind)
+
+			if authEventsClosed {
+				_ = e.manager.Revoke(ctx, token)
+
+				authEventUnavailable(w)
+
+				return
+			}
+		}
+
+		captured.flush(w)
+	})
+}
+
+// signingOut records the event before the session is revoked, since a
+// revoked session can no longer prove the subject. Origin and ingress
+// bounds apply before any lookup, exactly as for the wrapped handler.
+func (e authEvents) signingOut(next http.Handler) http.Handler {
+	return e.ingress(e.transport.Guard(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			token, err := e.transport.Token(r)
+			if err != nil {
+				next.ServeHTTP(w, r)
+
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(
+				context.WithoutCancel(r.Context()),
+				authEventTimeout,
+			)
+			defer cancel()
+
+			err = e.recordFor(ctx, token, "{{.LogoutKind}}")
+			if errors.Is(err, auth.ErrUnauthenticated) {
+				next.ServeHTTP(w, r)
+
+				return
+			}
+
+			if err != nil {
+				e.logger.Error(
+					"authentication event not recorded",
+					"event",
+					"{{.LogoutKind}}",
+				)
+
+				if authEventsClosed {
+					authEventUnavailable(w)
+
+					return
+				}
+			}
+
+			next.ServeHTTP(w, r)
+		},
+	)))
+}
+
+// recordFor verifies the session, resolves its organizations and runs the
+// declared operation once per organization.
+func (e authEvents) recordFor(
+	ctx context.Context,
+	token, kind string,
+) error {
+	var subject string
+
+	err := e.manager.WithIdentity(
+		ctx,
+		token,
+		func(ctx context.Context, identity *auth.Identity) error {
+			return e.manager.UseIdentity(
+				ctx,
+				identity,
+				func(_ context.Context, verified string) error {
+					subject = verified
+
+					return nil
+				})
+		})
+	if err != nil {
+		return err
+	}
+
+	tenants, err := e.tenants.Tenants(ctx, subject)
+	if err != nil {
+		return err
+	}
+
+	if len(tenants) == 0 {
+		e.logger.Info(
+			"authentication event has no organization",
+			"event",
+			kind,
+		)
+
+		return nil
+	}
+
+	if len(tenants) > {{.MaxTenants}} {
+		return errors.New("subject belongs to too many organizations")
+	}
+
+	for _, tenant := range tenants {
+		err := access.WithSession(
+			ctx,
+			e.manager,
+			token,
+			tenant,
+			func(ctx context.Context, caller access.Caller) error {
+				return e.record(ctx, caller, kind)
+			})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// issuedToken returns the session credential a successful response sets.
+func (e authEvents) issuedToken(
+	captured *authEventResponse,
+) (string, bool) {
+	if captured.status < 200 || captured.status > 399 {
+		return "", false
+	}
+
+	response := http.Response{Header: captured.header}
+	request := &http.Request{Header: http.Header{}}
+
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == httpauth.CookieName && cookie.Value != "" &&
+			cookie.MaxAge >= 0 {
+			request.AddCookie(cookie)
+		}
+	}
+
+	token, err := e.transport.Token(request)
+	if err != nil || token == "" {
+		return "", false
+	}
+
+	return token, true
+}
+
+func authEventUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+
+	_, _ = w.Write([]byte(`{"code":"authentication_unavailable"}` + "\n"))
+}
+
+// authEventResponse buffers a handler's response so the client sees it only
+// after the event is recorded.
+type authEventResponse struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+	failed bool
+}
+
+func (c *authEventResponse) Header() http.Header { return c.header }
+
+func (c *authEventResponse) WriteHeader(status int) {
+	if c.status == 0 {
+		c.status = status
+	}
+}
+
+func (c *authEventResponse) Write(data []byte) (int, error) {
+	c.WriteHeader(http.StatusOK)
+
+	if c.body.Len()+len(data) > authEventCapture {
+		c.failed = true
+
+		return 0, errAuthEventCapture
+	}
+
+	return c.body.Write(data)
+}
+
+func (c *authEventResponse) flush(w http.ResponseWriter) {
+	for name, values := range c.header {
+		w.Header()[name] = values
+	}
+
+	if c.status == 0 {
+		c.status = http.StatusOK
+	}
+
+	w.WriteHeader(c.status)
+
+	_, _ = w.Write(c.body.Bytes())
+}

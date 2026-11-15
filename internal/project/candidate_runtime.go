@@ -56,6 +56,15 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 		)
 	}
 
+	if m.AuthEventsOn() {
+		operation, _ := m.Operation(m.Auth.Events.Operation)
+		fmt.Fprintf(
+			&source,
+			"\tauthEventModels %s\n",
+			q(m.Project.Module+"/internal/models/"+operation.Group),
+		)
+	}
+
 	for _, name := range internalImports {
 		fmt.Fprintf(&source, `	%s
 `, q(m.Project.Module+"/internal/"+name))
@@ -506,6 +515,10 @@ func NewCandidateRuntime(
 		)
 	}
 
+	if err := writeAuthEvents(&source, m); err != nil {
+		return nil, err
+	}
+
 	source.WriteString(
 		`
 	router := chi.NewRouter()
@@ -527,7 +540,12 @@ func NewCandidateRuntime(
 `,
 	)
 
-	if local {
+	if local && m.AuthEventsOn() {
+		source.WriteString(
+			`	registerCandidateCredentials(router, authentication, events)
+`,
+		)
+	} else if local {
 		source.WriteString(
 			`	registerCandidateCredentials(router, authentication)
 `,
@@ -845,6 +863,52 @@ func writeSystemOperation(
 		operation.Action,
 		suffix,
 		ports.String(),
+	)
+
+	return nil
+}
+
+// writeAuthEvents composes the generated authentication event hook around the
+// declared operation. The recorder is the only code that calls it.
+func writeAuthEvents(source *bytes.Buffer, m Manifest) error {
+	if !m.AuthEventsOn() {
+		return nil
+	}
+
+	operation, ok := m.Operation(m.Auth.Events.Operation)
+	if !ok {
+		return fmt.Errorf(
+			"auth events operation %s is not declared",
+			m.Auth.Events.Operation,
+		)
+	}
+
+	fmt.Fprintf(
+		source,
+		`
+	events, err := newAuthEvents(
+		authentication,
+		memberships,
+		integrations.Ingress,
+		func(
+			ctx context.Context,
+			caller access.Caller,
+			event string,
+		) error {
+			return runtime.Operations.%[1]s.Execute(
+				ctx,
+				caller,
+				authEventModels.%[2]sRequest{Event: event},
+			)
+		},
+		logger,
+	)
+	if err != nil {
+		return nil, err
+	}
+`,
+		symbol(operation.Endpoint()),
+		operation.Action,
 	)
 
 	return nil

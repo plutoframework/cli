@@ -162,6 +162,12 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 	seamFile(
 		t,
 		root,
+		"record_auth_event.go.txt",
+		"internal/logic/audit/recordauthevent.go",
+	)
+	seamFile(
+		t,
+		root,
 		"event_store.go.txt",
 		"internal/adapters/audit/event_store.go",
 	)
