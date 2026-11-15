@@ -73,7 +73,7 @@ func TestStateScaffoldConsumers(t *testing.T) {
 			mustInvoke(t, root, "add", "state", "state")
 			external(t, root, "go", "test", "-race", "./...")
 			external(t, root, "go", "test", "./internal/domain/purchases",
-				"-run=^$", "-fuzz=FuzzLifecycle", "-fuzztime=1s", "-parallel=2")
+				"-run=^$", "-fuzz=FuzzLifecycle", "-fuzztime=20000x", "-parallel=2")
 			mustInvoke(t, root, "fmt")
 			mustVetPublishedCompatibility(t, root)
 		})
