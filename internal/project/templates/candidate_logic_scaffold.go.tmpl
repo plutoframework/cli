@@ -1,0 +1,36 @@
+package {{.Group}}
+
+import (
+	"context"
+	"errors"
+
+	models "{{.Module}}/internal/models/{{.Group}}"
+{{- if .Authored.Pagination}}
+	"github.com/plutoframework/pluto-core/pagination"
+{{- end}}
+	"{{.Module}}/internal/scope"
+)
+
+// {{.Action}} is the authored body of {{.Authored.ID}}. Pluto created this file
+// once and never overwrites it. It is reachable only through the generated
+// gate: e carries the verified identity and tenant, and p holds the declared
+// adapters. Take the actor from e.SubjectID(), never from the request.
+//
+// This package may import rules/{{.Group}}, models/{{.Group}}, ports/{{.Group}},
+// internal/scope, internal/domain and the pure standard library. It has no
+// init, no package-level variables and no goroutines.
+func {{.Action}}(
+	ctx context.Context,
+	e scope.Execution,
+	p {{.Action}}Ports,
+	in models.{{.Action}}Request,
+) ({{.Authored.Returns}}) {
+	_, _, _, _ = ctx, e, p, in
+{{if .Authored.Result}}
+	var zero {{.Authored.Result}}
+
+	return zero, errors.New("{{.Authored.ID}} is not implemented")
+{{- else}}
+	return errors.New("{{.Authored.ID}} is not implemented")
+{{- end}}
+}

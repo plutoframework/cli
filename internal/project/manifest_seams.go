@@ -683,6 +683,10 @@ func splitQualified(id string) (string, string, bool) {
 // refuseUngeneratedAuthored fails closed until the seam generators exist: an
 // authored-body operation must never get an endpoint without its gate.
 func refuseUngeneratedAuthored(m Manifest) error {
+	if authoredSeamReady {
+		return nil
+	}
+
 	for _, operation := range m.Operations {
 		if operation.Body == BodyAuthored {
 			return fmt.Errorf(

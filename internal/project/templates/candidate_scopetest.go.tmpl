@@ -1,0 +1,52 @@
+// Package scopetest mints scope Executions for tests of authored role
+// packages. It runs a real identity gate over an in-memory membership table,
+// so a test uses the same authority path as production. Production code must
+// never import it (ARCH610).
+package scopetest
+
+import (
+	"context"
+
+	"{{.Module}}/internal/scope"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
+	"github.com/plutoframework/pluto-rbac/identity/identitytest"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Harness owns a real gate backed by in-memory sessions and membership.
+type Harness struct {
+	inner *identitytest.Harness
+}
+
+// New builds the harness; see identitytest.Options.
+func New(options identitytest.Options) (*Harness, error) {
+	inner, err := identitytest.New(options)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Harness{inner: inner}, nil
+}
+
+// Within runs run with an Execution minted through the real gate. Denials are
+// returned unchanged and run is not invoked.
+func (h *Harness) Within(
+	ctx context.Context,
+	subject, tenant, resource string,
+	run func(context.Context, scope.Execution) error,
+) error {
+	return h.inner.Within(
+		ctx,
+		subject,
+		tenant,
+		resource,
+		func(ctx context.Context, execution *identitygate.Execution) error {
+			return run(ctx, scope.Bind(execution, h.inner.Gate(), resource))
+		},
+	)
+}
+
+// DB wraps a test database pool for adapter tests.
+func (h *Harness) DB(pool *pgxpool.Pool) scope.DB {
+	return scope.NewDB(pool)
+}

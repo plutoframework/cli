@@ -45,6 +45,8 @@ type candidateRules struct {
 	protectedTypes     map[string]bool
 	privateNames       map[string]map[string]string
 	domainFiles        map[string]bool
+	roles              map[string]authoredRole
+	dependencies       []string
 }
 
 // inspectCandidateBoundaries checks the closed, declared candidate source
@@ -126,7 +128,9 @@ func inspectCandidateBoundaries(
 		)
 	}
 
-	if len(declaration.Operations) > 0 || len(declaration.Resources) > 0 ||
+	if (len(declaration.Operations) > 0 &&
+		!allAuthored(declaration.Operations)) ||
+		len(declaration.Resources) > 0 ||
 		len(declaration.Contracts) > 0 ||
 		len(declaration.Effects) > 0 {
 		if err := ValidateContracts(
@@ -181,6 +185,10 @@ func inspectCandidateBoundaries(
 		}
 
 		operations[operation.ID()] = operation
+		if operation.Body == BodyAuthored {
+			continue
+		}
+
 		contract, ok := contracts[operation.ID()]
 
 		write := contract.Kind == "create" || contract.Kind == "transition" ||
@@ -272,6 +280,7 @@ func inspectCandidateBoundaries(
 	}
 
 	rules.managed = owned
+	addAuthoredRules(&rules, module, canonical)
 
 	// The authored credential seam is a declared framework extension. Its
 	// files are not trusted by content; their capabilities are restricted.
@@ -578,6 +587,15 @@ func inspectCandidateBoundaries(
 			continue
 		}
 
+		inspectAuthoredImports(file, rules, module, emit)
+
+		if role, ok := rules.roles[file.directory]; ok {
+			inspectAuthoredRole(file, rules, role, module, emit)
+			inspectCandidateFile(file, rules, types, functions, emit)
+
+			continue
+		}
+
 		if credentialSeam != "" && file.directory == credentialSeam {
 			inspectCandidateCredentialSeam(file, module, emit)
 			inspectCandidateFile(file, rules, types, functions, emit)
@@ -597,6 +615,8 @@ func inspectCandidateBoundaries(
 		)
 		inspectCandidateFile(file, rules, types, functions, emit)
 	}
+
+	checkAuthoredBodies(canonical, files, add)
 
 	return diagnostics, []string{
 		"candidate source checks compose with exact managed integrity; " +
