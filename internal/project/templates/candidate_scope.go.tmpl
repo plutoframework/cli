@@ -22,6 +22,9 @@ import (
 	"sync"
 
 	auth "github.com/plutoframework/pluto-auth"
+{{- else if .Manifest.DeviceOn}}
+
+	auth "github.com/plutoframework/pluto-auth"
 {{- else}}
 {{end}}
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
@@ -42,6 +45,9 @@ type Execution struct {
 	scopeExecution *identitygate.Execution
 	scopeGate      *identitygate.Gate
 	scopeResource  string
+{{- if .Manifest.DeviceOn}}
+	scopeActor     Actor
+{{- end}}
 }
 
 // SubjectID is the verified acting subject and the only legitimate actor
@@ -358,4 +364,78 @@ func BindProvisioning(
 		subject:  subject,
 	}}
 }
-{{end}}
+{{end}}{{- if .Manifest.DeviceOn}}
+
+// Actor describes who is acting for an Execution: the owner interactively, or
+// a delegated client (CLI, agent) the owner approved through the device grant.
+// It carries client and actor-type metadata for authored code and audit. It
+// grants nothing: scopes were already intersected with the owner's permissions
+// by the gate. It has no constructor reachable from authored code.
+type Actor struct {
+	scopeActorKind   string
+	scopeActorClient string
+	scopeActorGrant  string
+}
+
+// Kind is "user" for an interactive session, else the declared actor_type of
+// the delegated client (for example "agent").
+func (a Actor) Kind() string {
+	if a.scopeActorKind == "" {
+		return "user"
+	}
+
+	return a.scopeActorKind
+}
+
+// Delegated reports whether the actor is a delegated client.
+func (a Actor) Delegated() bool {
+	return a.scopeActorKind != ""
+}
+
+// ClientID is the declared device client, empty for an interactive session.
+func (a Actor) ClientID() string {
+	return a.scopeActorClient
+}
+
+// GrantID identifies the approved token family, empty when interactive.
+func (a Actor) GrantID() string {
+	return a.scopeActorGrant
+}
+
+// Actor is the acting identity of this execution.
+func (e Execution) Actor() Actor {
+	return e.scopeActor
+}
+
+type actorContextKey struct{}
+
+// ContextWithActor is a capability: only generated gates may call it. It
+// records the verified identity's delegation for the generated workflow.
+func ContextWithActor(ctx context.Context, identity *auth.Identity) context.Context {
+	var actor Actor
+
+	if delegation, ok := identity.Delegation(); ok {
+		actor = Actor{
+			scopeActorKind:   delegation.ActorType,
+			scopeActorClient: delegation.ClientID,
+			scopeActorGrant:  delegation.GrantID,
+		}
+	}
+
+	return context.WithValue(ctx, actorContextKey{}, actor)
+}
+
+// BindActor is Bind for a gate that carried the acting identity in ctx. Only
+// generated workflow files and the scope test harness may call it.
+func BindActor(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	gate *identitygate.Gate,
+	resource string,
+) Execution {
+	bound := Bind(execution, gate, resource)
+	bound.scopeActor, _ = ctx.Value(actorContextKey{}).(Actor)
+
+	return bound
+}
+{{- end}}

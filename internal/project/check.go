@@ -262,6 +262,12 @@ func Contracts(root string, m Manifest) error {
 				return nil
 			}
 
+			// The OpenAPI document is machine-owned and grows with every
+			// declared endpoint; `openapi -check` holds it exact instead.
+			if relative == filepath.Join("openapi", "openapi.json") {
+				return nil
+			}
+
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return err

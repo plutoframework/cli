@@ -43,6 +43,10 @@ type authoredOp struct {
 	Result     string
 	Pagination bool
 
+	// Permission is the declared operation permission; a delegated token's
+	// scopes are checked against it before the identity gate.
+	Permission string
+
 	// Provision marks a scope = "provision" body, which receives a
 	// scope.Provisioning instead of a scope.Execution.
 	Provision bool
@@ -84,10 +88,11 @@ func modelName(id string) string {
 
 func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 	view := authoredOp{
-		ID:        operation.ID(),
-		Action:    operation.Action,
-		Resource:  operation.Resource,
-		Provision: operation.Scope == ScopeProvision,
+		ID:         operation.ID(),
+		Action:     operation.Action,
+		Resource:   operation.Resource,
+		Provision:  operation.Scope == ScopeProvision,
+		Permission: operation.Permission,
 	}
 
 	switch operation.Response {

@@ -42,6 +42,7 @@ var frameworkMigrationKeys = map[string]string{
 	"authentication":      "006",
 	"external_accounts":   "007",
 	"credential_attempts": "008",
+	"device_grants":       "090",
 }
 
 // ReservedMigrationNumber reports numbers never allocated to framework migrations.

@@ -268,3 +268,71 @@ tables; enable login and set the credential in the deployment. Generated
 start when the connected role is a superuser, has BYPASSRLS, owns or inherits
 ownership of a declared table, is not the declared runtime role, or a declared
 table lacks forced row-level security. There is no override.
+
+## Device authorization and scoped delegated tokens
+
+`[auth.device]` declares the OAuth 2.0 device authorization grant (RFC 8628) for
+a CLI or an agent acting for a user. It needs the candidate profile, multi
+tenancy and `--local-credentials` (the owner approves in a signed-in browser
+session). Everything is generated; the generated app mounts these routes under
+`/auth/device` (the `/auth` namespace is reserved) and applies
+`db/migrations/090_device_grants.sql` (`pluto_auth_device_*` tables; codes and
+tokens are stored only as SHA-256 digests).
+
+```toml
+[auth.device]
+verification_uri = "https://app.example.com/device"   # browser page
+# optional, bounded: code_ttl 10m, poll_interval 5s, access_ttl 15m,
+# refresh_ttl 720h, max_lifetime 2160h (absolute per grant)
+
+[[auth.device.scopes]]
+name = "requests.write"
+permissions = ["requests.create", "requests.read"]    # declared operation permissions
+
+[[auth.device.clients]]
+id = "gryt-cli"
+name = "gryt CLI"
+actor_type = "agent"            # carried on every delegated identity; never "user"
+scopes = ["requests.write"]
+```
+
+Flow: `POST /auth/device/code` (public, tenant-less, ingress limited) returns
+`device_code`, `user_code`, `verification_uri(_complete)`, `expires_in` and
+`interval`. The owner opens the page and the browser calls `GET
+/auth/device/request?user_code=` (client and requested scopes) then `POST
+/auth/device/approve` with `user_code`, a `tenant` where the owner holds a
+membership with a role, and a subset of the requested `scope`s (or `/deny`).
+The client polls `POST /auth/device/token` with the device-code grant; polling
+faster than the interval returns `slow_down` and raises the interval, and codes
+are single use. The token response carries `access_token`, `refresh_token`,
+`scope`, `tenant` and `grant_id`. The refresh grant rotates both tokens and may
+narrow scopes, never widen them. Presenting an already rotated refresh token
+revokes the whole token family (`invalid_grant`). `POST /auth/device/revoke`
+(RFC 7009), `DELETE /auth/device/grants/{id}` (owner), password reset, account
+disabling and `DELETE /auth/session` all revoke families.
+
+Enforcement: an access token is an ordinary opaque session through the single
+runtime manager, so requests run the normal gates with the owner's verified
+identity. Each generated gate first calls `caller.Permits(permission)`: the
+operation permission must be named by an approved scope and the tenant must be
+the token's tenant (the `X-Tenant-ID` header may be omitted, never differ).
+The identity gate then still requires the owner's live membership, role and
+resource policy, so the effective authority is the intersection and never
+exceeds the owner's. Delegated tokens are refused on every owner route
+(approve, deny, grants) and on tenant provisioning, and the generic
+`/api/features` front door, which has no permission to intersect, still applies
+only the owner's membership.
+
+Metadata: authored bodies read `e.Actor()` on `scope.Execution` (`Kind()` is
+`user` or the client's `actor_type`; `ClientID()`, `GrantID()`). Authored code
+cannot construct or set it (`scope.Actor` is protected; `BindActor` and
+`ContextWithActor` are generated-only capabilities), and cannot import
+`pluto-auth/device`. Generated code that receives an `access.Caller` (for
+example the auth-events hook) can read `Caller.Delegation()`.
+
+Operational notes: user codes are 8 characters from a 20-letter alphabet and
+live for `code_ttl`; lookups and decisions are limited per subject through the
+shared credential attempt limiter (so each approval uses a few of its attempts)
+and the public routes through `Ingress`. Expired requests are pruned
+opportunistically on creation. Requires a pluto-auth revision containing the
+`device` package; the candidate pin probe does not yet check it.

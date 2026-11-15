@@ -61,10 +61,18 @@ func (operation *{{.Action}}) execute(
 {{end}}
 	return logic.{{.Action}}(
 		ctx,
+{{- if .Manifest.DeviceOn}}
+		scope.BindActor(
+			ctx,
+			execution,
+			operation.{{lowerFirst .Action}}Gate,
+			{{q .Authored.Resource}}),
+{{- else}}
 		scope.Bind(
 			execution,
 			operation.{{lowerFirst .Action}}Gate,
 			{{q .Authored.Resource}}),
+{{- end}}
 		operation.{{lowerFirst .Action}}Ports,
 		request)
 }

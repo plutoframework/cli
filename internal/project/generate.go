@@ -451,6 +451,13 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 		catalog.WriteString("OIDCBegin,\nOIDCCallback,\nOIDCProviders,\n")
 	}
 
+	if m.DeviceOn() {
+		catalog.WriteString(
+			"DeviceCode,\nDeviceToken,\nDeviceRevoke,\nDeviceRequest,\n" +
+				"DeviceApprove,\nDeviceDeny,\nDeviceGrants,\nDeviceRevokeGrant,\n",
+		)
+	}
+
 	catalog.WriteString("}\n}\n")
 	composition.WriteString("}\n")
 	definitions.WriteString(

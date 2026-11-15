@@ -61,6 +61,14 @@ func (operation *{{.Action}}) Execute(
 		operation.{{lowerFirst .Action}}Limiter == nil {
 		return output, commonDomain.ErrUnauthenticated
 	}
+{{- if .Manifest.DeviceOn}}
+
+	// A delegated client never creates tenants: provisioning needs the
+	// owner's own interactive session.
+	if _, delegated := identity.Delegation(); delegated {
+		return output, commonDomain.ErrForbidden
+	}
+{{- end}}
 
 	err := operation.{{lowerFirst .Action}}Manager.UseIdentity(
 		ctx,
