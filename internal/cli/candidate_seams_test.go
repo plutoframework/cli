@@ -103,7 +103,11 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 	seamFile(t, root, "events.sql", "db/queries/audit/events.sql")
 	seamFile(t, root, "approvals.sql", "db/queries/approvals/requests.sql")
 	systemFileAs(
-		t, root, "example.test/auditapp", "orgs.sql", "db/queries/orgs/orgs.sql",
+		t,
+		root,
+		"example.test/auditapp",
+		"orgs.sql",
+		"db/queries/orgs/orgs.sql",
 	)
 	seamFile(t, root, "blueprint.toml", "audit-blueprint.toml")
 
