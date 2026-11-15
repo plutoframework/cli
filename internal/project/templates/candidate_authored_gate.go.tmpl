@@ -1,0 +1,197 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	"{{.Module}}/internal/access"
+	commonDomain "{{.Module}}/internal/domain"
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	models "{{.Module}}/internal/models/{{.Group}}"
+{{- if .Authored.Pagination}}
+	"github.com/plutoframework/pluto-core/pagination"
+{{- end}}
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
+)
+
+type {{.Action}}Boundary interface {
+	sealed{{.Action}}()
+	Prepare(
+		context.Context,
+		access.Caller,
+		models.{{.Action}}Request) (*{{.Action}}Intent, error)
+	AuthorizeIntent(context.Context, *{{.Action}}Intent) (access.Actor, error)
+	ExecutePrepared(
+		context.Context,
+		*{{.Action}}Intent) ({{.Authored.Returns}})
+	Execute(
+		context.Context,
+		access.Caller,
+		models.{{.Action}}Request) ({{.Authored.Returns}})
+}
+
+// {{.Action}}Intent is normalized once and bound to the exact operation
+// instance and verified identity scope. It is not reusable authorization:
+// every execution revalidates identity, membership, permission and resource
+// before the authored body runs.
+type {{.Action}}Intent struct {
+	{{lowerFirst .Action}}IntentOwner   *{{.Action}}
+	{{lowerFirst .Action}}IntentCaller  access.Caller
+	{{lowerFirst .Action}}IntentRequest models.{{.Action}}Request
+}
+
+// {{.Action}} gates the authored body logic.{{.Action}}. The body is reachable
+// only from this operation's generated workflow.
+type {{.Action}} struct {
+	{{lowerFirst .Action}}Gate  *identitygate.Gate
+	{{lowerFirst .Action}}Ports logic.{{.Action}}Ports
+}
+
+func New{{.Action}}(
+	gate *identitygate.Gate,
+	ports logic.{{.Action}}Ports,
+) *{{.Action}} {
+	return &{{.Action}}{
+		{{lowerFirst .Action}}Gate:  gate,
+		{{lowerFirst .Action}}Ports: ports,
+	}
+}
+
+func (*{{.Action}}) sealed{{.Action}}() {}
+
+func (operation *{{.Action}}) intent(
+	caller access.Caller,
+	input models.{{.Action}}Request,
+) (*{{.Action}}Intent, error) {
+	if operation == nil || caller.Identity() == nil {
+		return nil, commonDomain.ErrUnauthenticated
+	}
+
+	return &{{.Action}}Intent{
+		{{lowerFirst .Action}}IntentOwner:   operation,
+		{{lowerFirst .Action}}IntentCaller:  caller,
+		{{lowerFirst .Action}}IntentRequest: input,
+	}, nil
+}
+
+func (operation *{{.Action}}) within(
+	ctx context.Context,
+	intent *{{.Action}}Intent,
+	run func(context.Context, *identitygate.Execution) error,
+) error {
+	if ctx == nil || operation == nil ||
+		operation.{{lowerFirst .Action}}Gate == nil ||
+		intent == nil ||
+		intent.{{lowerFirst .Action}}IntentOwner != operation {
+		return commonDomain.ErrUnauthenticated
+	}
+
+	caller := intent.{{lowerFirst .Action}}IntentCaller
+	if caller.Identity() == nil {
+		return commonDomain.ErrUnauthenticated
+	}
+
+	return operation.{{lowerFirst .Action}}Gate.Within(
+		ctx,
+		caller.Identity(),
+		caller.TenantID(),
+		{{q .Authored.Resource}},
+		run)
+}
+
+func (operation *{{.Action}}) Prepare(
+	ctx context.Context,
+	caller access.Caller,
+	input models.{{.Action}}Request,
+) (*{{.Action}}Intent, error) {
+	intent, err := operation.intent(caller, input)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := operation.AuthorizeIntent(ctx, intent); err != nil {
+		return nil, err
+	}
+
+	return intent, nil
+}
+
+func (operation *{{.Action}}) AuthorizeIntent(
+	ctx context.Context,
+	intent *{{.Action}}Intent,
+) (access.Actor, error) {
+	var actor access.Actor
+
+	err := operation.within(
+		ctx,
+		intent,
+		func(_ context.Context, execution *identitygate.Execution) error {
+			actor = access.Actor{
+				SubjectID: execution.SubjectID(),
+				TenantID:  execution.TenantID(),
+			}
+
+			return nil
+		})
+
+	return actor, err
+}
+
+func (operation *{{.Action}}) ExecutePrepared(
+	ctx context.Context,
+	intent *{{.Action}}Intent,
+) ({{.Authored.Returns}}) {
+{{- if .Authored.Result}}
+	var output {{.Authored.Result}}
+{{end}}
+	err := operation.within(
+		ctx,
+		intent,
+		func(ctx context.Context, execution *identitygate.Execution) error {
+{{- if .Authored.Result}}
+			var err error
+
+			output, err = operation.execute(
+				ctx,
+				execution,
+				intent.{{lowerFirst .Action}}IntentRequest)
+
+			return err
+{{- else}}
+			return operation.execute(
+				ctx,
+				execution,
+				intent.{{lowerFirst .Action}}IntentRequest)
+{{- end}}
+		})
+{{- if .Authored.Result}}
+	if err != nil {
+		var zero {{.Authored.Result}}
+
+		return zero, err
+	}
+
+	return output, nil
+{{- else}}
+
+	return err
+{{- end}}
+}
+
+func (operation *{{.Action}}) Execute(
+	ctx context.Context,
+	caller access.Caller,
+	input models.{{.Action}}Request,
+) ({{.Authored.Returns}}) {
+	intent, err := operation.intent(caller, input)
+	if err != nil {
+{{- if .Authored.Result}}
+		var zero {{.Authored.Result}}
+
+		return zero, err
+{{- else}}
+		return err
+{{- end}}
+	}
+
+	return operation.ExecutePrepared(ctx, intent)
+}

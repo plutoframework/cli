@@ -38,6 +38,10 @@ type templateData struct {
 	Params          []string
 	Body            bool
 	TestPath        string
+
+	// Authored-body seam views; see candidate_authored.go.
+	Authored      authoredOp
+	AuthoredGroup authoredGroupView
 }
 
 func dataFor(m Manifest, e Endpoint) templateData {

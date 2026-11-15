@@ -112,7 +112,7 @@ func OperationFiles(
 	operation Operation,
 ) (map[string][]byte, error) {
 	if m.Boundary.Mode == "candidate" {
-		return map[string][]byte{}, nil
+		return candidateAuthoredScaffold(m, operation)
 	}
 
 	files := map[string][]byte{}

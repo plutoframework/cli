@@ -1,0 +1,37 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	models "{{.Module}}/internal/models/{{.Group}}"
+{{- if .AuthoredGroup.UsesPorts}}
+	ports "{{.Module}}/internal/ports/{{.Group}}"
+{{- end}}
+	"{{.Module}}/internal/scope"
+{{- if .AuthoredGroup.UsesPagination}}
+	"github.com/plutoframework/pluto-core/pagination"
+{{- end}}
+)
+
+// Managed contract of the authored logic bodies in this group. Each body must
+// be a plain function with exactly the shape asserted below, declared in
+// <action>.go. Only the generated workflow calls it, inside the operation's
+// gate, so a body can never run without verified identity and policy.
+{{range .AuthoredGroup.Ops}}
+// {{.Action}}Ports are the declared adapters of {{.ID}}. Only generated
+// composition constructs them.
+type {{.Action}}Ports struct {
+{{- range .Ports}}
+	{{.Field}} ports.{{.Field}}
+{{- end}}
+}
+{{end}}
+{{range .AuthoredGroup.Ops -}}
+var _ func(
+	context.Context,
+	scope.Execution,
+	{{.Action}}Ports,
+	models.{{.Action}}Request,
+) ({{.Returns}}) = {{.Action}}
+
+{{end}}

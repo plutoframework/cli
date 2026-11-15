@@ -179,12 +179,17 @@ func ValidateManifestContracts(m Manifest) error {
 		return nil
 	}
 
-	if err := ValidateContracts(
-		m.Resources,
-		m.OperationContracts,
-		m.Effects,
-	); err != nil {
-		return err
+	// An application whose operations are all authored bodies has no resource
+	// data contracts to validate.
+	if !allAuthored(m.Operations) || len(m.Resources)+
+		len(m.OperationContracts)+len(m.Effects) != 0 {
+		if err := ValidateContracts(
+			m.Resources,
+			m.OperationContracts,
+			m.Effects,
+		); err != nil {
+			return err
+		}
 	}
 
 	contracts := map[string]OperationContract{}
