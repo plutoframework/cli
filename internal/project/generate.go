@@ -102,6 +102,60 @@ func render(name string, data templateData) ([]byte, error) {
 		return nil, err
 	}
 
+	return renderSource(name, source, data)
+}
+
+// Documents renders the agent-facing documents (README.md and AGENTS.md).
+// They are authored after creation, so only pristine copies are refreshed.
+func Documents(m Manifest) (map[string][]byte, error) {
+	return documents(m, nil)
+}
+
+// DocumentsFromTemplates renders the same documents from template sources
+// recorded from an earlier CLI, keyed by document name. A missing source is
+// skipped.
+func DocumentsFromTemplates(
+	m Manifest,
+	sources map[string][]byte,
+) (map[string][]byte, error) {
+	return documents(m, sources)
+}
+
+func documents(
+	m Manifest,
+	sources map[string][]byte,
+) (map[string][]byte, error) {
+	files := map[string][]byte{}
+
+	for _, name := range []string{"README.md", "AGENTS.md"} {
+		var (
+			data []byte
+			err  error
+		)
+
+		if sources == nil {
+			data, err = render(name, dataFor(m, Endpoint{}))
+		} else if source, ok := sources[name]; ok {
+			data, err = renderSource(name, source, dataFor(m, Endpoint{}))
+		} else {
+			continue
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+
+		files[name] = data
+	}
+
+	return files, nil
+}
+
+func renderSource(
+	name string,
+	source []byte,
+	data templateData,
+) ([]byte, error) {
 	tmpl, err := template.New(name).
 		Funcs(template.FuncMap{"q": strconv.Quote, "upperFirst": func(
 			value string,

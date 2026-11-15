@@ -155,7 +155,11 @@ func migrateCommand(options Options) *cobra.Command {
 }
 
 func reportPlan(out io.Writer, plan *migrate.Plan) {
-	fmt.Fprintf(out, "Migrating %s -> %s\n", plan.From, plan.To)
+	if len(plan.Steps) == 0 {
+		fmt.Fprintf(out, "Generating %s\n", plan.To)
+	} else {
+		fmt.Fprintf(out, "Migrating %s -> %s\n", plan.From, plan.To)
+	}
 
 	for _, step := range plan.Steps {
 		fmt.Fprintf(out, "  step %s: %s\n", step.ID, step.Summary)

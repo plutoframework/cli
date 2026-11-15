@@ -9,6 +9,10 @@ module proxy reaches). Do not remove replacements or change pins by hand and
 claim the candidate contract still works; pluto vet checks go.mod against
 pluto.toml.
 
+Managed files are CLI-owned. After editing pluto.toml or upgrading the CLI,
+run `pluto generate` (`--dry-run` previews the diff) instead of editing
+generated files; it refuses hand-edited managed files.
+
 Declare supported resources, operations, roles, HTTP entries, jobs and
 host-approved
 agent tools in an atomic blueprint:
@@ -91,6 +95,28 @@ shape; real SQL/cross-entry conformance is tested by the framework's candidate
 profile. Arbitrary business semantics and external dependency/provider
 correctness
 are not established by a passing structural source report.
+
+## Authored seams
+
+Production business code is authored only in role directories, driven by
+declarations in pluto.toml; run `pluto generate` after every manifest edit.
+
+- `internal/rules/<group>`: pure validation and invariants (no I/O).
+- `internal/logic/<group>`: operation bodies for `body = "authored"`
+  operations; they receive the verified `scope.Execution` and declared ports.
+- `internal/adapters/<group>`: SQL behind declared `[[ports]]`, with query sets
+  declared by `[[queries]]`. Adapters use only `queriesOf(...)`.
+- Signup or tenant bootstrap (creating an org and its first admin) is supported:
+  mark the root `[[tables]]` entry `tenant_root = true` and declare an operation
+  with `scope = "provision"`. It needs a verified identity but no membership,
+  and generated code mints the tenant id. Resolving a tenant before login
+  (for example by slug) uses `scope = "lookup"` with a `[[lookups]]` entry.
+- Cross-group writes in one transaction: the port lists `tx_methods` and
+  `tx_callers`, and the calling operation lists the port.
+- `[memberships]` binds roles to an app table; `active_column` and
+  `active_values` deny suspended subjects on the next request.
+- `[database] runtime_role` proposes a least-privilege role migration; the
+  API and worker refuse to start as an owner, superuser or BYPASSRLS role.
 {{else}}
 # {{.Name}}
 
@@ -99,6 +125,10 @@ primitives will be candidates for framework extraction; published Pluto Core,
 Auth and RBAC libraries
 provide sessions and capability evaluation. Chi is the HTTP router,
 PostgreSQL/pgx + sqlc the database direction.
+
+Managed files are CLI-owned. After editing pluto.toml or upgrading the CLI,
+run `pluto generate` (`--dry-run` previews the diff) instead of editing
+generated files; it refuses hand-edited managed files.
 
 ```sh
 go mod download
