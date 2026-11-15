@@ -388,8 +388,8 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
             (
                 "scope transaction always rolls back",
                 "internal/project/templates/candidate_scope.go.tmpl",
-                "defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()",
-                "defer func() {}()",
+                "defer func() {\n\t\t_ = tx.Rollback(context.WithoutCancel(ctx))\n\t}()",
+                "defer func() {\n\t}()",
                 "./internal/project#TestScopeAlwaysRollsBack",
             ),
             (

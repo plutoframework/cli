@@ -159,6 +159,14 @@ func TestAdapterStubsCompileAgainstContract(t *testing.T) {
 type Execution struct{}
 type Tx struct{}
 type DB struct{}
+
+func Queries[Q, D any](Tx, func(D) Q) Q { var q Q; return q }
+`)
+	write("internal/storage/queries/audit/queries.go", `package queries
+
+type Queries struct{}
+
+func New(int) *Queries { return nil }
 `)
 	write("internal/models/audit/models.go", `package audit
 

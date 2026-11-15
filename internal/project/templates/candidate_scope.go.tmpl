@@ -156,7 +156,9 @@ func (d DB) transact(
 
 	// Rollback after Commit is a no-op, so every exit, including a panic in
 	// run, releases the transaction.
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+	}()
 
 	if _, err = tx.Exec(
 		ctx,

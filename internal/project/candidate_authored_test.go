@@ -367,8 +367,8 @@ func TestScopeAlwaysRollsBack(t *testing.T) {
 
 	if !strings.Contains(
 		source,
-		"defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()",
-	) && !strings.Contains(source, "defer func() {\n\t_ = tx.Rollback(") {
+		"defer func() {\n\t\t_ = tx.Rollback(context.WithoutCancel(ctx))",
+	) {
 		t.Fatalf("scope must roll back on every exit, including panics:\n%s",
 			source)
 	}
