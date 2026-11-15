@@ -821,8 +821,8 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
             (
                 "authored tenant transaction binding",
                 "internal/project/templates/candidate_scope.go.tmpl",
-                "\"SELECT set_config('app.tenant_id', $1, true)\",",
-                "\"SELECT set_config('app.tenant_id_unbound', $1, true)\",",
+                "\t}()\n\n\tif _, err = tx.Exec(\n\t\tctx,\n\t\t\"SELECT set_config('app.tenant_id', $1, true)\",\n\t\ttenant.scopeTenant,\n\t); err != nil {\n\t\treturn err\n\t}\n\n\tif err = run(",
+                "\t}()\n\n\tif _, err = tx.Exec(\n\t\tctx,\n\t\t\"SELECT set_config('app.tenant_id_unbound', $1, true)\",\n\t\ttenant.scopeTenant,\n\t); err != nil {\n\t\treturn err\n\t}\n\n\tif err = run(",
                 "TestCandidateAuthoredSeamEndToEnd",
             ),
         ]
