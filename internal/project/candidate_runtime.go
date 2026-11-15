@@ -688,12 +688,31 @@ func writeAuthoredOperation(
 	var ports bytes.Buffer
 
 	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			fmt.Fprintf(
+				&ports,
+				"%s: adapters.%sTx, ",
+				foreignPortField(id),
+				adapterField(Port{ID: id}),
+			)
+
+			continue
+		}
+
 		fmt.Fprintf(
 			&ports,
 			"%s: adapters.%s, ",
 			modelName(id),
 			adapterField(Port{ID: id}),
 		)
+	}
+
+	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			ports.WriteString("TxDB: adapters.DB, ")
+
+			break
+		}
 	}
 
 	fmt.Fprintf(

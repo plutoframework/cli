@@ -1,0 +1,39 @@
+package approvals
+
+import (
+	"context"
+	"errors"
+
+	models "example.test/auditapp/internal/models/approvals"
+	"example.test/auditapp/internal/scope"
+	queries "example.test/auditapp/internal/storage/queries/approvals"
+)
+
+// RequestStore is the authored approvals adapter.
+type RequestStore struct{ db scope.DB }
+
+func NewRequestStore(db scope.DB) *RequestStore {
+	return &RequestStore{db: db}
+}
+
+// ApproveTx joins the caller's transaction, so the approval commits only with
+// everything else the operation writes there.
+func (s *RequestStore) ApproveTx(
+	ctx context.Context,
+	tx scope.Tx,
+	in models.ApproveInput,
+) error {
+	rows, err := queriesOf(tx).ApproveRequest(
+		ctx,
+		queries.ApproveRequestParams{OrgID: tx.Tenant(), ID: in.ID},
+	)
+	if err != nil {
+		return err
+	}
+
+	if rows != 1 {
+		return errors.New("request is not pending")
+	}
+
+	return nil
+}

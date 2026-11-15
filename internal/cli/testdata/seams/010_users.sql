@@ -5,3 +5,10 @@ CREATE TABLE users (
     state text NOT NULL DEFAULT 'active',
     PRIMARY KEY (org_id, id)
 );
+
+CREATE TABLE approval_requests (
+    org_id text NOT NULL,
+    id text NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    PRIMARY KEY (org_id, id)
+);

@@ -3,6 +3,7 @@ package project
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -190,7 +191,80 @@ func renderPortInterface(module string, port Port) ([]byte, error) {
 
 	source.WriteString("}\n")
 
+	writeTxInterface(&source, name, port, methods)
+
 	return source.Bytes(), nil
+}
+
+// writeTxInterface renders the narrow interface other groups receive for a
+// port's tx methods, with a concrete wrapper so the full adapter cannot be
+// recovered from it by a type assertion.
+func writeTxInterface(
+	source *bytes.Buffer,
+	name string,
+	port Port,
+	methods []portMethod,
+) {
+	if len(port.TxMethods) == 0 {
+		return
+	}
+
+	var tx []portMethod
+
+	for _, method := range methods {
+		if slices.Contains(port.TxMethods, method.Name) {
+			tx = append(tx, method)
+		}
+	}
+
+	fmt.Fprintf(
+		source,
+		"\n// %[1]sTx is the only part of %[1]s another group's operation "+
+			"sees: methods\n// that join its transaction. It cannot open a "+
+			"transaction or a gate.\ntype %[1]sTx interface {\n",
+		name,
+	)
+
+	for _, method := range tx {
+		fmt.Fprintf(
+			source,
+			"\t%s(context.Context, %s) %s\n",
+			method.Name,
+			strings.Join(method.Params, ", "),
+			resultList(method.Results),
+		)
+	}
+
+	fmt.Fprintf(
+		source,
+		"}\n\ntype %[2]sTx struct{ inner %[1]s }\n\n"+
+			"// New%[1]sTx narrows a port to its transactional methods.\n"+
+			"func New%[1]sTx(inner %[1]s) %[1]sTx {\n"+
+			"\treturn %[2]sTx{inner: inner}\n}\n",
+		name,
+		strings.ToLower(name[:1])+name[1:],
+	)
+
+	for _, method := range tx {
+		var params, args []string
+
+		for index, param := range method.Params {
+			params = append(params, fmt.Sprintf("a%d %s", index, param))
+			args = append(args, fmt.Sprintf("a%d", index))
+		}
+
+		fmt.Fprintf(
+			source,
+			"\nfunc (t %sTx) %s(ctx context.Context, %s) %s {\n"+
+				"\treturn t.inner.%s(ctx, %s)\n}\n",
+			strings.ToLower(name[:1])+name[1:],
+			method.Name,
+			strings.Join(params, ", "),
+			resultList(method.Results),
+			method.Name,
+			strings.Join(args, ", "),
+		)
+	}
 }
 
 func resultList(results []string) string {
@@ -296,6 +370,8 @@ func renderAdapterWiring(module string, adapters []authoredAdapter) []byte {
 			"port.\ntype AuthoredAdapters struct {\n",
 	)
 
+	transactional := false
+
 	for _, adapter := range adapters {
 		for _, port := range adapter.Ports {
 			fmt.Fprintf(
@@ -305,15 +381,44 @@ func renderAdapterWiring(module string, adapters []authoredAdapter) []byte {
 				adapter.Group,
 				portName(port),
 			)
+
+			if len(port.TxMethods) != 0 {
+				transactional = true
+
+				fmt.Fprintf(
+					&source,
+					"\t%sTx %sports.%sTx\n",
+					adapterField(port),
+					adapter.Group,
+					portName(port),
+				)
+			}
 		}
+	}
+
+	if transactional {
+		source.WriteString(
+			"\n\t// DB opens the shared transaction of cross-group writes; " +
+				"only generated\n\t// operation wiring hands it on.\n" +
+				"\tDB scope.DB\n",
+		)
 	}
 
 	source.WriteString(
 		"}\n\n// NewAuthoredAdapters is the only place a scoped DB is created " +
 			"from the pool.\nfunc NewAuthoredAdapters(pool *pgxpool.Pool) " +
-			"AuthoredAdapters {\n\tdb := scope.NewDB(pool)\n\n" +
-			"\treturn AuthoredAdapters{\n",
+			"AuthoredAdapters {\n\tdb := scope.NewDB(pool)\n\n",
 	)
+
+	if transactional {
+		source.WriteString("\tadapters := AuthoredAdapters{\n")
+	} else {
+		source.WriteString("\treturn AuthoredAdapters{\n")
+	}
+
+	if transactional {
+		source.WriteString("\t\tDB: db,\n")
+	}
 
 	for _, adapter := range adapters {
 		for _, port := range adapter.Ports {
@@ -327,7 +432,31 @@ func renderAdapterWiring(module string, adapters []authoredAdapter) []byte {
 		}
 	}
 
-	source.WriteString("\t}\n}\n")
+	source.WriteString("\t}\n")
+
+	if !transactional {
+		source.WriteString("}\n")
+
+		return source.Bytes()
+	}
+
+	for _, adapter := range adapters {
+		for _, port := range adapter.Ports {
+			if len(port.TxMethods) == 0 {
+				continue
+			}
+
+			fmt.Fprintf(
+				&source,
+				"\n\tadapters.%[1]sTx = %[2]sports.New%[3]sTx(adapters.%[1]s)",
+				adapterField(port),
+				adapter.Group,
+				portName(port),
+			)
+		}
+	}
+
+	source.WriteString("\n\n\treturn adapters\n}\n")
 
 	return source.Bytes()
 }

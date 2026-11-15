@@ -10,6 +10,12 @@ name = "Recorder"
 description = "Reads and appends audit events."
 permissions = ["audit.read", "audit.write"]
 
+[[roles]]
+id = "approver"
+name = "Approver"
+description = "Approves requests; audit entries are written on its behalf."
+permissions = ["approvals.write"]
+
 [[tables]]
 group = "access"
 name = "users"
@@ -23,19 +29,42 @@ tenant_column = "org_id"
 append_only = true
 row_security = true
 
+[[tables]]
+group = "approvals"
+name = "approval_requests"
+tenant_column = "org_id"
+row_security = true
+
 [[queries]]
 group = "audit"
 files = ["db/queries/audit/*.sql"]
 tables = ["audit_events"]
+
+[[queries]]
+group = "approvals"
+files = ["db/queries/approvals/*.sql"]
+tables = ["approval_requests"]
 
 [[ports]]
 id = "audit.Events"
 adapter = "audit.EventStore"
 methods = [
   "Append(scope.Execution, models.NewEvent) error",
+  "AppendTx(scope.Tx, models.NewEvent) error",
   "Query(scope.Execution, models.ListRequest) (pagination.Page[models.Entry], error)",
   "Scan(scope.Execution, int64, int64) ([]models.Entry, error)",
 ]
+tx_methods = ["AppendTx"]
+tx_callers = ["approvals.Approve"]
+
+[[ports]]
+id = "approvals.Requests"
+adapter = "approvals.RequestStore"
+methods = ["ApproveTx(scope.Tx, models.ApproveInput) error"]
+
+[[models]]
+id = "approvals.ApproveInput"
+fields = ["id:string"]
 
 [[models]]
 id = "audit.Entry"
@@ -92,6 +121,19 @@ resource = "audit.events"
 resource_policy = "tenant"
 ports = ["audit.Events"]
 input = "audit.NewEvent"
+
+[[operations]]
+group = "approvals"
+action = "Approve"
+permission = "approvals.write"
+write = true
+idempotency = "exempt"
+replay_reason = "Approving is a one-way transition; a repeat conflicts."
+body = "authored"
+resource = "approvals.requests"
+resource_policy = "tenant"
+ports = ["approvals.Requests", "audit.Events"]
+input = "approvals.ApproveInput"
 
 [[endpoints]]
 group = "audit"

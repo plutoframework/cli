@@ -51,6 +51,12 @@ type Port struct {
 	ID      string   `toml:"id"`
 	Adapter string   `toml:"adapter"`
 	Methods []string `toml:"methods"`
+
+	// TxMethods names the methods another group's operation may call inside
+	// its own transaction; each takes scope.Tx. TxCallers names the only
+	// operations allowed to do so (see manifest_txwrite.go).
+	TxMethods []string `toml:"tx_methods,omitempty"`
+	TxCallers []string `toml:"tx_callers,omitempty"`
 }
 
 // Model declares typed fields that generate structs and OpenAPI schemas.
@@ -188,6 +194,10 @@ func validateSeams(m Manifest) error {
 	}
 
 	if err := validateMemberships(m.Memberships, tables); err != nil {
+		return err
+	}
+
+	if err := validateTxCallers(m.Ports, m.Operations); err != nil {
 		return err
 	}
 
@@ -353,6 +363,10 @@ func validatePorts(ports []Port) (map[string]Port, error) {
 			}
 
 			methods[portMethodName(method)] = true
+		}
+
+		if err := validateTxMethods(port); err != nil {
+			return nil, err
 		}
 
 		seen[port.ID] = port
@@ -611,8 +625,8 @@ func (o Operation) validateSeams(
 			return fmt.Errorf("references undeclared port %s", id)
 		}
 
-		if group, _, _ := splitQualified(id); group != o.Group {
-			return fmt.Errorf("port %s belongs to another group", id)
+		if err := o.checkPortGroup(ports[id]); err != nil {
+			return err
 		}
 	}
 

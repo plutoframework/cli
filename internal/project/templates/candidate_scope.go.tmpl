@@ -102,13 +102,21 @@ type DB struct {
 
 // Tx is one open tenant-scoped transaction.
 type Tx struct {
-	scopeTx     pgx.Tx
-	scopeTenant Tenant
+	scopeTx      pgx.Tx
+	scopeTenant  Tenant
+	scopeSubject string
 }
 
 // Tenant is the verified tenant this transaction is bound to.
 func (t Tx) Tenant() Tenant {
 	return t.scopeTenant
+}
+
+// SubjectID is the verified acting subject of the execution that opened this
+// transaction. A method that joins another operation's transaction attributes
+// its writes to it instead of trusting an actor argument.
+func (t Tx) SubjectID() string {
+	return t.scopeSubject
 }
 
 // Read rechecks the live gate, opens a read-only transaction and binds
@@ -149,7 +157,13 @@ func (d DB) within(
 		tenant,
 		e.scopeResource,
 		func(ctx context.Context) error {
-			return d.transact(ctx, mode, Tenant{scopeTenant: tenant}, run)
+			return d.transact(
+				ctx,
+				mode,
+				Tenant{scopeTenant: tenant},
+				e.scopeExecution.SubjectID(),
+				run,
+			)
 		},
 	)
 }
@@ -158,6 +172,7 @@ func (d DB) transact(
 	ctx context.Context,
 	mode pgx.TxAccessMode,
 	tenant Tenant,
+	subject string,
 	run func(context.Context, Tx) error,
 ) (err error) {
 	tx, err := d.scopeDBPool.BeginTx(ctx, pgx.TxOptions{AccessMode: mode})
@@ -179,7 +194,11 @@ func (d DB) transact(
 		return err
 	}
 
-	if err = run(ctx, Tx{scopeTx: tx, scopeTenant: tenant}); err != nil {
+	if err = run(ctx, Tx{
+		scopeTx:      tx,
+		scopeTenant:  tenant,
+		scopeSubject: subject,
+	}); err != nil {
 		return err
 	}
 

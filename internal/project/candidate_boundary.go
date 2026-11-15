@@ -47,6 +47,10 @@ type candidateRules struct {
 	domainFiles        map[string]bool
 	roles              map[string]authoredRole
 	dependencies       []string
+
+	// foreignPorts maps a logic group to the other groups' ports packages
+	// its operations declare for transactional writes.
+	foreignPorts map[string]map[string]bool
 }
 
 // inspectCandidateBoundaries checks the closed, declared candidate source
