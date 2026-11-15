@@ -84,6 +84,11 @@ func Apply(
 	names := make([]string, 0, len(files))
 	backups := map[string][]byte{}
 
+	lock, _, err := ReadLock(root)
+	if err != nil {
+		return nil, err
+	}
+
 	for name := range files {
 		names = append(names, name)
 	}
@@ -107,15 +112,12 @@ func Apply(
 		data, err := os.ReadFile(path)
 		if err == nil {
 			old, owned := previous[name]
-			if !owned ||
-				!bytes.Equal(data, old) &&
-					(!strings.HasSuffix(
-						name,
-						".go",
-					) || !Equivalent(
-						data,
-						old,
-					)) {
+			pristine := owned && (bytes.Equal(data, old) ||
+				strings.HasSuffix(name, ".go") && Equivalent(data, old))
+
+			// A managed file still matching what an older CLI wrote is
+			// pristine. Authored files are never in previous.
+			if !pristine && !(owned && lock.Matches(name, data)) {
 				return nil, fmt.Errorf(
 					"refusing to overwrite %s (existing or modified)",
 					path,
@@ -161,6 +163,10 @@ func Apply(
 		}
 
 		written = append(written, name)
+	}
+
+	if err := recordLock(root, files); err != nil {
+		return nil, err
 	}
 
 	return names, nil

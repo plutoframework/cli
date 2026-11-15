@@ -118,8 +118,12 @@ pluto generate             # needs a clean Git tree; no hooks run
 ```
 
 A managed file is overwritten only while it is pristine relative to a render the
-CLI knows: the current one, or an earlier generator's render recorded in the
-migrate history (drift caused by a CLI upgrade). A file that matches none was
+CLI knows: the current one, what the CLI itself last wrote (recorded as a digest
+in `.pluto/managed.lock`, which every CLI command that writes managed files
+updates; commit it), or an earlier generator's render recorded in the migrate
+history. A template change in a new CLI is therefore an upgrade, never a "hand
+edit", with no per-release snapshot. `pluto vet` reports such a file as stale
+("run pluto generate"). A file that matches none was
 edited by hand; `generate` prints `file:line` with the first differing line,
 writes nothing and exits nonzero. Move the change into pluto.toml or an
 authored file, restore the managed file and rerun. Applied SQL migrations are
@@ -127,6 +131,12 @@ never rewritten. Required migrations are proposed with framework numbering: the
 forced-RLS migration of each new `[[tables]]` entry and the `[database]
 runtime_role` migration; missing authored adapter stubs are created once. After
 writing, `generate` runs OpenAPI generation and `pluto fmt`.
+
+An application scaffolded before the lock existed has none: run
+`pluto generate --adopt --dry-run`, review the diff, then `pluto generate
+--adopt`. Adopt overwrites every managed file with the current render, hand
+edits included (Git is the safety net), records the lock, and refuses once a
+lock exists.
 
 ## Migrating existing applications
 

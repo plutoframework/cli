@@ -180,6 +180,11 @@ func Contracts(root string, m Manifest) error {
 		return err
 	}
 
+	lock, locked, err := ReadLock(root)
+	if err != nil {
+		return err
+	}
+
 	names := []string{}
 	for path := range managed {
 		names = append(names, path)
@@ -199,11 +204,7 @@ func Contracts(root string, m Manifest) error {
 		}
 
 		if !Equivalent(current, managed[path]) {
-			return fmt.Errorf(
-				"generated contract differs: %s; restore generated content "+
-					"or intentionally migrate metadata",
-				path,
-			)
+			return contractDiffers(path, current, lock, locked)
 		}
 	}
 
@@ -438,4 +439,36 @@ func Contracts(root string, m Manifest) error {
 	}
 
 	return nil
+}
+
+// contractDiffers explains a managed file that is not the current render. A
+// file that still matches the lock was written by an older pluto and only
+// needs regeneration; anything else is a hand edit.
+func contractDiffers(
+	path string,
+	current []byte,
+	lock Lock,
+	locked bool,
+) error {
+	switch {
+	case lock.Matches(path, current):
+		return fmt.Errorf(
+			"generated file is stale: %s was written by an older pluto "+
+				"and is unedited; run pluto generate",
+			path,
+		)
+	case !locked:
+		return fmt.Errorf(
+			"generated contract differs: %s; restore generated content, "+
+				"or if an older pluto rendered it run pluto generate "+
+				"--adopt --dry-run, review, then --adopt",
+			path,
+		)
+	default:
+		return fmt.Errorf(
+			"generated contract differs: %s; restore generated content "+
+				"or intentionally migrate metadata",
+			path,
+		)
+	}
 }
