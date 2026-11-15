@@ -77,6 +77,14 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 		internalImports = append(internalImports, "storage/machineauth")
 	}
 
+	if m.AuthEventsOn() && m.HasMachine() {
+		fmt.Fprintf(
+			&source,
+			"\tmachineports %s\n",
+			q(m.Project.Module+"/internal/ports/machineauth"),
+		)
+	}
+
 	if m.AuthEventsOn() {
 		operation, _ := m.Operation(m.Auth.Events.Operation)
 		fmt.Fprintf(
@@ -428,6 +436,7 @@ func NewCandidateRuntime(
 		if operation.Scope != "" {
 			if err := writeSystemOperation(
 				&source,
+				m,
 				operation,
 				index,
 			); err != nil {

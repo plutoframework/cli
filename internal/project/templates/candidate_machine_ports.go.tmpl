@@ -141,5 +141,12 @@ type Verifier interface {
 
 // Enroller redeems single-use enrollment tokens.
 type Enroller interface {
-	Enroll(context.Context, string, string, string) (string, error)
+	// Enroll redeems the token and returns the machine it activated, as a
+	// Verified whose key is the one just bound.
+	Enroll(context.Context, string, string, string) (Verified, error)
+
+	// Withdraw revokes a machine just enrolled, in its own tenant
+	// transaction. It undoes an enrollment whose audit record failed under
+	// a closed policy.
+	Withdraw(context.Context, Verified) error
 }

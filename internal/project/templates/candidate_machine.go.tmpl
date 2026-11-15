@@ -465,21 +465,23 @@ func NewEnroller(pool *pgxpool.Pool) *Enroller {
 func (e *Enroller) Enroll(
 	ctx context.Context,
 	principal, token, publicKey string,
-) (string, error) {
+) (machineports.Verified, error) {
+	var none machineports.Verified
+
 	cfg, ok := principals[principal]
 	if !ok || ctx == nil || e == nil || e.pool == nil ||
 		!machineports.TokenPattern.MatchString(token) {
-		return "", machineports.ErrInvalidEnrollment
+		return none, machineports.ErrInvalidEnrollment
 	}
 
 	key, err := base64.RawURLEncoding.Strict().DecodeString(publicKey)
 	if err != nil || len(key) != ed25519.PublicKeySize {
-		return "", machineports.ErrInvalidEnrollment
+		return none, machineports.ErrInvalidEnrollment
 	}
 
 	tx, err := e.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return "", err
+		return none, err
 	}
 
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
@@ -487,7 +489,7 @@ func (e *Enroller) Enroll(
 	hash := hashToken(token)
 
 	if _, err := tx.Exec(ctx, tokenSetting, hash); err != nil {
-		return "", err
+		return none, err
 	}
 
 	var tenant, machineID string
@@ -500,26 +502,59 @@ func (e *Enroller) Enroll(
 		principal,
 	).Scan(&tenant, &machineID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", machineports.ErrInvalidEnrollment
+		return none, machineports.ErrInvalidEnrollment
 	}
 
 	if err != nil {
-		return "", err
+		return none, err
 	}
 
 	if _, err := tx.Exec(ctx, tenantSetting, tenant); err != nil {
-		return "", err
+		return none, err
 	}
 
 	if err := redeem(ctx, tx, cfg, hash, principal, machineID, publicKey); err != nil {
-		return "", err
+		return none, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return "", err
+		return none, err
 	}
 
-	return machineID, nil
+	return machineports.NewVerified(principal, machineID, tenant, publicKey), nil
+}
+
+// Withdraw revokes a machine that just enrolled.
+func (e *Enroller) Withdraw(
+	ctx context.Context,
+	verified machineports.Verified,
+) error {
+	if ctx == nil || e == nil || e.pool == nil || verified.TenantID() == "" {
+		return machineports.ErrInvalidMachine
+	}
+
+	tx, err := e.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if _, err := tx.Exec(ctx, tenantSetting, verified.TenantID()); err != nil {
+		return err
+	}
+
+	if err := RevokeMachine(
+		ctx,
+		tx,
+		verified.TenantID(),
+		verified.Principal(),
+		verified.MachineID(),
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 // redeem marks the token used and activates the machine. Both must change

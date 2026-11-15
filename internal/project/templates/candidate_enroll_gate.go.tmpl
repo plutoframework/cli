@@ -14,6 +14,13 @@ type {{.Action}}Limiter interface {
 	Allow(context.Context, string) error
 }
 
+{{- if .Manifest.AuthEventsOn}}
+
+// {{.Action}}Audit records the enrollment through the declared
+// [auth.events] operation, attributed to the machine and bound to its tenant.
+type {{.Action}}Audit func(context.Context, machineauth.Verified) error
+{{- end}}
+
 type {{.Action}}Boundary interface {
 	sealed{{.Action}}()
 	Execute(
@@ -29,15 +36,24 @@ type {{.Action}}Boundary interface {
 type {{.Action}} struct {
 	{{lowerFirst .Action}}Enroller machineauth.Enroller
 	{{lowerFirst .Action}}Limiter  {{.Action}}Limiter
+{{- if .Manifest.AuthEventsOn}}
+	{{lowerFirst .Action}}Audit    {{.Action}}Audit
+{{- end}}
 }
 
 func New{{.Action}}(
 	enroller machineauth.Enroller,
 	limiter {{.Action}}Limiter,
+{{- if .Manifest.AuthEventsOn}}
+	audit {{.Action}}Audit,
+{{- end}}
 ) *{{.Action}} {
 	return &{{.Action}}{
 		{{lowerFirst .Action}}Enroller: enroller,
 		{{lowerFirst .Action}}Limiter:  limiter,
+{{- if .Manifest.AuthEventsOn}}
+		{{lowerFirst .Action}}Audit:    audit,
+{{- end}}
 	}
 }
 
@@ -64,7 +80,7 @@ func (operation *{{.Action}}) Execute(
 		return output, err
 	}
 
-	machineID, err := operation.{{lowerFirst .Action}}Enroller.Enroll(
+	verified, err := operation.{{lowerFirst .Action}}Enroller.Enroll(
 		ctx,
 		{{q .Authored.Principal}},
 		input.Token,
@@ -72,8 +88,29 @@ func (operation *{{.Action}}) Execute(
 	if err != nil {
 		return output, err
 	}
+{{- if .Manifest.AuthEventsOn}}
 
-	output.MachineID = machineID
+	// The record is attributed to the machine and bound to the tenant of the
+	// token row. Under a closed policy a failed record withdraws the
+	// enrollment, so no machine is active without its audit row.
+	if operation.{{lowerFirst .Action}}Audit == nil {
+		_ = operation.{{lowerFirst .Action}}Enroller.Withdraw(ctx, verified)
+
+		return output, commonDomain.ErrUnauthenticated
+	}
+
+	if err := operation.{{lowerFirst .Action}}Audit(ctx, verified); err != nil {
+{{- if .Manifest.Auth.Events.Closed}}
+		_ = operation.{{lowerFirst .Action}}Enroller.Withdraw(
+			context.WithoutCancel(ctx),
+			verified)
+
+		return output, err
+{{- end}}
+	}
+{{- end}}
+
+	output.MachineID = verified.MachineID()
 
 	return output, nil
 }

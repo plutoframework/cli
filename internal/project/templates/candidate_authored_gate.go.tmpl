@@ -7,6 +7,9 @@ import (
 	commonDomain "{{.Module}}/internal/domain"
 	logic "{{.Module}}/internal/logic/{{.Group}}"
 	models "{{.Module}}/internal/models/{{.Group}}"
+{{- if .Authored.MachineEvent}}
+	machineauth "{{.Module}}/internal/ports/machineauth"
+{{- end}}
 {{- if .Authored.Pagination}}
 	"github.com/plutoframework/pluto-core/pagination"
 {{- end}}
@@ -27,6 +30,12 @@ type {{.Action}}Boundary interface {
 		context.Context,
 		access.Caller,
 		models.{{.Action}}Request) ({{.Authored.Returns}})
+{{- if .Authored.MachineEvent}}
+	ExecuteMachine(
+		context.Context,
+		machineauth.Verified,
+		models.{{.Action}}Request) ({{.Authored.Returns}})
+{{- end}}
 }
 
 // {{.Action}}Intent is normalized once and bound to the exact operation
@@ -195,3 +204,30 @@ func (operation *{{.Action}}) Execute(
 
 	return operation.ExecutePrepared(ctx, intent)
 }
+{{- if .Authored.MachineEvent}}
+
+// ExecuteMachine runs the body for a machine just enrolled: the execution is
+// bound to the machine's own tenant and its subject is the machine id. Only
+// generated enrollment calls it, and every data access of the body rechecks
+// that the machine is active.
+func (operation *{{.Action}}) ExecuteMachine(
+	ctx context.Context,
+	verified machineauth.Verified,
+	input models.{{.Action}}Request,
+) ({{.Authored.Returns}}) {
+{{- if .Authored.Result}}
+	var zero {{.Authored.Result}}
+
+{{end}}
+	if ctx == nil || operation == nil || verified.MachineID() == "" ||
+		verified.TenantID() == "" {
+{{- if .Authored.Result}}
+		return zero, commonDomain.ErrUnauthenticated
+{{- else}}
+		return commonDomain.ErrUnauthenticated
+{{- end}}
+	}
+
+	return operation.executeMachine(ctx, verified, input)
+}
+{{- end}}

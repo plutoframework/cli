@@ -72,6 +72,10 @@ type authoredOp struct {
 	StreamIn  string
 	StreamOut string
 
+	// MachineEvent adds ExecuteMachine to the declared [auth.events]
+	// operation so a machine enrollment can be recorded in its tenant.
+	MachineEvent bool
+
 	// EachTenant marks a scope = "each_tenant" body: it has no request, and
 	// receives the scope.Execution of one enumerated tenant.
 	EachTenant bool
@@ -124,6 +128,8 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 		Resource:  operation.Resource,
 		Provision: operation.Scope == ScopeProvision,
 		Principal: operation.MachinePrincipal(),
+
+		MachineEvent: m.HasMachine() && m.IsAuthEventOperation(operation),
 	}
 
 	if operation.Scope == ScopeEachTenant {

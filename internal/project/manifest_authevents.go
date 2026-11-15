@@ -12,6 +12,10 @@ const (
 	AuthEventLogin     = "login"
 	AuthEventLogout    = "logout"
 	AuthEventOIDCLogin = "oidc_login"
+
+	// AuthEventMachineEnroll is recorded when a machine redeems its
+	// enrollment token, attributed to the machine in its own tenant.
+	AuthEventMachineEnroll = "machine_enroll"
 )
 
 // Auth event failure policies.
@@ -266,4 +270,21 @@ func validateAuthEventRoles(m Manifest, operation Operation) error {
 	}
 
 	return nil
+}
+
+// AuthEventOperation returns the declared event operation.
+func (m Manifest) AuthEventOperation() (Operation, bool) {
+	if !m.AuthEventsOn() {
+		return Operation{}, false
+	}
+
+	return m.Operation(m.Auth.Events.Operation)
+}
+
+// IsAuthEventOperation reports the operation the generated hooks run; with
+// machine principals declared it also runs for a machine enrollment.
+func (m Manifest) IsAuthEventOperation(operation Operation) bool {
+	event, ok := m.AuthEventOperation()
+
+	return ok && event.ID() == operation.ID()
 }

@@ -11,6 +11,7 @@ import (
 // or membership exists at that point.
 func writeSystemOperation(
 	source *bytes.Buffer,
+	m Manifest,
 	operation Operation,
 	index int,
 ) error {
@@ -39,18 +40,37 @@ func writeSystemOperation(
 	)
 
 	if operation.Scope == ScopeEnroll {
+		audit := ""
+
+		if event, ok := m.AuthEventOperation(); ok {
+			audit = fmt.Sprintf(
+				`,
+		func(ctx context.Context, verified machineports.Verified) error {
+			return runtime.Operations.%[1]s.ExecuteMachine(
+				ctx,
+				verified,
+				authEventModels.%[2]sRequest{Event: %[3]q},
+			)
+		}`,
+				symbol(event.Endpoint()),
+				event.Action,
+				AuthEventMachineEnroll,
+			)
+		}
+
 		fmt.Fprintf(
 			source,
 			`
 	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
 		machineEnroller,
-		limiter%[4]s,
+		limiter%[4]s%[5]s,
 	)
 `,
 			symbol(operation.Endpoint()),
 			operation.Group,
 			operation.Action,
 			suffix,
+			audit,
 		)
 
 		return nil
