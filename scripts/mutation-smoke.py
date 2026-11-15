@@ -302,7 +302,7 @@ mutations = [
         "authored logic reachable only from its workflow",
         "internal/project/candidate_authored_rules.go",
         "file.directory != rolesLogicDir+role.group {",
-        "false {",
+        "file.directory != rolesLogicDir+role.group && role.group == \"\" {",
         "./internal/project#TestAuthoredRoleViolations",
     ),
     (
