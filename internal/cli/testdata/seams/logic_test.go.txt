@@ -249,6 +249,10 @@ func TestWatchRejectsMalformedClientMessages(t *testing.T) {
 			ctx, h, "alice", "north", "audit.events",
 			func(ctx context.Context, peer scopetest.Peer[models.Cursor, models.Tick]) {
 				_ = peer.SendRaw(ctx, []byte(payload))
+
+				// Stay connected until the server ends the stream, so
+				// closing cannot race the rejection.
+				_, _ = peer.Receive(ctx)
 			},
 			func(
 				ctx context.Context,
