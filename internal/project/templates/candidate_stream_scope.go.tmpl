@@ -190,17 +190,9 @@ func (s Stream[In, Out]) Receive(ctx context.Context) (In, error) {
 		return message, ErrNoInbound
 	}
 
-	var data []byte
-
-	select {
-	case <-ctx.Done():
+	data, open := state.next(ctx)
+	if !open {
 		return message, ErrStreamClosed
-	case received, open := <-state.scopeStreamInbound:
-		if !open {
-			return message, ErrStreamClosed
-		}
-
-		data = received
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -219,6 +211,23 @@ func (s Stream[In, Out]) Receive(ctx context.Context) (In, error) {
 	}
 
 	return message, nil
+}
+
+// next returns the next queued client message. Messages that arrived before
+// the stream ended are delivered first; only an empty queue observes the end.
+func (state *streamState) next(ctx context.Context) ([]byte, bool) {
+	select {
+	case data, open := <-state.scopeStreamInbound:
+		return data, open
+	default:
+	}
+
+	select {
+	case data, open := <-state.scopeStreamInbound:
+		return data, open
+	case <-ctx.Done():
+		return nil, false
+	}
 }
 
 // terminate records the first failure, cancels the stream context and sends
@@ -502,6 +511,12 @@ func (p *MemoryPeer) Close() {
 func (memory) limit(int64) {}
 
 func (m memory) read(ctx context.Context) ([]byte, error) {
+	select {
+	case message := <-m.scopeMemoryPeer.scopePeerToServer:
+		return message, nil
+	default:
+	}
+
 	select {
 	case message := <-m.scopeMemoryPeer.scopePeerToServer:
 		return message, nil

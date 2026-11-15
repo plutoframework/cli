@@ -67,6 +67,13 @@ Authored seams (candidate): declare, then write only authored role files.
 - `[memberships]` binds roles to an app table; `active_column`/`active_values`
   deny suspended subjects. `[database] runtime_role` names the least-privilege
   role; a migration is proposed and startup refuses owner/BYPASSRLS roles.
+- Streams: `response = "stream"` (`item` = server message model, optional
+  `input` = client message model) exposed by one `[[endpoints]]` with
+  `transport = "websocket"`. The body is `func(ctx, scope.Execution, ports,
+  request, scope.Stream[In, Out]) error` using only `Send`/`Receive`; generated
+  code owns the upgrade, Origin check, limits (`[operations.stream]`), ping,
+  idle timeout, periodic gate recheck and close codes. Test with
+  `scopetest.RunStream`; never import a websocket library.
 - Declaration changes: edit pluto.toml (or pluto add blueprint), then run
   `pluto generate`. Full reference: the CANDIDATE.md in the Pluto CLI docs.
 

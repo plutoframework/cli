@@ -15,6 +15,7 @@ import (
 	auth "github.com/plutoframework/pluto-auth"
 
 	"github.com/coder/websocket"
+	"github.com/go-chi/chi/v5"
 )
 
 type {{.Action}}Operations = operations.{{.Action}}Boundary
@@ -28,38 +29,62 @@ var {{.Action}}Origins = []string{
 {{- end}}
 }
 
+// {{.Action}}Router lets clients that cannot set headers on a WebSocket
+// (browsers) select the tenant with a tenant query parameter. It runs before
+// the registrar, so the selection is verified by the same authentication and
+// gate as the X-Tenant-ID header, which wins when both are present.
+type {{.Action}}Router struct {
+	chi.Router
+}
+
+func (router {{.Action}}Router) Method(
+	method, pattern string,
+	handler http.Handler,
+) {
+	router.Router.Method(
+		method,
+		pattern,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query()
+
+			if tenant := query.Get("tenant"); tenant != "" &&
+				r.Header.Get("X-Tenant-ID") == "" {
+				r.Header.Set("X-Tenant-ID", tenant)
+			}
+
+			query.Del("tenant")
+
+			r.URL.RawQuery = query.Encode()
+
+			handler.ServeHTTP(w, r)
+		}))
+}
+
 // Register{{.Action}} serves the WebSocket upgrade of {{.Group}}.{{.Action}}.
 // Authentication and the gate run before the upgrade, so a denied caller
 // receives an ordinary HTTP error and never a connection. The tenant is
-// selected by the X-Tenant-ID header or the tenant query parameter and is
-// verified by the gate like any other request.
+// selected by the X-Tenant-ID header or the tenant query parameter.
 func Register{{.Action}}(
 	reg transport.Registrar,
 	operation {{.Action}}Operations,
 	bodyLimit int64,
 ) {
 	_ = bodyLimit
+	reg.Router = {{.Action}}Router{Router: reg.Router}
 
 	reg.Handle(
 		paths.{{.Symbol}},
 		func(w http.ResponseWriter, r *http.Request) {
-			query := r.URL.Query()
-
-			tenant := r.Header.Get("X-Tenant-ID")
-			if tenant == "" {
-				tenant = query.Get("tenant")
-			}
-
-			query.Del("tenant")
-
-			caller, err := access.CallerFromHTTP(r.Context(), tenant)
+			caller, err := access.CallerFromHTTP(
+				r.Context(),
+				r.Header.Get("X-Tenant-ID"))
 			if err != nil {
 				transport.OperationError(w, r, err)
 
 				return
 			}
 
-			input, err := models.Parse{{.Action}}Query(query)
+			input, err := models.Parse{{.Action}}Query(r.URL.Query())
 			if err != nil {
 				var rejected *models.QueryError
 				if errors.As(err, &rejected) {

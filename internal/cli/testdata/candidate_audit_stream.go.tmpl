@@ -1,0 +1,374 @@
+package app_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+
+	"github.com/coder/websocket"
+	"github.com/plutoframework/pluto-auth/httpauth"
+)
+
+type auditTick struct {
+	Seq  int64  `json:"seq"`
+	Type string `json:"type"`
+}
+
+type streamFixture struct {
+	*auditFixture
+	server *httptest.Server
+}
+
+func newStreamFixture(t *testing.T) *streamFixture {
+	t.Helper()
+
+	f := auditSetup(t)
+	server := httptest.NewServer(f.app.Handler())
+	t.Cleanup(server.Close)
+
+	return &streamFixture{auditFixture: f, server: server}
+}
+
+// dial opens the stream as a service client would: session credential and
+// tenant in headers, the trusted origin the session transport expects.
+func (f *streamFixture) dial(
+	t *testing.T,
+	cookie, tenant, query, origin string,
+) (*websocket.Conn, *http.Response, error) {
+	t.Helper()
+
+	header := http.Header{}
+	if origin != "" {
+		header.Set("Origin", origin)
+	}
+
+	if tenant != "" {
+		header.Set("X-Tenant-ID", tenant)
+	}
+
+	if cookie != "" {
+		header.Set(
+			"Cookie",
+			(&http.Cookie{Name: httpauth.CookieName, Value: cookie}).String(),
+		)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	url := "ws" + strings.TrimPrefix(f.server.URL, "http") + "/api/audit/watch"
+	if query != "" {
+		url += "?" + query
+	}
+
+	return websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: header})
+}
+
+func (f *streamFixture) open(
+	t *testing.T,
+	user auditUser,
+	tenant, query string,
+) *websocket.Conn {
+	t.Helper()
+
+	conn, response, err := f.dial(t, user.session, tenant, query, auditOrigin)
+	if err != nil {
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+		}
+
+		t.Fatalf("dial %s: %v (status %d)", tenant, err, status)
+	}
+
+	t.Cleanup(func() {
+		_ = conn.CloseNow()
+	})
+
+	return conn
+}
+
+func readTick(t *testing.T, conn *websocket.Conn) auditTick {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	kind, data, err := conn.Read(ctx)
+	if err != nil || kind != websocket.MessageText {
+		t.Fatalf("read tick: %v %v", kind, err)
+	}
+
+	var tick auditTick
+	if err := json.Unmarshal(data, &tick); err != nil {
+		t.Fatalf("tick %s: %v", data, err)
+	}
+
+	return tick
+}
+
+// expectClose reads until the server closes and returns the close code, or -1
+// when the connection ended without a close frame.
+func expectClose(t *testing.T, conn *websocket.Conn, within time.Duration) int {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), within)
+	defer cancel()
+
+	for {
+		if _, _, err := conn.Read(ctx); err != nil {
+			if ctx.Err() != nil {
+				t.Fatal("connection was still open")
+			}
+
+			return int(websocket.CloseStatus(err))
+		}
+	}
+}
+
+// The stream replays the verified tenant's events, resumes from a client
+// cursor and never shows another tenant's rows, selecting the tenant by header
+// or query parameter.
+func TestAuditStreamReplayAndResume(t *testing.T) {
+	f := newStreamFixture(t)
+
+	alice := f.enroll(t, "alice@example.test")
+	f.member(t, alice, "north", "recorder")
+
+	bob := f.enroll(t, "bob@example.test")
+	f.member(t, bob, "south", "recorder")
+
+	for _, kind := range []string{"a", "b", "c"} {
+		if err := f.appendEvent(alice, "north", kind, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := f.appendEvent(bob, "south", "secret", `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	conn := f.open(t, alice, "north", "after=0")
+
+	var last int64
+
+	for _, want := range []string{"a", "b", "c"} {
+		tick := readTick(t, conn)
+		if tick.Type != want || tick.Seq <= last {
+			t.Fatalf("replay %q got %+v after %d", want, tick, last)
+		}
+
+		last = tick.Seq
+	}
+
+	if err := f.appendEvent(alice, "north", "d", `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	cursor, _ := json.Marshal(map[string]int64{"seq": last})
+	if err := conn.Write(
+		t.Context(), websocket.MessageText, cursor,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if tick := readTick(t, conn); tick.Type != "d" {
+		t.Fatalf("resume got %+v", tick)
+	}
+
+	// The tenant in the query parameter is verified like the header.
+	south := f.open(t, bob, "", "tenant=south&after=0")
+	if tick := readTick(t, south); tick.Type != "secret" {
+		t.Fatalf("south replay got %+v", tick)
+	}
+
+	// Closing the client ends the server body cleanly and frees its slot.
+	if err := conn.Close(websocket.StatusNormalClosure, "done"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every denial happens before the upgrade as an ordinary HTTP response: no
+// credential, a non-member, a foreign origin, bad filters and no free slot.
+func TestAuditStreamDeniedBeforeUpgrade(t *testing.T) {
+	f := newStreamFixture(t)
+
+	alice := f.enroll(t, "alice@example.test")
+	f.member(t, alice, "north", "recorder")
+
+	type denial struct {
+		name, cookie, tenant, query, origin string
+		want                                int
+	}
+
+	evil := "http://evil.example"
+
+	cases := []denial{
+		{
+			name: "no credential", tenant: "north", origin: auditOrigin,
+			want: 401,
+		},
+		{
+			name: "non-member tenant", cookie: alice.session,
+			tenant: "south", origin: auditOrigin,
+		},
+		{
+			name: "foreign origin", cookie: alice.session,
+			tenant: "north", origin: evil, want: 403,
+		},
+		{
+			name: "unknown filter", cookie: alice.session, tenant: "north",
+			query: "bogus=1", origin: auditOrigin, want: 400,
+		},
+		{
+			name: "bad filter", cookie: alice.session, tenant: "north",
+			query: "after=-1", origin: auditOrigin, want: 400,
+		},
+	}
+
+	for _, tc := range cases {
+		conn, response, err := f.dial(
+			t, tc.cookie, tc.tenant, tc.query, tc.origin,
+		)
+		if err == nil {
+			_ = conn.CloseNow()
+
+			t.Fatalf("%s: upgrade must be refused", tc.name)
+		}
+
+		if response == nil {
+			t.Fatalf("%s: no HTTP response: %v", tc.name, err)
+		}
+
+		status := response.StatusCode
+		denied := tc.want == 0 && (status == 401 || status == 403)
+
+		if status != tc.want && !denied {
+			t.Fatalf("%s: status %d want %d", tc.name, status, tc.want)
+		}
+	}
+
+	// max_connections = 3: the fourth open stream is refused with 503.
+	for range 3 {
+		f.open(t, alice, "north", "")
+	}
+
+	conn, response, err := f.dial(t, alice.session, "north", "", auditOrigin)
+	if err == nil {
+		_ = conn.CloseNow()
+
+		t.Fatal("capacity must refuse the upgrade")
+	}
+
+	if response == nil || response.StatusCode != 503 {
+		t.Fatalf("capacity: %v %+v", err, response)
+	}
+}
+
+// The gate is rechecked while the stream lives: suspending the member closes
+// it with a policy violation, and the next dial is denied.
+func TestAuditStreamClosesOnRevocation(t *testing.T) {
+	f := newStreamFixture(t)
+
+	alice := f.enroll(t, "alice@example.test")
+	f.member(t, alice, "north", "recorder")
+
+	conn := f.open(t, alice, "north", "")
+
+	if _, err := f.admin.Exec(
+		t.Context(),
+		`UPDATE users SET state = 'suspended' WHERE org_id = $1 AND id = $2`,
+		"north", alice.id,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := expectClose(t, conn, 10*time.Second); code != 1008 {
+		t.Fatalf("revoked stream closed with %d, want 1008", code)
+	}
+
+	if dialed, response, err := f.dial(
+		t, alice.session, "north", "", auditOrigin,
+	); err == nil {
+		_ = dialed.CloseNow()
+
+		t.Fatal("suspended member opened a stream")
+	} else if response == nil || response.StatusCode < 400 {
+		t.Fatalf("suspended dial: %v", err)
+	}
+}
+
+// Size, shape and silence are bounded by the generated runtime, not the body.
+func TestAuditStreamLimits(t *testing.T) {
+	f := newStreamFixture(t)
+
+	alice := f.enroll(t, "alice@example.test")
+	f.member(t, alice, "north", "recorder")
+
+	send := func(kind websocket.MessageType, payload string) *websocket.Conn {
+		t.Helper()
+
+		conn := f.open(t, alice, "north", "")
+		if err := conn.Write(
+			t.Context(), kind, []byte(payload),
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		return conn
+	}
+
+	for _, tc := range []struct {
+		name    string
+		kind    websocket.MessageType
+		payload string
+		want    int
+	}{
+		{"oversized", websocket.MessageText,
+			`{"seq":1,"pad":"` + strings.Repeat("x", 2048) + `"}`, 1009},
+		{"unknown field", websocket.MessageText, `{"seq":1,"extra":2}`, 1007},
+		{"not an object", websocket.MessageText, `[1]`, 1007},
+		{"trailing data", websocket.MessageText, `{"seq":1} {"seq":2}`, 1007},
+		{"binary", websocket.MessageBinary, `{"seq":1}`, 1003},
+	} {
+		code := expectClose(t, send(tc.kind, tc.payload), 10*time.Second)
+
+		// An oversized frame can be answered by a reset that discards the
+		// close frame; the connection must still be gone.
+		if code != tc.want && !(tc.name == "oversized" && code == -1) {
+			t.Fatalf("%s: closed with %d, want %d", tc.name, code, tc.want)
+		}
+	}
+
+	// A peer that never answers pings is dropped by the idle timeout (ping 1s,
+	// idle 5s). It does not read, so no pong is ever sent; the close frame
+	// may be lost to the reset that follows an unanswered close handshake.
+	idle := f.open(t, alice, "north", "")
+
+	time.Sleep(8 * time.Second)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	for {
+		_, _, err := idle.Read(ctx)
+		if err == nil {
+			continue
+		}
+
+		if code := websocket.CloseStatus(err); code != -1 && code != 1001 {
+			t.Fatalf("idle stream closed with %d, want 1001", code)
+		}
+
+		if ctx.Err() != nil {
+			t.Fatal("idle stream was still open after the idle timeout")
+		}
+
+		break
+	}
+}

@@ -314,7 +314,10 @@ func EnsureStreamModule(m Manifest, goMod, goSum []byte) ([]byte, []byte) {
 		[]byte("\n\nrequire "+websocketModule+" "+websocketVersion+"\n")...,
 	)
 
-	if !strings.Contains(string(goSum), websocketModule+" "+websocketVersion+" ") {
+	if !strings.Contains(
+		string(goSum),
+		websocketModule+" "+websocketVersion+" ",
+	) {
 		goSum = append(goSum, []byte(websocketGoSum)...)
 	}
 

@@ -259,6 +259,25 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		"TestSystemRowLevelBoundaries",
 	)
 
+	stream, err := os.ReadFile("testdata/candidate_audit_stream.go.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(t, root, "internal/app/audit_stream_test.go", string(stream))
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestAuditStream", "./internal/app",
+	)
+	assertCandidateCaseNames(
+		t, output,
+		"TestAuditStreamReplayAndResume",
+		"TestAuditStreamDeniedBeforeUpgrade",
+		"TestAuditStreamClosesOnRevocation",
+		"TestAuditStreamLimits",
+	)
+
 	assertSeamNegatives(t, root)
 	assertSystemNegatives(
 		t, root, "example.test/auditapp/", migrationPath(t, root, "rls_orgs"),
@@ -511,6 +530,58 @@ func assertSeamNegatives(t *testing.T, root string) {
 			mutate: appendTo(
 				"-- name: Leak :many\nSELECT id FROM users LIMIT 1;\n",
 			),
+		},
+		{
+			name:  "websocket library in logic",
+			check: "ARCH610",
+			path:  "internal/logic/audit/socket.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport _ \"github.com/coder/websocket\"\n"
+			},
+		},
+		{
+			name:  "stream runtime outside its workflow",
+			check: "ARCH603",
+			path:  "internal/logic/audit/run.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport \"" + module +
+					"internal/scope\"\n\nvar _ = scope.RunStream[int, int]\n"
+			},
+		},
+		{
+			name:  "wire built outside its handler",
+			check: "ARCH603",
+			path:  "internal/logic/audit/wire.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport \"" + module +
+					"internal/scope\"\n\nvar _ = scope.NewWire\n"
+			},
+		},
+		{
+			name:  "stream runtime edited by hand",
+			check: "ARCH202",
+			path:  "internal/scope/stream_gen.go",
+			mutate: func(original string) string {
+				return strings.Replace(
+					original,
+					"s.scopeSocketConn.SetReadLimit(bytes)",
+					"s.scopeSocketConn.SetReadLimit(-1)",
+					1,
+				)
+			},
+		},
+		{
+			name:  "stream handler edited by hand",
+			check: "ARCH202",
+			path:  "internal/handlers/audit/watch.go",
+			mutate: func(original string) string {
+				return strings.Replace(
+					original,
+					"operation.Prepare(",
+					"operation.Skip(",
+					1,
+				)
+			},
 		},
 		{
 			name:  "missing row-level security migration",

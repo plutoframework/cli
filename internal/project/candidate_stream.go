@@ -48,7 +48,12 @@ func streamPathSpec(
 
 	var out strings.Builder
 
-	fmt.Fprintf(&out, "Stream:&StreamSpec{\nServer:%s.%s{},\n", operation.Group, item)
+	fmt.Fprintf(
+		&out,
+		"Stream:&StreamSpec{\nServer:%s.%s{},\n",
+		operation.Group,
+		item,
+	)
 
 	if operation.Input != "" {
 		_, input, _ := splitQualified(operation.Input)
