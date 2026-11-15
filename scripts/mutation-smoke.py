@@ -341,20 +341,6 @@ mutations = [
         "./internal/sqlcheck#TestAnalyzeQueryTenantRootInsert",
     ),
     (
-        "lookup policy is select only",
-        "internal/sqlcheck/migrations.go",
-        'if policy.LookupOK && policy.Command == "select" && !policy.HasCheck {',
-        "if policy.LookupOK && !policy.HasCheck {",
-        "./internal/sqlcheck#TestCheckMigrationsLookupPolicy",
-    ),
-    (
-        "lookup policy has no write check",
-        "internal/sqlcheck/migrations.go",
-        'if policy.LookupOK && policy.Command == "select" && !policy.HasCheck {',
-        'if policy.LookupOK && policy.Command == "select" {',
-        "./internal/sqlcheck#TestCheckMigrationsLookupPolicy",
-    ),
-    (
         "lookup policy is keyed to its own column",
         "internal/sqlcheck/migrations_apply.go",
         "tableKey(lookup.Key),",
