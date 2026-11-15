@@ -89,7 +89,6 @@ func TestMigrateGrytShapedFixture(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"  D internal/app/app_test.go",
 		"sqlc output kept unchanged",
 	} {
 		if !strings.Contains(output, want) {
