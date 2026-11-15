@@ -180,7 +180,6 @@ func TestAuthoredSQLSkippedWithoutDeclarations(t *testing.T) {
 	if found := inspectAuthoredSQL(t.TempDir(), metadata); len(found) != 0 {
 		t.Fatalf("undeclared project checked: %+v", found)
 	}
-
 }
 
 func rewrite(t *testing.T, root, path, old, replacement string) {

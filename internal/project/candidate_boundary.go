@@ -495,9 +495,10 @@ func inspectCandidateBoundaries(
 				)
 			}
 
+			adapterPgtypeUse := adapterDirs[file.directory] != "" &&
+				path == adapterPgtype
 			if !rules.managed[file.path] && candidateDataPackage(path) &&
-				!(adapterDirs[file.directory] != "" &&
-					path == adapterPgtype) {
+				!adapterPgtypeUse {
 				emit(
 					"ARCH608",
 					spec.Pos(),

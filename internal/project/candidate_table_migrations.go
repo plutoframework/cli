@@ -33,7 +33,12 @@ func ProposeTableMigrations(
 	}
 
 	tables := append([]Table(nil), m.Tables...)
-	sort.Slice(tables, func(i, j int) bool { return tables[i].ID() < tables[j].ID() })
+	sort.Slice(
+		tables,
+		func(i, j int) bool {
+			return tables[i].ID() < tables[j].ID()
+		},
+	)
 
 	for _, table := range tables {
 		cfg := sqlcheck.Config{

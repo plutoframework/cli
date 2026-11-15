@@ -353,8 +353,8 @@ func AuthoredAdapterStubs(m Manifest) (map[string][]byte, error) {
 	}
 
 	for _, adapter := range adapters {
-		files[AuthoredAdapterPath(adapter.Group, adapter.Name)] =
-			renderAdapterStub(m.Project.Module, adapter)
+		path := AuthoredAdapterPath(adapter.Group, adapter.Name)
+		files[path] = renderAdapterStub(m.Project.Module, adapter)
 	}
 
 	return files, nil

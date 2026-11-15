@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/pelletier/go-toml/v2"
-
 	"github.com/plutoframework/cli/internal/sqlcheck"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // CandidateQueryPackage is the sqlc output directory of an authored query set.
@@ -38,7 +38,12 @@ sql:
 `)
 
 	sets := append([]QuerySet(nil), m.Queries...)
-	sort.Slice(sets, func(i, j int) bool { return sets[i].Group < sets[j].Group })
+	sort.Slice(
+		sets,
+		func(i, j int) bool {
+			return sets[i].Group < sets[j].Group
+		},
+	)
 
 	for _, set := range sets {
 		fmt.Fprintf(
