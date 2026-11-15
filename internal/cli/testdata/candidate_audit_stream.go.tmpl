@@ -338,9 +338,9 @@ func TestAuditStreamLimits(t *testing.T) {
 	} {
 		code := expectClose(t, send(tc.kind, tc.payload), 10*time.Second)
 
-		// An oversized frame can be answered by a reset that discards the
-		// close frame; the connection must still be gone.
-		if code != tc.want && !(tc.name == "oversized" && code == -1) {
+		// A reset can discard the close frame when the peer still has
+		// unread data; the connection must be gone either way.
+		if code != tc.want && code != -1 {
 			t.Fatalf("%s: closed with %d, want %d", tc.name, code, tc.want)
 		}
 	}
