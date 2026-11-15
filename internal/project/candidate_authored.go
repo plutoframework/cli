@@ -169,7 +169,7 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 	}
 
 	if operation.Write && operation.Idempotency == "required" &&
-		!(operation.isAuthoredWriteBody() && m.hasEndpoint(operation)) {
+		(!operation.isAuthoredWriteBody() || !m.hasEndpoint(operation)) {
 		return view, fmt.Errorf(
 			"operation %s: idempotency = \"required\" needs an HTTP "+
 				"endpoint (the generated Idempotency-Key claim); internal "+

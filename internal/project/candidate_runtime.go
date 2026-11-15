@@ -592,6 +592,7 @@ func NewCandidateRuntime(
 	}
 `,
 	)
+
 	if m.hasIdempotentWrites() {
 		source.WriteString(
 			`
