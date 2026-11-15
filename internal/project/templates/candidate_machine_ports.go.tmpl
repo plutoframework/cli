@@ -132,6 +132,11 @@ func (v Verified) Key() string {
 // Verifier verifies signed machine requests of a declared principal.
 type Verifier interface {
 	Verify(context.Context, string, Request) (Verified, error)
+
+	// Recheck confirms the machine is still active with the verified key. A
+	// long-lived stream calls it periodically: a revoked or re-keyed machine
+	// loses the connection, not just its next request.
+	Recheck(context.Context, Verified) error
 }
 
 // Enroller redeems single-use enrollment tokens.

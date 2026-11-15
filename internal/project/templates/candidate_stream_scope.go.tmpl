@@ -10,6 +10,9 @@ import (
 	"time"
 
 	commonDomain "{{.Module}}/internal/domain"
+{{- if .HasMachine}}
+	machineauth "{{.Module}}/internal/ports/machineauth"
+{{- end}}
 	auth "github.com/plutoframework/pluto-auth"
 
 	"github.com/coder/websocket"
@@ -256,8 +259,58 @@ func RunStream[In, Out any](
 	inbound bool,
 	run func(context.Context, Stream[In, Out]) error,
 ) error {
-	if wire.scopeWireTransport == nil || e.scopeExecution == nil ||
-		e.scopeGate == nil || run == nil || ctx == nil ||
+	if e.scopeExecution == nil || e.scopeGate == nil {
+		return ErrNoTenant
+	}
+
+	return runStream(
+		ctx,
+		wire,
+		limits,
+		inbound,
+		func(ctx context.Context) error {
+			return e.scopeGate.Use(
+				ctx,
+				e.scopeExecution,
+				e.scopeExecution.TenantID(),
+				e.scopeResource,
+				func(context.Context) error { return nil },
+			)
+		},
+		run,
+	)
+}
+{{- if .HasMachine}}
+
+// RunMachineStream is RunStream for a machine caller. The recheck, supplied
+// by the generated workflow, confirms the machine is still active with the
+// verified key every Recheck interval; the stream closes when it fails.
+func RunMachineStream[In, Out any](
+	ctx context.Context,
+	wire Wire,
+	e Execution,
+	recheck func(context.Context) error,
+	limits StreamLimits,
+	inbound bool,
+	run func(context.Context, Stream[In, Out]) error,
+) error {
+	if e.scopeMachine == nil || recheck == nil {
+		return ErrNoTenant
+	}
+
+	return runStream(ctx, wire, limits, inbound, recheck, run)
+}
+{{- end}}
+
+func runStream[In, Out any](
+	ctx context.Context,
+	wire Wire,
+	limits StreamLimits,
+	inbound bool,
+	recheck func(context.Context) error,
+	run func(context.Context, Stream[In, Out]) error,
+) error {
+	if wire.scopeWireTransport == nil || run == nil || ctx == nil ||
 		limits.MaxMessageBytes <= 0 || limits.Ping <= 0 ||
 		limits.Idle <= limits.Ping || limits.Recheck <= 0 ||
 		limits.Write <= 0 {
@@ -295,7 +348,7 @@ func RunStream[In, Out any](
 	go func() {
 		defer workers.Done()
 
-		state.recheck(ctx, e)
+		state.recheck(ctx, recheck)
 	}()
 
 	err := run(ctx, Stream[In, Out]{scopeStream: state})
@@ -329,6 +382,9 @@ func closeStatus(err, cause error) (int, string) {
 		return closeInvalid, "invalid_message"
 	case errors.Is(err, commonDomain.ErrUnauthenticated),
 		errors.Is(err, auth.ErrUnauthenticated),
+{{- if .HasMachine}}
+		errors.Is(err, machineauth.ErrUnauthenticated),
+{{- end}}
 		errors.Is(err, commonDomain.ErrForbidden):
 		return closePolicy, "unauthorized"
 	case errors.Is(err, context.Canceled),
@@ -417,7 +473,10 @@ func (state *streamState) keepAlive(ctx context.Context) {
 // recheck re-verifies the live gate for the lifetime of the stream. Any
 // failure, including a transient one, closes the stream: authority is never
 // assumed to persist.
-func (state *streamState) recheck(ctx context.Context, e Execution) {
+func (state *streamState) recheck(
+	ctx context.Context,
+	check func(context.Context) error,
+) {
 	ticker := time.NewTicker(state.scopeStreamLimits.Recheck)
 	defer ticker.Stop()
 
@@ -428,13 +487,7 @@ func (state *streamState) recheck(ctx context.Context, e Execution) {
 		case <-ticker.C:
 		}
 
-		err := e.scopeGate.Use(
-			ctx,
-			e.scopeExecution,
-			e.scopeExecution.TenantID(),
-			e.scopeResource,
-			func(context.Context) error { return nil },
-		)
+		err := check(ctx)
 		if err == nil {
 			continue
 		}

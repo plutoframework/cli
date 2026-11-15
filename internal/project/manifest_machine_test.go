@@ -240,7 +240,13 @@ func TestMachineManifestRejections(t *testing.T) {
 		}, "resource"},
 		{"machine operation page", func(m *Manifest) {
 			beat(m).Collection = true
-		}, "non-collection"},
+		}, "no collection"},
+		{"machine write page", func(m *Manifest) {
+			beat(m).Response = ResponsePage
+			beat(m).Collection = true
+			beat(m).Item = "gateways.Ack"
+			beat(m).Output = ""
+		}, "a read with collection"},
 		{"machine write without input", func(m *Manifest) {
 			beat(m).Input = ""
 		}, "JSON input model"},

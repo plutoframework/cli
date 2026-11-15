@@ -1,0 +1,52 @@
+package {{.Group}}
+
+import (
+	"context"
+	"time"
+
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/scope"
+)
+
+// execute is the only caller of the authored body. It binds the verified
+// machine to this operation's fixed resource and runs the body inside
+// scope.RunMachineStream with the limits declared in pluto.toml. Every data
+// access and every recheck interval confirms the machine is still active with
+// the verified key. The body never sees the connection.
+func (operation *{{.Action}}) execute(
+	ctx context.Context,
+	verified machineauth.Verified,
+	wire scope.Wire,
+	request models.{{.Action}}Request,
+) error {
+	bound := scope.BindMachine(verified, {{q .Authored.Resource}})
+
+	return scope.RunMachineStream(
+		ctx,
+		wire,
+		bound,
+		func(ctx context.Context) error {
+			return operation.{{lowerFirst .Action}}Verifier.Recheck(ctx, verified)
+		},
+		scope.StreamLimits{
+			MaxMessageBytes: {{.Authored.Stream.MaxMessageBytes}},
+			Write:           {{.Authored.Stream.WriteSeconds}} * time.Second,
+			Ping:            {{.Authored.Stream.PingSeconds}} * time.Second,
+			Idle:            {{.Authored.Stream.IdleSeconds}} * time.Second,
+			Recheck:         {{.Authored.Stream.RecheckSeconds}} * time.Second,
+		},
+		{{.Authored.Inbound}},
+		func(
+			ctx context.Context,
+			stream scope.Stream[{{.Authored.StreamIn}}, {{.Authored.StreamOut}}],
+		) error {
+			return logic.{{.Action}}(
+				ctx,
+				bound,
+				operation.{{lowerFirst .Action}}Ports,
+				request,
+				stream)
+		})
+}

@@ -450,14 +450,16 @@ func (o Operation) validateMachineOperation(
 		)
 	}
 
-	if o.Body != BodyAuthored || o.Public || o.Collection ||
-		o.Scope != "" || o.Lookup != "" || o.RateLimit != "" ||
-		o.Response != ResponseObject || o.Output == "" || o.Item != "" {
+	if o.Body != BodyAuthored || o.Public || o.Scope != "" ||
+		o.Lookup != "" || o.RateLimit != "" {
 		return fmt.Errorf(
-			"a machine operation requires body = \"authored\", a " +
-				"protected non-collection operation and response = " +
-				"\"object\" with an output model",
+			"a machine operation requires body = \"authored\" and a " +
+				"protected operation without a system scope",
 		)
+	}
+
+	if err := o.validateMachineResponse(); err != nil {
+		return err
 	}
 
 	if !slices.Contains(principal.Permissions, o.Permission) {
@@ -468,8 +470,8 @@ func (o Operation) validateMachineOperation(
 		)
 	}
 
-	if o.Write && (o.Input == "" || len(o.Query) != 0) ||
-		!o.Write && o.Input != "" {
+	if !o.isStream() && (o.Write && (o.Input == "" || len(o.Query) != 0) ||
+		!o.Write && o.Input != "") {
 		return fmt.Errorf(
 			"a machine write takes a JSON input model; a machine read " +
 				"takes declared query parameters and no input",
@@ -513,7 +515,7 @@ func validateMachineEndpoints(m Manifest) error {
 		}
 
 		method := "GET"
-		if operation.Write {
+		if operation.Write && !operation.isStream() {
 			method = "POST"
 		}
 
@@ -584,4 +586,35 @@ func (m Manifest) protectedColumns(table Table) []string {
 	}
 
 	return columns
+}
+
+// validateMachineResponse limits a machine operation to the shapes its
+// generated gate can serve: an object (read or write), a keyset page (read)
+// or a stream opened by a signed upgrade.
+func (o Operation) validateMachineResponse() error {
+	switch o.Response {
+	case ResponseObject:
+		if o.Output == "" || o.Item != "" || o.Collection {
+			return fmt.Errorf(
+				"a machine object response requires an output model and " +
+					"no collection",
+			)
+		}
+	case ResponsePage:
+		if o.Write || !o.Collection || o.Item == "" || o.Output != "" {
+			return fmt.Errorf(
+				"a machine page is a read with collection = true and an " +
+					"item model",
+			)
+		}
+	case ResponseStream:
+		// Item, input and limits are checked with the stream declaration.
+	default:
+		return fmt.Errorf(
+			"a machine operation requires response = \"object\", " +
+				"\"page\" or \"stream\"",
+		)
+	}
+
+	return nil
 }

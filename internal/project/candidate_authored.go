@@ -332,6 +332,13 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 				"_gate_gen.go":     "candidate_stream_gate.go",
 				"_workflow_gen.go": "candidate_stream_workflow.go",
 			}
+
+			if operation.isMachine() {
+				layout = map[string]string{
+					"_gate_gen.go":     "candidate_machine_stream_gate.go",
+					"_workflow_gen.go": "candidate_machine_stream_workflow.go",
+				}
+			}
 		}
 
 		if operation.Scope == ScopeEachTenant {

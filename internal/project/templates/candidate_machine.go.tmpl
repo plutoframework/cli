@@ -156,6 +156,31 @@ func (v *Verifier) Verify(
 	), nil
 }
 
+// Recheck confirms, in a short tenant transaction, that the machine is still
+// active with the verified key.
+func (v *Verifier) Recheck(
+	ctx context.Context,
+	verified machineports.Verified,
+) error {
+	if ctx == nil || v == nil || v.pool == nil ||
+		verified.TenantID() == "" {
+		return machineports.ErrUnauthenticated
+	}
+
+	tx, err := v.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if _, err := tx.Exec(ctx, tenantSetting, verified.TenantID()); err != nil {
+		return err
+	}
+
+	return Recheck(ctx, tx, verified)
+}
+
 type machineRow struct {
 	id, tenant, key, state string
 }

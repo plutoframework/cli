@@ -94,10 +94,27 @@ func Register{{.Action}}(
 				return
 			}
 
+{{- if eq .Response "page"}}
+
+			if output.Data == nil {
+				output.Data = []models.{{.Item}}{}
+			}
+
+			transport.JSON(
+				w,
+				paths.{{.Symbol}}.SuccessStatus,
+				models.{{.Action}}Response{
+					Data: output.Data,
+					Page: output.Page,
+				},
+			)
+{{- else}}
+
 			transport.JSON(
 				w,
 				paths.{{.Symbol}}.SuccessStatus,
 				models.{{.Action}}Response{Data: output},
 			)
+{{- end}}
 		})
 }

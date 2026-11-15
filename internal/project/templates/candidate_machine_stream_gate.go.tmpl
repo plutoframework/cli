@@ -1,0 +1,118 @@
+package {{.Group}}
+
+import (
+	"context"
+
+	commonDomain "{{.Module}}/internal/domain"
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	machineauth "{{.Module}}/internal/ports/machineauth"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/scope"
+)
+
+// {{.Action}}Principal is the machine principal whose signature gates
+// {{.Authored.ID}}.
+const {{.Action}}Principal = {{q .Authored.Principal}}
+
+// {{.Action}}Boundary is the sealed entry of a machine stream. The handler
+// verifies the signed upgrade request with Prepare, reserves a connection
+// with Admit, then hands the accepted connection to Serve, which keeps
+// rechecking that the machine is still active with the verified key.
+type {{.Action}}Boundary interface {
+	sealed{{.Action}}()
+	Prepare(
+		context.Context,
+		machineauth.Request,
+		models.{{.Action}}Request) (*{{.Action}}Intent, error)
+	Admit() (release func(), ok bool)
+	Serve(context.Context, *{{.Action}}Intent, scope.Wire) error
+}
+
+// {{.Action}}Intent carries the machine verified at the upgrade. It is bound
+// to this operation instance and is not reusable authorization: the stream
+// rechecks the machine for its whole lifetime.
+type {{.Action}}Intent struct {
+	{{lowerFirst .Action}}IntentOwner    *{{.Action}}
+	{{lowerFirst .Action}}IntentVerified machineauth.Verified
+	{{lowerFirst .Action}}IntentRequest  models.{{.Action}}Request
+}
+
+// {{.Action}} gates the authored body logic.{{.Action}}. The body is reachable
+// only from this operation's generated workflow.
+type {{.Action}} struct {
+	{{lowerFirst .Action}}Verifier machineauth.Verifier
+	{{lowerFirst .Action}}Ports    logic.{{.Action}}Ports
+	{{lowerFirst .Action}}Slots    chan struct{}
+}
+
+func New{{.Action}}(
+	verifier machineauth.Verifier,
+	ports logic.{{.Action}}Ports,
+) *{{.Action}} {
+	return &{{.Action}}{
+		{{lowerFirst .Action}}Verifier: verifier,
+		{{lowerFirst .Action}}Ports:    ports,
+		{{lowerFirst .Action}}Slots:    make(chan struct{}, {{.Authored.Stream.MaxConnections}}),
+	}
+}
+
+func (*{{.Action}}) sealed{{.Action}}() {}
+
+// Prepare verifies the signature, timestamp window and nonce of the upgrade
+// request and the machine's request limit before any connection exists.
+func (operation *{{.Action}}) Prepare(
+	ctx context.Context,
+	request machineauth.Request,
+	input models.{{.Action}}Request,
+) (*{{.Action}}Intent, error) {
+	if ctx == nil || operation == nil ||
+		operation.{{lowerFirst .Action}}Verifier == nil {
+		return nil, commonDomain.ErrUnauthenticated
+	}
+
+	verified, err := operation.{{lowerFirst .Action}}Verifier.Verify(
+		ctx,
+		{{.Action}}Principal,
+		request)
+	if err != nil {
+		return nil, err
+	}
+
+	return &{{.Action}}Intent{
+		{{lowerFirst .Action}}IntentOwner:    operation,
+		{{lowerFirst .Action}}IntentVerified: verified,
+		{{lowerFirst .Action}}IntentRequest:  input,
+	}, nil
+}
+
+// Admit reserves one of this operation's {{.Authored.Stream.MaxConnections}}
+// connection slots. The caller releases it when the connection ends.
+func (operation *{{.Action}}) Admit() (func(), bool) {
+	if operation == nil || operation.{{lowerFirst .Action}}Slots == nil {
+		return func() {}, false
+	}
+
+	select {
+	case operation.{{lowerFirst .Action}}Slots <- struct{}{}:
+		return func() { <-operation.{{lowerFirst .Action}}Slots }, true
+	default:
+		return func() {}, false
+	}
+}
+
+func (operation *{{.Action}}) Serve(
+	ctx context.Context,
+	intent *{{.Action}}Intent,
+	wire scope.Wire,
+) error {
+	if ctx == nil || operation == nil || intent == nil ||
+		intent.{{lowerFirst .Action}}IntentOwner != operation {
+		return commonDomain.ErrUnauthenticated
+	}
+
+	return operation.execute(
+		ctx,
+		intent.{{lowerFirst .Action}}IntentVerified,
+		wire,
+		intent.{{lowerFirst .Action}}IntentRequest)
+}

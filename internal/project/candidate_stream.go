@@ -28,6 +28,24 @@ func streamHandler(
 	})
 }
 
+// machineStreamHandler renders the signed upgrade handler of a stream whose
+// caller is a machine principal.
+func machineStreamHandler(
+	m Manifest,
+	operation Operation,
+	entry Endpoint,
+) ([]byte, error) {
+	spec, err := seamOperation(m, operation)
+	if err != nil {
+		return nil, err
+	}
+
+	return seamTemplate(
+		"candidate_machine_stream_handler.go",
+		streamHandlerData{SeamOperation: spec, Origins: entry.Origins},
+	)
+}
+
 // streamPathSpec renders the paths.Endpoint Stream field of a websocket
 // endpoint: the declared message models and the generated limits that the
 // OpenAPI document publishes.

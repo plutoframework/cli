@@ -222,6 +222,9 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 			system.Scope != "" {
 			source, err = systemHandler(m, system)
 		} else if authored, ok := m.Operation(entry.Operation); ok &&
+			authored.isStream() && authored.isMachine() {
+			source, err = machineStreamHandler(m, authored, entry)
+		} else if authored, ok := m.Operation(entry.Operation); ok &&
 			authored.isStream() {
 			source, err = streamHandler(m, authored, entry)
 		} else if authored, ok := m.Operation(entry.Operation); ok &&
