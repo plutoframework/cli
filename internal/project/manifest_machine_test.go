@@ -415,3 +415,137 @@ func TestMachineSurfaceAbsentWithoutPrincipals(t *testing.T) {
 		}
 	}
 }
+
+// machinePageStream adds a signed paginated read and a signed stream.
+func machinePageStream(t *testing.T) Manifest {
+	t.Helper()
+
+	m := machineFixture(t)
+	m.Principals[0].Permissions = append(
+		m.Principals[0].Permissions, "gateway.history", "gateway.channel",
+	)
+	m.Models = append(m.Models, Model{
+		ID: "gateways.BeatRow", Fields: []string{"id:int64", "seq:int64"},
+	})
+	m.Ports[len(m.Ports)-1].Methods = append(
+		m.Ports[len(m.Ports)-1].Methods,
+		"History(scope.Execution, models.HistoryRequest) "+
+			"(pagination.Page[models.BeatRow], error)",
+	)
+	m.Operations = append(
+		m.Operations,
+		Operation{
+			Group:          "gateways",
+			Action:         "History",
+			Auth:           "machine:gateways.Gateway",
+			Permission:     "gateway.history",
+			Collection:     true,
+			Idempotency:    "none",
+			Body:           BodyAuthored,
+			Resource:       "gateways.history",
+			ResourcePolicy: "tenant",
+			Ports:          []string{"gateways.Registry"},
+			Response:       ResponsePage,
+			Item:           "gateways.BeatRow",
+		},
+		Operation{
+			Group:          "gateways",
+			Action:         "Channel",
+			Auth:           "machine:gateways.Gateway",
+			Permission:     "gateway.channel",
+			Idempotency:    "none",
+			Body:           BodyAuthored,
+			Resource:       "gateways.channel",
+			ResourcePolicy: "tenant",
+			Ports:          []string{"gateways.Registry"},
+			Response:       ResponseStream,
+			Item:           "gateways.Ack",
+			Input:          "gateways.Beat",
+		},
+	)
+	m.Endpoints = append(
+		m.Endpoints,
+		Endpoint{
+			Group:       "gateways",
+			Action:      "History",
+			Operation:   "gateways.History",
+			Method:      "GET",
+			Path:        "/api/gateway/beats",
+			Name:        "History",
+			Description: "A gateway pages its heartbeats.",
+		},
+		Endpoint{
+			Group:       "gateways",
+			Action:      "Channel",
+			Operation:   "gateways.Channel",
+			Transport:   TransportWebSocket,
+			Method:      "GET",
+			Path:        "/api/gateway/channel",
+			Name:        "Channel",
+			Description: "A gateway opens its job channel.",
+		},
+	)
+
+	return m
+}
+
+func TestMachinePageAndStreamAreGenerated(t *testing.T) {
+	m := machinePageStream(t)
+	if err := m.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := candidateManaged(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for path, wants := range map[string][]string{
+		"internal/operations/gateways/history_workflow_gen.go": {
+			"verified.MachineID()", "pagination.Binding",
+		},
+		"internal/operations/gateways/channel_gate_gen.go": {
+			"machineauth.Verifier", "Admit()", "Prepare(",
+		},
+		"internal/operations/gateways/channel_workflow_gen.go": {
+			"scope.RunMachineStream", "Verifier.Recheck",
+		},
+		"internal/handlers/gateways/channel.go": {
+			"MachineRequestFrom", "websocket.Accept", "rate_limited",
+		},
+		"internal/handlers/gateways/history.go": {
+			"output.Page", "rate_limited",
+		},
+		"internal/scope/stream_gen.go": {"func RunMachineStream"},
+	} {
+		source, ok := files[path]
+		if !ok {
+			t.Fatalf("missing %s", path)
+		}
+
+		for _, want := range wants {
+			if !strings.Contains(string(source), want) {
+				t.Errorf("%s misses %q", path, want)
+			}
+		}
+	}
+}
+
+func TestMachineProtectedColumnsReachSQLCheck(t *testing.T) {
+	m := machineFixture(t)
+
+	got := m.protectedColumns(m.Tables[len(m.Tables)-1])
+	if strings.Join(got, ",") != "public_key,state" {
+		t.Fatalf("protected columns %v", got)
+	}
+
+	if len(m.protectedColumns(m.Tables[0])) != 0 {
+		t.Fatal("an unrelated table gained protected columns")
+	}
+
+	m.Principals[0].RevokedValue = "active"
+	if err := m.Validate(); err == nil ||
+		!strings.Contains(err.Error(), "must be distinct") {
+		t.Fatalf("revoked value equal to active accepted: %v", err)
+	}
+}
