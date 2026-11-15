@@ -41,6 +41,7 @@ func addAuthoredRules(
 	}
 
 	rules.dependencies = nil
+
 	if m.Authored != nil {
 		for _, dependency := range m.Authored.Dependencies {
 			rules.dependencies = append(rules.dependencies, dependency.Module)
@@ -73,15 +74,14 @@ func addAuthoredRules(
 		rules.managed[rolesLogicDir+operation.Group+"/contract_gen.go"] = true
 
 		rules.addCapability(logicNamespace, operation.Action, workflow, body)
-		rules.protectedTypes[logicNamespace+"."+operation.Action+"Ports"] =
-			true
+
+		rules.protectedTypes[logicNamespace+"."+operation.Action+"Ports"] = true
 
 		lower := strings.ToLower(operation.Action[:1]) + operation.Action[1:]
 		for _, suffix := range []string{"Ports", "IntentRequest"} {
 			if rules.privateNames["internal/operations/"+operation.Group] ==
 				nil {
-				rules.privateNames["internal/operations/"+operation.Group] =
-					map[string]string{}
+				rules.privateNames["internal/operations/"+operation.Group] = map[string]string{}
 			}
 
 			rules.privateNames["internal/operations/"+operation.Group][lower+

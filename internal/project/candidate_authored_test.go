@@ -38,7 +38,9 @@ func enableAuthoredSeam(t *testing.T) {
 
 	authoredSeamReady = true
 
-	t.Cleanup(func() { authoredSeamReady = false })
+	t.Cleanup(func() {
+		authoredSeamReady = false
+	})
 }
 
 func authoredManifest(t *testing.T) Manifest {
@@ -108,7 +110,10 @@ func TestAuthoredManagedFiles(t *testing.T) {
 	if !strings.Contains(workflow, "logic.List(") ||
 		!strings.Contains(workflow, "scope.Bind(") ||
 		!strings.Contains(workflow, `"audit.events"`) {
-		t.Fatalf("workflow does not call the body under its gate:\n%s", workflow)
+		t.Fatalf(
+			"workflow does not call the body under its gate:\n%s",
+			workflow,
+		)
 	}
 
 	contract := string(files["internal/logic/audit/contract_gen.go"])
@@ -131,7 +136,10 @@ func TestAuthoredSeamFailsClosedUntilReady(t *testing.T) {
 func TestAuthoredScaffoldCreatedOnce(t *testing.T) {
 	m := authoredManifest(t)
 
-	files, err := candidateAuthoredScaffold(m, m.Operations[len(m.Operations)-1])
+	files, err := candidateAuthoredScaffold(
+		m,
+		m.Operations[len(m.Operations)-1],
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,8 +176,16 @@ var _ = json.Marshal
 		}
 	}
 
-	if candidateReviewHas(diagnostics, "ARCH602", "internal/rules/audit/chain.go") ||
-		candidateReviewHas(diagnostics, "ARCH610", "internal/rules/audit/chain.go") {
+	if candidateReviewHas(
+		diagnostics,
+		"ARCH602",
+		"internal/rules/audit/chain.go",
+	) ||
+		candidateReviewHas(
+			diagnostics,
+			"ARCH610",
+			"internal/rules/audit/chain.go",
+		) {
 		t.Fatalf("rules role rejected: %+v", diagnostics)
 	}
 }
@@ -197,7 +213,8 @@ func TestAuthoredRoleViolations(t *testing.T) {
 		},
 		"logic pgx": {
 			"internal/logic/audit/x.go",
-			"package audit\n\nimport _ \"github.com/jackc/pgx/v5\"\n", "ARCH610",
+			"package audit\n\nimport _ \"github.com/jackc/pgx/v5\"\n",
+			"ARCH610",
 		},
 		"logic rbac": {
 			"internal/logic/audit/x.go",
