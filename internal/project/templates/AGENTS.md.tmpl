@@ -157,7 +157,9 @@ narrows: every gate runs `caller.Permits` and then the owner's own live
 membership and permission. Tokens are bound to one tenant. Authored bodies read
 `e.Actor()` (Kind, ClientID, GrantID) for audit and never set it; they cannot
 import pluto-auth/device or call scope.BindActor/ContextWithActor. Delegates
-cannot approve, manage grants or provision tenants.
+cannot approve, manage grants or provision tenants. Path endpoints and
+streams run the same scope check (a stream rechecks it, so revoking a grant
+closes the socket); a tenant-invisible path id is the usual 404.
 {{- end}}
 Apply explicit database migrations before startup. No constructor creates
 schemas,

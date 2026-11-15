@@ -893,6 +893,14 @@ exceeds the owner's. Delegated tokens are refused on every owner route
 `/api/features` front door, which has no permission to intersect, still applies
 only the owner's membership.
 
+Delegated tokens go through every generated gate that has a human caller:
+HTTP operations, path-parameter endpoints (the gate runs `Permits` before
+the lookup, so a scope miss is 403 and a tenant-invisible id is the same
+`404 not_found` the owner gets), and WebSocket streams (`Permits` runs in
+`Prepare` before the upgrade and again at every recheck, so revoking the
+grant closes an open stream with 1008). Machine routes and per-tenant jobs
+have no human caller and never accept a delegated token.
+
 Metadata: authored bodies read `e.Actor()` on `scope.Execution` (`Kind()` is
 `user` or the client's `actor_type`; `ClientID()`, `GrantID()`). Authored code
 cannot construct or set it (`scope.Actor` is protected; `BindActor` and
