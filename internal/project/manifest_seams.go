@@ -327,7 +327,7 @@ func validatePorts(ports []Port) (map[string]Port, error) {
 		methods := map[string]bool{}
 
 		for _, method := range port.Methods {
-			if !exportName.MatchString(method) || methods[method] {
+			if !validPortMethod(method) || methods[portMethodName(method)] {
 				return nil, fmt.Errorf(
 					"port %s has invalid or duplicate method %q",
 					port.ID,
@@ -335,7 +335,7 @@ func validatePorts(ports []Port) (map[string]Port, error) {
 				)
 			}
 
-			methods[method] = true
+			methods[portMethodName(method)] = true
 		}
 
 		seen[port.ID] = port

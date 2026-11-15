@@ -42,7 +42,12 @@ func seamFixture(t *testing.T) Manifest {
 	m.Ports = []Port{{
 		ID:      "audit.Events",
 		Adapter: "audit.EventStore",
-		Methods: []string{"Append", "Query", "Scan"},
+		Methods: []string{
+			"Append(scope.Execution, models.Event) error",
+			"Query(scope.Execution, pagination.Request) " +
+				"(pagination.Page[models.Entry], error)",
+			"Scan(scope.Execution, int64, int64) ([]models.Entry, error)",
+		},
 	}}
 	m.Models = []Model{
 		{
