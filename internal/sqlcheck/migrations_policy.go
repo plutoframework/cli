@@ -85,3 +85,44 @@ func settingCall(tokens []token, setting string) bool {
 
 	return false
 }
+
+// switchExpression reports whether a policy expression is exactly
+// `current_setting('<setting>'[, true|false]) = 'on'`, in either order,
+// ignoring parentheses and casts: the tenant index switch.
+func switchExpression(tokens []token, setting string) bool {
+	var flat []token
+
+	for i := 0; i < len(tokens); i++ {
+		switch {
+		case tokens[i].punct("("), tokens[i].punct(")"):
+			continue
+		case tokens[i].punct("::"):
+			i++
+			for i+1 < len(tokens) && tokens[i+1].punct(".") {
+				i += 2
+			}
+
+			continue
+		}
+
+		flat = append(flat, tokens[i])
+	}
+
+	for i, tok := range flat {
+		if !tok.punct("=") {
+			continue
+		}
+
+		left, right := flat[:i], flat[i+1:]
+
+		return settingCall(left, setting) && onLiteral(right) ||
+			settingCall(right, setting) && onLiteral(left)
+	}
+
+	return false
+}
+
+func onLiteral(tokens []token) bool {
+	return len(tokens) == 1 && tokens[0].Kind == tokString &&
+		tokens[0].Text == "'on'"
+}

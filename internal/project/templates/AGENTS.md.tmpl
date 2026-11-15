@@ -64,6 +64,17 @@ Authored seams (candidate): declare, then write only authored role files.
   login lookup by slug uses `scope = "lookup"` with `[[lookups]]`.
 - Same-transaction writes across groups: the port declares `tx_methods` and
   `tx_callers`; the caller operation lists the port.
+- Per-tenant background work (offline sweeps, expiry): an operation with
+  `scope = "each_tenant"`, `schedule = "every 30s"` (or `"triggered"`),
+  `permission`, `service_role` (a declared `[[roles]]` entry that grants it) and
+  `body = "authored"`. Generated code lists tenant ids from a narrow index of
+  the tenant root, enqueues one delivery per tenant and runs your body as
+  `logic.<Action>(ctx, e, ports)` with that tenant's `scope.Execution`. It has
+  no request, no HTTP entry and no tenant argument. A body may run more than
+  once per tenant, so keep it idempotent. Set
+  `<PREFIX>JOB_<GROUP>_<ACTION>_CREDENTIAL` for the worker.
+- `scope.Tx.Enqueue(ctx, kind, payload)` inserts a declared `[[jobs]]` kind in
+  the open transaction; tenant and attempts come from the declaration.
 - `[memberships]` binds roles to an app table; `active_column`/`active_values`
   deny suspended subjects. `[database] runtime_role` names the least-privilege
   role; a migration is proposed and startup refuses owner/BYPASSRLS roles.

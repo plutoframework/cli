@@ -250,5 +250,15 @@ func sqlcheckLookups(m Manifest) []sqlcheck.Lookup {
 		})
 	}
 
+	if root, ok := m.TenantRoot(); ok && m.hasEachTenant() {
+		lookups = append(lookups, sqlcheck.Lookup{
+			Table:     root.Name,
+			Key:       root.TenantColumn,
+			Policy:    tenantIndexPolicy,
+			Setting:   tenantIndexSetting,
+			Enumerate: true,
+		})
+	}
+
 	return lookups
 }

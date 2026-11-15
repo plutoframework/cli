@@ -160,7 +160,8 @@ func (o Operation) usesSeams() bool {
 		len(o.Ports) != 0 || o.Response != "" || o.Item != "" ||
 		o.Output != "" || o.Input != "" || len(o.Query) != 0 ||
 		o.Scope != "" || o.Lookup != "" || o.RateLimit != "" ||
-		o.Auth != "" || o.Principal != "" || o.Stream != nil
+		o.Auth != "" || o.Principal != "" || o.Stream != nil ||
+		o.Schedule != "" || o.ServiceRole != ""
 }
 
 // validateSeams checks every seam declaration. Published projects may declare
@@ -618,6 +619,10 @@ func (o Operation) validateSeams(
 	case "", BodyGenerated, BodyAuthored, BodySystem:
 	default:
 		return fmt.Errorf("body must be authored or generated")
+	}
+
+	if o.Scope == ScopeEachTenant {
+		return o.validateEachTenant(ports)
 	}
 
 	if o.Scope != "" {

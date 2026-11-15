@@ -1,0 +1,54 @@
+[[roles]]
+id = "janitor"
+name = "Tenant janitor"
+description = "Service role of the per-tenant sweeps."
+permissions = ["sweeps.run"]
+
+[[tables]]
+group = "orgs"
+name = "orgs"
+tenant_column = "id"
+tenant_root = true
+row_security = true
+
+[[tables]]
+group = "orgs"
+name = "users"
+tenant_column = "org_id"
+row_security = true
+
+[[tables]]
+group = "orgs"
+name = "sweeps"
+tenant_column = "org_id"
+row_security = true
+
+[[queries]]
+group = "orgs"
+files = ["db/queries/orgs/*.sql"]
+tables = ["orgs", "users", "sweeps"]
+
+[[ports]]
+id = "orgs.Sweeps"
+adapter = "orgs.SweepStore"
+methods = ["Record(scope.Execution) error"]
+
+[[operations]]
+group = "orgs"
+action = "Sweep"
+scope = "each_tenant"
+schedule = "every 5s"
+timeout = "10s"
+concurrency = 2
+max_attempts = 2
+write = true
+idempotency = "exempt"
+replay_reason = "A repeated sweep only appends one more audit row."
+permission = "sweeps.run"
+service_role = "janitor"
+body = "authored"
+resource = "orgs.sweeps"
+resource_policy = "tenant"
+ports = ["orgs.Sweeps"]
+
+[authored]

@@ -33,8 +33,17 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 	)
 
 	if m.hasScope(ScopeProvision) || m.hasScope(ScopeLookup) ||
-		m.hasScope(ScopeEnroll) {
+		m.hasScope(ScopeEnroll) || m.hasEachTenant() {
 		source.WriteString("\t\"time\"\n")
+	}
+
+	if m.hasEachTenant() {
+		source.WriteString("\t\"sync\"\n")
+		fmt.Fprintf(
+			&source,
+			"\t\"%s/internal/storage/tenantindex\"\n",
+			m.Project.Module,
+		)
 	}
 
 	local := m.Capabilities.LocalCredentials
@@ -225,6 +234,7 @@ type CandidateRuntime struct {
 	candidateRuntimeManager *auth.Manager
 	candidateRuntimeHandler http.Handler
 	candidateRuntimePool    *pgxpool.Pool
+	candidateRuntimeLogger  *slog.Logger
 }
 `,
 	)
@@ -349,6 +359,7 @@ func NewCandidateRuntime(
 	runtime := &CandidateRuntime{
 		candidateRuntimeManager: authentication.Manager,
 		candidateRuntimePool:    pool,
+		candidateRuntimeLogger:  logger,
 	}
 `,
 	)
@@ -392,6 +403,12 @@ func NewCandidateRuntime(
 	}
 
 	for index, operation := range m.Operations {
+		if operation.Scope == ScopeEachTenant {
+			writeEachTenantOperation(&source, operation, index)
+
+			continue
+		}
+
 		if operation.Scope != "" {
 			if err := writeSystemOperation(
 				&source,
@@ -622,6 +639,17 @@ func NewCandidateRuntime(
 		)
 	}
 
+	for _, operation := range m.Operations {
+		if operation.Scope == ScopeEachTenant {
+			fmt.Fprintf(
+				&source,
+				`%s string
+`,
+				symbol(operation.Endpoint()),
+			)
+		}
+	}
+
 	source.WriteString(
 		`}
 
@@ -633,6 +661,7 @@ func (r *CandidateRuntime) Worker(
 	}
 
 	handlers := map[jobs.Kind]jobs.Handler{}
+	workerConfig := jobs.DefaultConfig()
 `,
 	)
 
@@ -664,15 +693,24 @@ func (r *CandidateRuntime) Worker(
 
 	source.WriteString(
 		`
+`,
+	)
+
+	writeEachTenantHandlers(&source, m)
+
+	source.WriteString(
+		`
 	store, err := jobspostgres.New(r.candidateRuntimePool)
 	if err != nil {
 		return nil, err
 	}
 
-	return jobs.NewWorker(store, handlers, jobs.DefaultConfig())
+	return jobs.NewWorker(store, handlers, workerConfig)
 }
 `,
 	)
+
+	writeEachTenantSchedule(&source, m)
 
 	if len(authoredGroups) > 0 {
 		source.WriteString(candidateTenantResourceSource)

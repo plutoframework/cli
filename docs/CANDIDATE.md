@@ -516,3 +516,75 @@ Limits of this phase: connection caps are per process; streams are not closed
 by `http.Server.Shutdown` (hijacked connections), so rely on the process exit
 or the recheck interval; there is no per-subject connection quota or message
 rate limit beyond the size, write and idle bounds.
+
+## Per-tenant background jobs
+
+Offline detection, expiry sweeps and similar maintenance must run for every
+tenant without any cross-tenant query. Declare an operation with
+`scope = "each_tenant"`:
+
+```toml
+[[roles]]
+id = "janitor"
+name = "Tenant janitor"
+description = "Service role of the per-tenant sweeps."
+permissions = ["gateways.sweep"]
+
+[[operations]]
+group = "gateways"
+action = "MarkStale"
+scope = "each_tenant"
+schedule = "every 30s"          # "every <5s..24h>" or "triggered"
+timeout = "10s"                 # per tenant, 1s..5m, default 30s
+concurrency = 2                 # simultaneous tenants, 1..32, default 4
+max_attempts = 2                # pluto-jobs budget per tenant run, default 3
+write = true
+idempotency = "exempt"
+replay_reason = "Marking a gateway offline twice is a no-op."
+permission = "gateways.sweep"
+service_role = "janitor"
+body = "authored"
+resource = "gateways.sweep"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+```
+
+The body is `logic.MarkStale(ctx, e scope.Execution, ports MarkStalePorts) error`.
+It has no request, no HTTP entry, no caller and no tenant input; `e` is the
+execution of one tenant and `e.Tenant()`, `scope.DB.Read/Write` and
+`queriesOf(tx)` behave as in any authored body, so row-level security and
+ARCH612 bind it to that tenant alone. `write = true` needs
+`idempotency = "exempt"` and a `replay_reason`: a run may repeat per tenant and
+schedule slot, so the body must be idempotent.
+
+How it runs (all generated):
+
+- The tenant root table (`tenant_root = true`, required) gains a migration with
+  a SELECT policy `USING (current_setting('app.tenant_index', true) = 'on')` and
+  a security-invoker view `pluto_tenant_index` exposing the tenant column alone.
+  Only the generated index reader sets the switch, in a read-only transaction
+  that queries only that view. There is no BYPASSRLS role and no tenant-less
+  escape hatch; sqlcheck requires the exact policy shape and rejects any wider
+  permissive policy on the root, and authored SQL may not touch the view.
+- `Schedule(ctx)` on the runtime (started by the generated worker main) ticks
+  each scheduled job, pages the index and enqueues one pluto-jobs delivery per
+  tenant with kind `tenant.<group>.<action>`, a delivery id derived from the
+  kind, tenant and schedule slot (replicas enqueue each run once) and the
+  declared budget. `triggered` jobs have no loop; call
+  `runtime.Operations.<Group><Action>.Enqueue(ctx)` from your own trigger.
+- Each delivery is input, not authority: the handler checks kind and budget,
+  decodes the payload, re-checks the tenant against the index (a vanished tenant
+  is a permanent failure), takes a concurrency slot (`concurrency`), applies
+  the per-tenant `timeout`, authenticates the configured service credential live
+  and runs the identity gate. The gate's membership check is "the tenant exists"
+  and its RBAC resolver grants exactly the declared `service_role`, which must
+  directly grant the operation's `permission`; every `scope.DB` call rechecks
+  the session, tenant, permission and resource policy. Retries and backoff are
+  pluto-jobs'; handler timeout and lease are sized for the slowest job.
+- The service credential is a session token in
+  `<PREFIX>JOB_<GROUP>_<ACTION>_CREDENTIAL`. The subject behind it needs no
+  membership in any tenant; its authority is the service role alone, so give
+  that role only what the sweep needs.
+
+Delivered rows stay in `pluto_jobs` (pluto-jobs has no retention); plan pruning
+for high-frequency schedules across many tenants.

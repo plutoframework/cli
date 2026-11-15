@@ -1,0 +1,344 @@
+package app_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"example.test/tenantjobs/internal/app"
+
+	"github.com/jackc/pgx/v5"
+	jobs "github.com/plutoframework/pluto-jobs"
+)
+
+const sweepKind jobs.Kind = "tenant.orgs.sweep"
+
+// seedOrgs creates organizations as the database owner: nothing in the
+// application can insert a tenant root, which is the point of the index.
+func (f *sysFixture) seedOrgs(t *testing.T, slugs ...string) []string {
+	t.Helper()
+
+	ids := []string{}
+
+	for _, slug := range slugs {
+		id := "org-" + slug
+
+		if _, err := f.admin.Exec(
+			t.Context(),
+			"INSERT INTO orgs (id, slug, name) VALUES ($1, $2, $2)",
+			id,
+			slug,
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		ids = append(ids, id)
+	}
+
+	return ids
+}
+
+func (f *sysFixture) sweepRows(t *testing.T) map[string]int {
+	t.Helper()
+
+	rows, err := f.admin.Query(
+		t.Context(),
+		"SELECT org_id, count(*) FROM sweeps GROUP BY org_id",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer rows.Close()
+
+	counts := map[string]int{}
+
+	for rows.Next() {
+		var (
+			tenant string
+			count  int
+		)
+
+		if err := rows.Scan(&tenant, &count); err != nil {
+			t.Fatal(err)
+		}
+
+		counts[tenant] = count
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	return counts
+}
+
+func (f *sysFixture) runWorker(t *testing.T, credential string) {
+	t.Helper()
+
+	worker, err := f.app.Worker(
+		app.CandidateWorkerCredentials{OrgsSweep: credential},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() {
+		done <- worker.Run(ctx)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("worker shutdown: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("worker did not stop")
+		}
+	})
+}
+
+func waitFor(t *testing.T, check func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(20 * time.Second)
+
+	for time.Now().Before(deadline) {
+		if check() {
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	t.Fatal("condition did not settle")
+}
+
+// The scheduler enumerates the tenant index, enqueues one delivery per tenant
+// and the worker runs the authored body once per tenant, bound to it.
+func TestTenantJobsEachTenantScheduled(t *testing.T) {
+	f := sysSetup(t)
+	ids := f.seedOrgs(t, "alpha", "bravo", "charlie")
+	service := f.enroll(t, "svc@example.test")
+
+	f.runWorker(t, service.session)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	scheduled := make(chan error, 1)
+
+	go func() {
+		scheduled <- f.app.Schedule(ctx)
+	}()
+
+	waitFor(t, func() bool {
+		counts := f.sweepRows(t)
+
+		for _, id := range ids {
+			if counts[id] < 1 {
+				return false
+			}
+		}
+
+		return true
+	})
+
+	cancel()
+
+	if err := <-scheduled; !errors.Is(err, context.Canceled) {
+		t.Fatalf("scheduler stop: %v", err)
+	}
+
+	// Rows exist for the declared tenants only, attributed to the verified
+	// service subject.
+	var foreign, wrongSubject int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT count(*) FILTER (WHERE org_id <> ALL ($1)), "+
+			"count(*) FILTER (WHERE subject <> $2) FROM sweeps",
+		ids,
+		service.id,
+	).Scan(&foreign, &wrongSubject); err != nil {
+		t.Fatal(err)
+	}
+
+	if foreign != 0 || wrongSubject != 0 {
+		t.Fatalf("foreign=%d wrongSubject=%d", foreign, wrongSubject)
+	}
+
+	// A second enqueue in the same slot adds no duplicate deliveries.
+	var before int
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM pluto_jobs WHERE kind = $1",
+		string(sweepKind),
+	).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		if err := f.app.Operations.OrgsSweep.Enqueue(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var after int
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM pluto_jobs WHERE kind = $1",
+		string(sweepKind),
+	).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+
+	// Crossing one slot boundary can add at most one more run per tenant.
+	if after-before > len(ids) {
+		t.Fatalf("duplicate deliveries: %d -> %d", before, after)
+	}
+}
+
+func (f *sysFixture) deliver(
+	t *testing.T,
+	credential, tenant string,
+	attempts int,
+) error {
+	t.Helper()
+
+	handler, err := f.app.Operations.OrgsSweep.Handler(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	options := jobs.Options{MaxAttempts: attempts}
+	if tenant != "" {
+		options.TenantID = &tenant
+	}
+
+	request, err := jobs.NewRequest(
+		sweepKind,
+		map[string]int64{"slot": 1},
+		options,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return handler(t.Context(), jobs.Job{Request: request, Attempt: 1})
+}
+
+// A persisted label is input, never authority: unknown tenants, wrong budgets,
+// missing tenants and bad credentials never reach the authored body.
+func TestTenantJobsRejectsForgedDeliveries(t *testing.T) {
+	f := sysSetup(t)
+	ids := f.seedOrgs(t, "alpha")
+	service := f.enroll(t, "svc@example.test")
+
+	if err := f.deliver(t, service.session, ids[0], 2); err != nil {
+		t.Fatalf("genuine delivery: %v", err)
+	}
+
+	if got := f.sweepRows(t)[ids[0]]; got != 1 {
+		t.Fatalf("expected one sweep, got %d", got)
+	}
+
+	for name, run := range map[string]func() error{
+		"unknown tenant": func() error {
+			return f.deliver(t, service.session, "org-ghost", 2)
+		},
+		"wrong budget": func() error {
+			return f.deliver(t, service.session, ids[0], 5)
+		},
+		"bad credential": func() error {
+			return f.deliver(t, "not-a-session", ids[0], 2)
+		},
+		"empty tenant": func() error {
+			return f.deliver(t, service.session, "", 2)
+		},
+	} {
+		if err := run(); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+
+	if got := f.sweepRows(t); len(got) != 1 || got[ids[0]] != 1 {
+		t.Fatalf("rejected deliveries wrote rows: %v", got)
+	}
+
+	if err := f.deliver(t, service.session, "org-ghost", 2); !errors.Is(
+		err,
+		jobs.ErrInvalid,
+	) {
+		t.Fatalf("unknown tenant must be permanent: %v", err)
+	}
+}
+
+// The tenant index is narrow: with the switch off the runtime role sees no
+// tenant at all, and the view exposes the tenant column alone.
+func TestTenantJobsIndexIsNarrow(t *testing.T) {
+	f := sysSetup(t)
+	f.seedOrgs(t, "alpha", "bravo")
+
+	var visible, indexed int
+
+	if err := f.runtime.QueryRow(
+		t.Context(),
+		"SELECT (SELECT count(*) FROM orgs), "+
+			"(SELECT count(*) FROM pluto_tenant_index)",
+	).Scan(&visible, &indexed); err != nil {
+		t.Fatal(err)
+	}
+
+	if visible != 0 || indexed != 0 {
+		t.Fatalf(
+			"row-level security leaked: orgs=%d index=%d",
+			visible,
+			indexed,
+		)
+	}
+
+	tx, err := f.runtime.BeginTx(t.Context(), pgx.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		_ = tx.Rollback(t.Context())
+	}()
+
+	if _, err := tx.Exec(
+		t.Context(),
+		"SELECT set_config('app.tenant_index', 'on', true)",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := tx.Query(t.Context(), "SELECT * FROM pluto_tenant_index")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer rows.Close()
+
+	columns := rows.FieldDescriptions()
+	if len(columns) != 1 || columns[0].Name != "tenant_id" {
+		t.Fatalf("index exposes more than the tenant id: %v", columns)
+	}
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+
+	if count != 2 {
+		t.Fatalf("index lists %d tenants", count)
+	}
+}
