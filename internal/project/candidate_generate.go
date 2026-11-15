@@ -275,6 +275,15 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		}
 	}
 
+	adapterFiles, err := candidateAdapterFiles(m)
+	if err != nil {
+		return nil, err
+	}
+
+	for path, source := range adapterFiles {
+		files[path] = source
+	}
+
 	files["internal/app/routes_gen.go"] = []byte("package app\n")
 	files["internal/app/app.go"] = []byte("package app\n")
 	files["internal/app/worker.go"] = []byte("package app\n")

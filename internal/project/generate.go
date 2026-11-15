@@ -569,7 +569,23 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 	}
 
 	for path, data := range ToolFiles(m) {
+		if _, managed := files[path]; managed && path == "sqlc.yaml" &&
+			m.Boundary.Mode == "candidate" {
+			continue
+		}
+
 		files[path] = data
+	}
+
+	if m.Boundary.Mode == "candidate" {
+		stubs, err := AuthoredAdapterStubs(m)
+		if err != nil {
+			return nil, err
+		}
+
+		for path, data := range stubs {
+			files[path] = data
+		}
 	}
 
 	files["go.mod"], err = AdoptBoundaryModules(

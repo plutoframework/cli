@@ -461,6 +461,7 @@ func InspectArchitecture(directory string) ArchitectureReport {
 		manifest,
 	)
 	r.Diagnostics = append(r.Diagnostics, primitiveDiagnostics...)
+	r.Diagnostics = append(r.Diagnostics, inspectAuthoredSQL(root, manifest)...)
 	r.Unassessed = append(r.Unassessed, primitiveUnassessed...)
 	sort.SliceStable(r.Diagnostics, func(i, j int) bool {
 		a, b := r.Diagnostics[i], r.Diagnostics[j]
@@ -554,6 +555,10 @@ func architectureRole(path string) string {
 		},
 		{
 			"internal/storage",
+			"data",
+		},
+		{
+			"internal/adapters",
 			"data",
 		},
 		{

@@ -291,6 +291,8 @@ func inspectCandidateBoundaries(
 		)
 	}
 
+	adapterDirs, adapterModules := adapterDirectories(metadata)
+
 	managedDirectories := map[string]bool{}
 
 	for path := range owned {
@@ -502,7 +504,10 @@ func inspectCandidateBoundaries(
 				)
 			}
 
-			if !rules.managed[file.path] && candidateDataPackage(path) {
+			adapterPgtypeUse := adapterDirs[file.directory] != "" &&
+				path == adapterPgtype
+			if !rules.managed[file.path] && candidateDataPackage(path) &&
+				!adapterPgtypeUse {
 				emit(
 					"ARCH608",
 					spec.Pos(),
@@ -598,6 +603,13 @@ func inspectCandidateBoundaries(
 
 		if credentialSeam != "" && file.directory == credentialSeam {
 			inspectCandidateCredentialSeam(file, module, emit)
+			inspectCandidateFile(file, rules, types, functions, emit)
+
+			continue
+		}
+
+		if group, ok := adapterDirs[file.directory]; ok {
+			inspectCandidateAdapter(file, group, module, adapterModules, emit)
 			inspectCandidateFile(file, rules, types, functions, emit)
 
 			continue
