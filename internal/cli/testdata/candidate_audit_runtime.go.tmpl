@@ -84,7 +84,18 @@ type auditFixture struct {
 // auditSetup applies the migrations as the database owner, then runs the whole
 // application as a separate login role that owns nothing, is not a superuser
 // and cannot bypass row-level security: the deployment the design requires.
+// auditSetup enables every authored feature flag; the flag test starts from
+// the generated default of off.
 func auditSetup(t *testing.T) *auditFixture {
+	t.Helper()
+
+	return auditSetupFlags(t, map[string]string{
+		config.Prefix + "FEATURE_AUDIT_APPEND": "true",
+		config.Prefix + "FEATURE_AUDIT_VERIFY": "true",
+	})
+}
+
+func auditSetupFlags(t *testing.T, env map[string]string) *auditFixture {
 	t.Helper()
 
 	address := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
@@ -209,7 +220,13 @@ func auditSetup(t *testing.T) *auditFixture {
 
 	cfg, err := config.LoadFrom(
 		func(key string) (string, bool) {
-			return address, key == config.Prefix+"DATABASE_URL"
+			if key == config.Prefix+"DATABASE_URL" {
+				return address, true
+			}
+
+			value, ok := env[key]
+
+			return value, ok
 		},
 	)
 	if err != nil {

@@ -253,6 +253,28 @@ is its own id).
 `ARCH612` understands these two query kinds; no general tenant-less escape hatch
 exists. Inserts into the tenant root are accepted only in provision queries.
 
+## Feature flags on operations
+
+An `[[operations]]` entry (authored, generated, system) may declare
+`feature = "<key>"` and optionally `feature_client_visible = true`. The operation
+owns the flag: its `[[endpoints]]` entries inherit it, and an entry that declares
+a different or additional flag fails validation (route-only flags stay rejected).
+Keys are the existing flag keys; the flag is declared by use, defaults to off and
+is set through `<PREFIX>FEATURE_<KEY>` (dots and hyphens become underscores).
+
+- The generated route gate checks the flag after session verification and before
+  the handler, the identity gate, membership lookups, rate limits, idempotency or
+  the authored body run. A disabled flag answers `403 feature_disabled` to
+  every verified caller, authorized or not, and produces no database effect.
+  Anonymous callers still get `401`.
+- An enabled flag changes nothing else: authentication, membership, permission
+  and resource checks apply unchanged. A flag never grants authorization.
+- OpenAPI marks the operation with `x-feature`. `GET /api/features` (now served
+  by the candidate runtime) lists only keys declared `feature_client_visible`,
+  to authenticated callers.
+- Flags gate transports. Code that calls an operation directly (workers, other
+  authored code) is not flag gated; gate exposure, not authorization.
+
 ## Memberships, active state and the runtime role
 
 Candidate `[memberships]` binds roles to an app-owned declared table. Optional

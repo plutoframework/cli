@@ -132,6 +132,8 @@ resource_policy = "tenant"
 ports = ["audit.Events"]
 response = "object"
 output = "audit.Verification"
+feature = "audit.verify"
+feature_client_visible = true
 
 [[operations]]
 group = "audit"
@@ -210,6 +212,7 @@ ports = ["orgs.Tenants"]
 response = "object"
 input = "orgs.Signup"
 output = "orgs.Org"
+feature = "orgs.provision"
 
 [[operations]]
 group = "orgs"

@@ -1,0 +1,111 @@
+package app_test
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/plutoframework/pluto-auth/httpauth"
+)
+
+// flagged sends one request as a signed-in member of a tenant.
+func (f *auditFixture) flagged(
+	t *testing.T,
+	method, path, body string,
+	user auditUser,
+	tenant string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Origin", auditOrigin)
+	request.Header.Set("Content-Type", "application/json")
+
+	if tenant != "" {
+		request.Header.Set("X-Tenant-ID", tenant)
+	}
+
+	if user.session != "" {
+		request.AddCookie(
+			&http.Cookie{Name: httpauth.CookieName, Value: user.session},
+		)
+	}
+
+	response := httptest.NewRecorder()
+	f.app.Handler().ServeHTTP(response, request)
+
+	return response
+}
+
+func (f *auditFixture) assertStatus(
+	t *testing.T,
+	response *httptest.ResponseRecorder,
+	want int,
+	label string,
+) {
+	t.Helper()
+
+	if response.Code != want {
+		t.Fatalf("%s: status=%d want=%d %s", label, response.Code, want,
+			response.Body.String())
+	}
+}
+
+// A flag is default-off exposure, never authorization: a disabled flag stops
+// even a fully authorized caller before the gate runs, and an enabled flag
+// leaves the gate's decision unchanged.
+func TestAuditFeatureFlags(t *testing.T) {
+	disabled := auditSetupFlags(t, map[string]string{})
+	bob := disabled.enroll(t, "bob@example.test")
+	disabled.member(t, bob, "north", "auditor")
+
+	response := disabled.flagged(
+		t, "GET", "/api/audit/verify", "", bob, "north",
+	)
+	disabled.assertStatus(t, response, 403, "disabled verify")
+
+	if !strings.Contains(response.Body.String(), "feature_disabled") {
+		t.Fatalf("disabled verify body: %s", response.Body.String())
+	}
+
+	// Anonymous callers see 401, never the flag state.
+	disabled.assertStatus(
+		t,
+		disabled.flagged(t, "GET", "/api/audit/verify", "", auditUser{}, ""),
+		401, "anonymous disabled verify",
+	)
+
+	// The client-visible flag is reported off to members.
+	visible := disabled.flagged(t, "GET", "/api/features", "", bob, "north")
+	disabled.assertStatus(t, visible, 200, "disabled features")
+
+	if !strings.Contains(visible.Body.String(), "audit.verify") ||
+		strings.Contains(visible.Body.String(), `"audit.verify":true`) {
+		t.Fatalf("unexpected visible flags: %s", visible.Body.String())
+	}
+
+	enabled := auditSetup(t)
+	bob = enabled.enroll(t, "bob@example.test")
+	mallory := enabled.enroll(t, "mallory@example.test")
+	enabled.member(t, bob, "north", "auditor")
+
+	// Enabled: a non-member stays denied by the normal gate.
+	got := enabled.flagged(
+		t, "GET", "/api/audit/verify", "", mallory, "north",
+	).Code
+	if got != 401 && got != 403 {
+		t.Fatalf("enabled verify by non-member: %d", got)
+	}
+
+	enabled.assertStatus(
+		t,
+		enabled.flagged(t, "GET", "/api/audit/verify", "", bob, "north"),
+		200, "enabled verify",
+	)
+
+	visible = enabled.flagged(t, "GET", "/api/features", "", bob, "north")
+	if !strings.Contains(visible.Body.String(), `"audit.verify":true`) {
+		t.Fatalf("enabled flag not reported: %s", visible.Body.String())
+	}
+}

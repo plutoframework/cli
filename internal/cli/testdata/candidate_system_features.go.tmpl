@@ -1,0 +1,57 @@
+package app_test
+
+import (
+	"strings"
+	"testing"
+)
+
+// A disabled flag stops provisioning before the gate: no tenant, membership
+// or session effect exists, and only enabling the flag restores the gate.
+func TestSystemFeatureFlag(t *testing.T) {
+	const body = `{"slug":"acme","name":"Acme"}`
+
+	disabled := sysSetupFlags(t, map[string]string{})
+	alice := disabled.enroll(t, "alice@example.test")
+
+	// Anonymous callers still see 401, never the flag state.
+	disabled.expect(t, disabled.call("POST", "/api/orgs", body, "", ""), 401)
+
+	response := disabled.call("POST", "/api/orgs", body, alice.session, "")
+	disabled.expect(t, response, 403)
+
+	if !strings.Contains(response.Body.String(), "feature_disabled") {
+		t.Fatalf("disabled provision body: %s", response.Body.String())
+	}
+
+	for _, table := range []string{"orgs", "users"} {
+		var rows int
+
+		if err := disabled.admin.QueryRow(
+			t.Context(), "SELECT count(*) FROM "+table,
+		).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("disabled flag wrote %d %s rows: %v", rows, table, err)
+		}
+	}
+
+	// Disabled attempts do not consume the provisioning rate limit.
+	for index := 0; index < 5; index++ {
+		disabled.expect(
+			t, disabled.call("POST", "/api/orgs", body, alice.session, ""), 403,
+		)
+	}
+
+	// Enabled: the normal gate decides, including body validation.
+	enabled := sysSetup(t)
+	bob := enabled.enroll(t, "bob@example.test")
+
+	enabled.expect(t, enabled.call("POST", "/api/orgs", body, "", ""), 401)
+	enabled.expect(
+		t,
+		enabled.call(
+			"POST", "/api/orgs", `{"slug":"Bad Slug","name":"x"}`,
+			bob.session, "",
+		),
+		400,
+	)
+	enabled.provision(t, bob, "acme", 200)
+}

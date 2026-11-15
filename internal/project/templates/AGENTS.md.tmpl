@@ -67,6 +67,10 @@ Authored seams (candidate): declare, then write only authored role files.
 - `[memberships]` binds roles to an app table; `active_column`/`active_values`
   deny suspended subjects. `[database] runtime_role` names the least-privilege
   role; a migration is proposed and startup refuses owner/BYPASSRLS roles.
+- Feature flags: an `[[operations]]` entry may set `feature = "<key>"` (and
+  `feature_client_visible = true`). Entries inherit it; the flag is default-off,
+  checked by the generated route gate before the handler and gate run (403
+  `feature_disabled`), and never grants authorization. Not on `[[endpoints]]`.
 - Declaration changes: edit pluto.toml (or pluto add blueprint), then run
   `pluto generate`. Full reference: the CANDIDATE.md in the Pluto CLI docs.
 

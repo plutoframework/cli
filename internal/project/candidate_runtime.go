@@ -512,11 +512,13 @@ func NewCandidateRuntime(
 	router.Use(transport.SecurityHeaders)
 	router.Use(transport.Recover(logger))
 
+	evaluator := features.New(cfg.Features)
+
 	reg := transport.Registrar{
 		Router:   router,
 		Auth:     authentication.Verifier,
 		Sessions: authentication.HTTP,
-		Features: features.New(cfg.Features),
+		Features: evaluator,
 		Logger:   logger,
 		Policy:   policy,
 	}
@@ -539,6 +541,22 @@ func NewCandidateRuntime(
 		paths.Health,
 		func(w http.ResponseWriter, r *http.Request) {
 			transport.JSON(w, 200, paths.HealthResponse{Data: "ok"})
+		},
+	)
+`,
+	)
+
+	source.WriteString(
+		`	// Only flags declared client-visible are listed, to authenticated
+	// callers; a flag never grants authorization.
+	reg.Handle(
+		paths.GetFeatures,
+		func(w http.ResponseWriter, r *http.Request) {
+			transport.JSON(
+				w,
+				200,
+				paths.FeaturesResponse{Data: evaluator.Visible()},
+			)
 		},
 	)
 `,

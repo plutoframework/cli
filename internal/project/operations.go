@@ -33,6 +33,11 @@ type Operation struct {
 	Scope     string `toml:"scope,omitempty"`
 	Lookup    string `toml:"lookup,omitempty"`
 	RateLimit string `toml:"rate_limit,omitempty"`
+
+	// Feature gates every entry of this operation behind a default-off flag.
+	// The flag never grants authorization; see feature_gate.go.
+	Feature       string `toml:"feature,omitempty"`
+	ClientVisible bool   `toml:"feature_client_visible,omitempty"`
 }
 
 func (o Operation) ID() string {
@@ -103,6 +108,11 @@ func (m Manifest) OperationEndpoint(entry Endpoint) (Endpoint, error) {
 	entry.Permission = operation.Permission
 	entry.Public = operation.Public
 	entry.Scope = operation.Scope
+
+	if operation.Feature != "" || operation.ClientVisible {
+		entry.Feature = operation.Feature
+		entry.ClientVisible = operation.ClientVisible
+	}
 
 	entry.Collection = operation.Collection
 	if operation.Write {

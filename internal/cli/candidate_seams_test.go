@@ -215,6 +215,19 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		t, output, "TestAuditSeamEndToEnd", "TestApprovalsTxEndToEnd",
 	)
 
+	flags, err := os.ReadFile("testdata/candidate_audit_features.go.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(t, root, "internal/app/audit_features_test.go", string(flags))
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestAuditFeatureFlags$", "./internal/app",
+	)
+	assertCandidateCaseNames(t, output, "TestAuditFeatureFlags")
+
 	members, err := os.ReadFile("testdata/candidate_audit_members.go.tmpl")
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +270,23 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		"TestSystemLookupRateLimit",
 		"TestSystemRowLevelBoundaries",
 	)
+
+	systemFlags, err := os.ReadFile(
+		"testdata/candidate_system_features.go.tmpl",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(
+		t, root, "internal/app/system_features_test.go", string(systemFlags),
+	)
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestSystemFeatureFlag$", "./internal/app",
+	)
+	assertCandidateCaseNames(t, output, "TestSystemFeatureFlag")
 
 	assertSeamNegatives(t, root)
 	assertSystemNegatives(

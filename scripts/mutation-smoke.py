@@ -404,6 +404,20 @@ mutations = [
         "./internal/project#TestRuntimeRoleGuardGeneratedAndWired",
     ),
     (
+        "operation feature reaches its entries",
+        "internal/project/operations.go",
+        "if operation.Feature != \"\" || operation.ClientVisible {",
+        "if false {",
+        "./internal/project#TestOperationOwnedFeatureReachesEntries",
+    ),
+    (
+        "entry cannot change operation feature",
+        "internal/project/feature_gate.go",
+        "if entry.Feature == \"\" && !entry.ClientVisible {",
+        "if true {",
+        "./internal/project#TestEntryCannotChangeOperationFeature",
+    ),
+    (
         "runtime role reserved names",
         "internal/project/manifest_seams.go",
         'role == "postgres" || role == "public" ||',
