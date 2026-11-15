@@ -2,12 +2,11 @@ package migrate
 
 import (
 	"bytes"
-	"fmt"
-	"go/scanner"
-	"go/token"
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/plutoframework/cli/internal/project"
 )
 
 // Paths the reconcile pass never touches: the manifest and module files are
@@ -66,9 +65,9 @@ func reconcile(
 
 		bases = append(bases, historicalRenders(w.Manifest, name)...)
 
-		pristine := false
+		pristine := exists && w.lock.Matches(name, current)
 
-		if exists {
+		if exists && !pristine {
 			for _, base := range bases {
 				if sameSource(name, current, base) {
 					pristine = true
@@ -192,71 +191,14 @@ func sameSource(name string, a, b []byte) bool {
 		return false
 	}
 
-	left, ok := goTokens(a)
+	left, ok := project.GoTokens(a)
 	if !ok {
 		return false
 	}
 
-	right, ok := goTokens(b)
+	right, ok := project.GoTokens(b)
 
 	return ok && left == right
-}
-
-// goTokens lists tokens with comment text. Automatic semicolons and trailing
-// commas before a closing bracket are dropped: formatters add or remove them.
-func goTokens(source []byte) (string, bool) {
-	files := token.NewFileSet()
-	failed := false
-
-	var lexer scanner.Scanner
-
-	lexer.Init(
-		files.AddFile("", files.Base(), len(source)),
-		source,
-		func(token.Position, string) {
-			failed = true
-		},
-		scanner.ScanComments,
-	)
-
-	type item struct {
-		tok     token.Token
-		literal string
-	}
-
-	items := []item{}
-
-	for {
-		_, tok, literal := lexer.Scan()
-		if tok == token.EOF {
-			break
-		}
-
-		if tok == token.SEMICOLON && literal == "\n" {
-			continue
-		}
-
-		if tok == token.COMMENT {
-			literal = strings.TrimSpace(literal)
-		}
-
-		items = append(items, item{tok, literal})
-	}
-
-	var result strings.Builder
-
-	for i, current := range items {
-		if current.tok == token.COMMA && i+1 < len(items) {
-			switch items[i+1].tok {
-			case token.RPAREN, token.RBRACE, token.RBRACK:
-				continue
-			}
-		}
-
-		fmt.Fprintf(&result, "%d:%q;", current.tok, current.literal)
-	}
-
-	return result.String(), !failed
 }
 
 func firstDifference(a, b []byte) int {

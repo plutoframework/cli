@@ -119,6 +119,13 @@ type Workspace struct {
 	Manifest project.Manifest
 	plan     *Plan
 
+	// lock records what the CLI last wrote to each managed file; a file
+	// still matching it is pristine whatever CLI version rendered it.
+	lock project.Lock
+
+	// adopt treats every managed file as pristine (generate --adopt).
+	adopt bool
+
 	// pristineTests records unedited scaffold tests reconcile kept; stale
 	// ones are removed once their references are known to dangle.
 	pristineTests map[string]bool
@@ -357,10 +364,17 @@ func build(
 		Deletes:  map[string]bool{},
 		Original: map[string][]byte{},
 	}
+
+	lock, _, err := project.ReadLock(root)
+	if err != nil {
+		return nil, err
+	}
+
 	workspace := &Workspace{
 		Root:          root,
 		Options:       options,
 		plan:          plan,
+		lock:          lock,
 		pristineTests: map[string]bool{},
 	}
 
@@ -385,6 +399,12 @@ func build(
 		}
 
 		plan.Manifest = workspace.Manifest
+	}
+
+	if !plan.Blocked && to.Schema == project.SchemaVersion {
+		if err := recordLock(workspace); err != nil {
+			return nil, err
+		}
 	}
 
 	sortItems(plan.Manual)
