@@ -82,8 +82,8 @@ func TestPublishedToCandidateFreshApplication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if plan.Blocked || len(scaffoldTestManual(plan)) != 0 ||
-		len(plan.Notes) != 0 {
+	if plan.Blocked || len(plan.Manual) != 0 ||
+		len(scaffoldTestNotes(plan)) != 0 {
 		t.Fatalf("fresh app must migrate cleanly: %+v %+v", plan.Manual,
 			plan.Notes)
 	}
@@ -153,6 +153,19 @@ func TestPublishedToCandidateFreshApplication(t *testing.T) {
 // scaffoldTestManual returns manual items that are not about pristine scaffold
 // tests, which are kept (never deleted silently) and may dangle against the
 // candidate API until ported.
+// scaffoldTestNotes drops the notes about removed pristine scaffold tests.
+func scaffoldTestNotes(plan *Plan) []Item {
+	rest := []Item{}
+
+	for _, item := range plan.Notes {
+		if !strings.HasSuffix(item.Path, "_test.go") {
+			rest = append(rest, item)
+		}
+	}
+
+	return rest
+}
+
 func scaffoldTestManual(plan *Plan) []Item {
 	rest := []Item{}
 

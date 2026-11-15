@@ -1,0 +1,172 @@
+package transport
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"@@MODULE@@/internal/domain"
+	"@@MODULE@@/internal/features"
+	"@@MODULE@@/internal/paths"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/plutoframework/pluto-auth/httpauth"
+	"github.com/plutoframework/pluto-core/httpidem"
+	"github.com/plutoframework/pluto-core/idempotency"
+	rbac "github.com/plutoframework/pluto-rbac"
+)
+
+// Authenticator validates bearer credentials and, for multi tenancy, selected
+// membership. Never trust actor, permission or tenant headers on their own.
+type Authenticator interface {
+	Authenticate(
+		context.Context,
+		string,
+
+		string,
+	) (domain.Principal, error)
+}
+
+type DenyAll struct{}
+
+func (DenyAll) Authenticate(
+	context.Context,
+	string,
+	string,
+) (domain.Principal, error) {
+	return domain.Principal{}, http.ErrNoCookie
+}
+
+type principalKey struct{}
+
+func Principal(ctx context.Context) domain.Principal {
+	principal, _ := ctx.Value(principalKey{}).(domain.Principal)
+	return principal
+}
+
+type Registrar struct {
+	Router      chi.Router
+	Auth        Authenticator
+	Features    features.Evaluator
+	Logger      *slog.Logger
+	Policy      *rbac.Policy
+	Sessions    *httpauth.Transport
+	Idempotency *httpidem.Handler
+}
+
+func (reg Registrar) Handle(endpoint paths.Endpoint, handler http.HandlerFunc) {
+	invoke := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		writer := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+		principal := domain.Principal{}
+
+		defer func() {
+			if recover() != nil {
+				Error(writer, r, 500, "internal_error")
+				reg.Logger.ErrorContext(
+					r.Context(),
+					"request panic",
+					"request_id",
+					middleware.GetReqID(r.Context()))
+			}
+
+			reg.Logger.InfoContext(r.Context(), "request",
+				"request_id", middleware.GetReqID(r.Context()),
+				"endpoint", endpoint.ID,
+				"status", writer.Status(),
+				"duration", time.Since(started),
+			)
+		}()
+
+		if endpoint.Authenticated && !endpoint.SessionOnly {
+			scheme, token, ok := strings.Cut(
+				r.Header.Get("Authorization"),
+				" ",
+			)
+
+			_, sessionVerified := httpauth.FromContext(r.Context())
+			if !sessionVerified &&
+				(!ok || !strings.EqualFold(scheme, "Bearer") || token == "" ||
+					strings.TrimSpace(token) != token) {
+				Error(writer, r, 401, "unauthenticated")
+
+				return
+			}
+
+			verified, err := reg.Auth.Authenticate(
+				r.Context(),
+				token,
+
+				r.Header.Get("X-Tenant-ID"),
+			)
+			if err != nil || !verified.Verified() {
+				Error(writer, r, 401, "unauthenticated")
+
+				return
+			}
+
+			principal = verified
+
+			r = r.WithContext(
+				context.WithValue(r.Context(), principalKey{}, principal),
+			)
+			if endpoint.Permission != "" &&
+				!principal.Can(reg.Policy, endpoint.Permission) {
+				Error(writer, r, 403, "forbidden")
+
+				return
+			}
+		}
+
+		// Features never bypass authentication or permissions, including public
+		// gates.
+		if endpoint.Feature != "" &&
+			!reg.Features.Enabled(endpoint.Feature) {
+			Error(writer, r, 403, "feature_disabled")
+
+			return
+		}
+
+		if endpoint.Idempotent {
+			if reg.Idempotency == nil {
+				Error(writer, r, 503, "idempotency_unavailable")
+
+				return
+			}
+
+			reg.Idempotency.Serve(
+				writer,
+				r,
+				idempotency.Scope{
+					Subject: principal.ActorID,
+
+					Tenant: principal.TenantID,
+
+					Operation: endpoint.ID,
+				},
+				handler)
+
+			return
+		}
+
+		handler(writer, r)
+	})
+
+	var secured http.Handler = invoke
+	if endpoint.Authenticated && reg.Sessions != nil {
+		secured = reg.Sessions.Require(invoke)
+	} else if endpoint.SessionOnly {
+		secured = http.HandlerFunc(func(
+			w http.ResponseWriter,
+			r *http.Request,
+		) {
+			Error(w, r, 401, "unauthenticated")
+		})
+	}
+
+	reg.Router.Method(endpoint.Method, endpoint.Path, secured)
+}

@@ -355,6 +355,29 @@ func TestAuthoredOutsideRoleStillARCH602(t *testing.T) {
 			t.Fatalf("%s escaped ARCH602: %+v", path, diagnostics)
 		}
 	}
+
+	for _, diagnostic := range diagnostics {
+		if diagnostic.ID == "ARCH602" &&
+			!strings.Contains(diagnostic.Repair, "Suggested target:") {
+			t.Fatalf("ARCH602 has no concrete target: %+v", diagnostic)
+		}
+	}
+}
+
+func TestOpenAPIParametersOutsideRolesSuggestOperationQuery(t *testing.T) {
+	diagnostics := authoredDiagnostics(t, map[string]string{
+		"internal/logic/audit/list.go": goodBody,
+		"internal/api/parameters.go":   "package api\n",
+	})
+
+	for _, diagnostic := range diagnostics {
+		if diagnostic.ID == "ARCH602" &&
+			strings.Contains(diagnostic.Repair, "[[operations.query]]") {
+			return
+		}
+	}
+
+	t.Fatalf("no [[operations.query]] suggestion: %+v", diagnostics)
 }
 
 func TestScopeAlwaysRollsBack(t *testing.T) {

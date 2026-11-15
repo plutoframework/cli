@@ -118,6 +118,10 @@ type Workspace struct {
 	Options  Options
 	Manifest project.Manifest
 	plan     *Plan
+
+	// pristineTests records unedited scaffold tests reconcile kept; stale
+	// ones are removed once their references are known to dangle.
+	pristineTests map[string]bool
 }
 
 // Read returns planned content, falling back to the file on disk.
@@ -353,7 +357,12 @@ func build(
 		Deletes:  map[string]bool{},
 		Original: map[string][]byte{},
 	}
-	workspace := &Workspace{Root: root, Options: options, plan: plan}
+	workspace := &Workspace{
+		Root:          root,
+		Options:       options,
+		plan:          plan,
+		pristineTests: map[string]bool{},
+	}
 
 	if from.Schema == project.SchemaVersion {
 		manifest, err := project.Decode(data)

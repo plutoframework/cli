@@ -1,0 +1,187 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"@@MODULE@@/internal/access"
+	"@@MODULE@@/internal/app"
+	"@@MODULE@@/internal/caching"
+	"@@MODULE@@/internal/config"
+	"@@MODULE@@/internal/storage/postgres"
+	"@@MODULE@@/internal/transport"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/plutoframework/pluto-core/httpidem"
+	"github.com/plutoframework/pluto-core/idempotency"
+	idempostgres "github.com/plutoframework/pluto-core/stores/postgres"
+)
+
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	policy, err := access.NewPolicy()
+	if err != nil {
+		return err
+	}
+
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.Logging.Level)); err != nil {
+		return err
+	}
+
+	runtime, err := newTelemetry(context.Background())
+	if err != nil {
+		return errors.New("invalid telemetry configuration")
+	}
+
+	logger := slog.New(runtime.Handler(
+		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}),
+	))
+
+	defer func() {
+		shutdown, cancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second)
+		defer cancel()
+
+		if err := runtime.Shutdown(shutdown); err != nil {
+			logger.Error("telemetry shutdown failed")
+		}
+	}()
+
+	dataCache, closeCache, err := caching.New(cfg.Cache)
+	if err != nil {
+		return errors.New("invalid cache configuration")
+	}
+
+	defer closeCache()
+
+	dataCache = runtime.Cache(dataCache)
+
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	var authentication transport.Authentication
+
+	startup, cancelStartup := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelStartup()
+
+	var idempotencyStore idempotency.Store
+
+	if cfg.Database.URL != "" {
+		pool, err := postgres.OpenWithTracer(
+			startup,
+			cfg.Database.URL,
+			runtime.PGXTracer())
+		if err != nil {
+			return errors.New(
+				"postgres connectivity failed; verify DATABASE_URL and " +
+					"database availability",
+			)
+		}
+
+		defer pool.Close()
+
+		idempotencyStore, err = idempostgres.New(pool)
+		if err != nil {
+			return err
+		}
+
+		authentication, err = newLocalAuthentication(startup, cfg, pool)
+		if err != nil {
+			return err
+		}
+	}
+
+	var idempotent *httpidem.Handler
+	if idempotencyStore != nil {
+		idempotent, err = transport.NewIdempotency(
+			idempotencyStore,
+			cfg.Server.BodyLimit)
+		if err != nil {
+			return err
+		}
+	}
+
+	authentication.Idempotency = idempotent
+
+	router := chi.NewRouter()
+	router.Use(runtime.Middleware)
+	router.Mount(
+		"/",
+		app.NewWithCache(cfg, authentication, logger, policy, dataCache))
+
+	server := &http.Server{
+		Addr:              cfg.Server.Address,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		MaxHeaderBytes:    16 * 1024,
+	}
+	done := make(chan struct{})
+	shutdownDone := make(chan struct{})
+
+	go func() {
+		defer close(shutdownDone)
+
+		select {
+		case <-ctx.Done():
+			shutdown, cancel := context.WithTimeout(
+				context.Background(),
+				10*time.Second,
+			)
+			defer cancel()
+
+			if err := server.Shutdown(shutdown); err != nil {
+				logger.Error("shutdown failed")
+			}
+		case <-done:
+		}
+	}()
+
+	defer func() {
+		close(done)
+		<-shutdownDone
+	}()
+
+	logger.Info(
+		"listening",
+		"address",
+		server.Addr,
+		"authentication",
+		"pluto-sessions; membership denies until implemented",
+	)
+
+	err = server.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+
+	return err
+}
+
+func main() {
+	if err := run(); err != nil {
+
+		// Database driver errors are sanitized at their boundary above.
+		slog.Error("startup/server failed", "error", err)
+
+		os.Exit(1)
+	}
+}
