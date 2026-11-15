@@ -52,7 +52,9 @@ func (i *Index) read(
 		return err
 	}
 
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+	}()
 
 	if _, err := tx.Exec(ctx, bindSwitch); err != nil {
 		return err

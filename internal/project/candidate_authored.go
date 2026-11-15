@@ -265,6 +265,7 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 
 		group.Ops = append(group.Ops, view)
 		group.UsesModels = group.UsesModels || !view.EachTenant
+
 		for _, port := range view.Ports {
 			group.UsesPorts = group.UsesPorts || port.Alias == ""
 		}

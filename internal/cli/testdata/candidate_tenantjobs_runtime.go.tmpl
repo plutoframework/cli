@@ -87,7 +87,9 @@ func (f *sysFixture) runWorker(t *testing.T, credential string) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 
-	go func() { done <- worker.Run(ctx) }()
+	go func() {
+		done <- worker.Run(ctx)
+	}()
 
 	t.Cleanup(func() {
 		cancel()
@@ -133,7 +135,9 @@ func TestTenantJobsEachTenantScheduled(t *testing.T) {
 
 	scheduled := make(chan error, 1)
 
-	go func() { scheduled <- f.app.Schedule(ctx) }()
+	go func() {
+		scheduled <- f.app.Schedule(ctx)
+	}()
 
 	waitFor(t, func() bool {
 		counts := f.sweepRows(t)
@@ -294,7 +298,11 @@ func TestTenantJobsIndexIsNarrow(t *testing.T) {
 	}
 
 	if visible != 0 || indexed != 0 {
-		t.Fatalf("row-level security leaked: orgs=%d index=%d", visible, indexed)
+		t.Fatalf(
+			"row-level security leaked: orgs=%d index=%d",
+			visible,
+			indexed,
+		)
 	}
 
 	tx, err := f.runtime.BeginTx(t.Context(), pgx.TxOptions{})
@@ -302,7 +310,9 @@ func TestTenantJobsIndexIsNarrow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defer func() { _ = tx.Rollback(t.Context()) }()
+	defer func() {
+		_ = tx.Rollback(t.Context())
+	}()
 
 	if _, err := tx.Exec(
 		t.Context(),

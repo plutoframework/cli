@@ -253,10 +253,14 @@ func validateEachTenantJobs(m Manifest) error {
 		}
 
 		for _, job := range m.Jobs {
-			if job.Kind == operation.JobKind() {
+			if job.Kind == operation.JobKind() ||
+				job.Group+"."+job.Action == operation.ID() {
 				return fmt.Errorf(
-					"operation %s: job kind %s is already declared",
+					"operation %s collides with job %s.%s (kind %s): job "+
+						"kinds and worker credentials must stay distinct",
 					operation.ID(),
+					job.Group,
+					job.Action,
 					job.Kind,
 				)
 			}

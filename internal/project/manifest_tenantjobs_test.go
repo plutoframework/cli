@@ -71,13 +71,15 @@ func TestTenantJobManifestValidatesAndRoundTrips(t *testing.T) {
 }
 
 func TestTenantJobManifestRejections(t *testing.T) {
-	mutate := func(change func(*Manifest, *Operation)) func(*testing.T) Manifest {
+	type change func(*Manifest, *Operation)
+
+	mutate := func(apply change) func(*testing.T) Manifest {
 		return func(t *testing.T) Manifest {
 			t.Helper()
 
 			m := tenantJobFixture(t)
 			index := len(m.Operations) - 1
-			change(&m, &m.Operations[index])
+			apply(&m, &m.Operations[index])
 
 			return m
 		}
@@ -88,11 +90,15 @@ func TestTenantJobManifestRejections(t *testing.T) {
 		want  string
 	}{
 		"missing service role": {
-			mutate(func(_ *Manifest, o *Operation) { o.ServiceRole = "" }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.ServiceRole = ""
+			}),
 			"service_role",
 		},
 		"undeclared service role": {
-			mutate(func(_ *Manifest, o *Operation) { o.ServiceRole = "ghost" }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.ServiceRole = "ghost"
+			}),
 			"service_role",
 		},
 		"role lacks the permission": {
@@ -102,11 +108,15 @@ func TestTenantJobManifestRejections(t *testing.T) {
 			"directly grants",
 		},
 		"missing permission": {
-			mutate(func(_ *Manifest, o *Operation) { o.Permission = "" }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.Permission = ""
+			}),
 			"permission",
 		},
 		"public": {
-			mutate(func(_ *Manifest, o *Operation) { o.Public = true }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.Public = true
+			}),
 			"protected",
 		},
 		"missing resource": {
@@ -116,31 +126,45 @@ func TestTenantJobManifestRejections(t *testing.T) {
 			"resource",
 		},
 		"bad schedule": {
-			mutate(func(_ *Manifest, o *Operation) { o.Schedule = "daily" }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.Schedule = "daily"
+			}),
 			"schedule",
 		},
 		"too frequent": {
-			mutate(func(_ *Manifest, o *Operation) { o.Schedule = "every 1s" }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.Schedule = "every 1s"
+			}),
 			"5s to 24h",
 		},
 		"timeout beyond the schedule": {
-			mutate(func(_ *Manifest, o *Operation) { o.Timeout = "5m" }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.Timeout = "5m"
+			}),
 			"pile up",
 		},
 		"concurrency too high": {
-			mutate(func(_ *Manifest, o *Operation) { o.Concurrency = 999 }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.Concurrency = 999
+			}),
 			"concurrency",
 		},
 		"attempts too high": {
-			mutate(func(_ *Manifest, o *Operation) { o.MaxAttempts = 101 }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.MaxAttempts = 101
+			}),
 			"max_attempts",
 		},
 		"write without replay reason": {
-			mutate(func(_ *Manifest, o *Operation) { o.ReplayReason = "" }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.ReplayReason = ""
+			}),
 			"idempotency",
 		},
 		"request model": {
-			mutate(func(_ *Manifest, o *Operation) { o.Input = "orgs.Signup" }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.Input = "orgs.Signup"
+			}),
 			"no request",
 		},
 		"query": {
@@ -150,7 +174,9 @@ func TestTenantJobManifestRejections(t *testing.T) {
 			"no request",
 		},
 		"generated body": {
-			mutate(func(_ *Manifest, o *Operation) { o.Body = BodyGenerated }),
+			mutate(func(_ *Manifest, o *Operation) {
+				o.Body = BodyGenerated
+			}),
 			"authored",
 		},
 		"foreign port": {
@@ -172,6 +198,18 @@ func TestTenantJobManifestRejections(t *testing.T) {
 				})
 			}),
 			"",
+		},
+		"job kind collision": {
+			mutate(func(m *Manifest, _ *Operation) {
+				m.Jobs = append(m.Jobs, Job{
+					Group:       "orgs",
+					Action:      "Other",
+					Kind:        "tenant.orgs.sweep",
+					Operation:   "orgs.Provision",
+					MaxAttempts: 3,
+				})
+			}),
+			"collides",
 		},
 		"no tenant root": {
 			mutate(func(m *Manifest, _ *Operation) {
@@ -247,6 +285,7 @@ func TestTenantJobManagedOutput(t *testing.T) {
 		`SweepKind jobs.Kind = "tenant.orgs.sweep"`,
 		"SweepInterval = time.Duration(30000000000)",
 		"Tenants.Exists(ctx, tenant)",
+		"if !found {\n\t\t\treturn jobs.Permanent(jobs.ErrInvalid)",
 		"jobs.Permanent(jobs.ErrInvalid)",
 		"WithIdentity(",
 		"Gate.Within(",
@@ -342,5 +381,63 @@ func TestScopeEnqueueIsBoundToDeclaredKinds(t *testing.T) {
 
 	if strings.Contains(source, "return ErrUnsupported") {
 		t.Fatal("Tx.Enqueue must no longer fail closed unconditionally")
+	}
+}
+
+// Only the generated tenant job gate and the scope package may handle job
+// requests without a declared effect; the same code anywhere else is still an
+// undeclared effect.
+func TestTenantJobExemptionIsPathSpecific(t *testing.T) {
+	const body = `package operations
+
+import queue "github.com/plutoframework/pluto-jobs"
+
+var decode = queue.Decode[string]
+`
+
+	root := primitiveFixture(t, map[string]string{
+		"internal/operations/orgs/sweep_gate_gen.go": body,
+		"internal/operations/orgs/other.go":          body,
+		"internal/scope/scope_gen.go":                body,
+	})
+
+	diagnostics, _ := inspectPrimitiveBoundaries(
+		root,
+		"example.test/app",
+		[]byte("[[operations]]\ngroup='orgs'\naction='Sweep'\n"+
+			"scope='each_tenant'\n"),
+	)
+
+	flagged := map[string]bool{}
+
+	for _, diagnostic := range diagnostics {
+		if diagnostic.ID == "ARCH506" {
+			flagged[diagnostic.File] = true
+		}
+	}
+
+	if len(flagged) != 1 || !flagged["internal/operations/orgs/other.go"] {
+		t.Fatalf("exemption must cover only managed files: %+v", diagnostics)
+	}
+
+	// Without a tenant job the gate path is not exempt, the scope package
+	// still is.
+	diagnostics, _ = inspectPrimitiveBoundaries(
+		root,
+		"example.test/app",
+		[]byte("[[operations]]\ngroup='orgs'\naction='Read'\n"),
+	)
+
+	flagged = map[string]bool{}
+
+	for _, diagnostic := range diagnostics {
+		if diagnostic.ID == "ARCH506" {
+			flagged[diagnostic.File] = true
+		}
+	}
+
+	if flagged["internal/scope/scope_gen.go"] ||
+		!flagged["internal/operations/orgs/sweep_gate_gen.go"] {
+		t.Fatalf("scope-only exemption broken: %+v", diagnostics)
 	}
 }
