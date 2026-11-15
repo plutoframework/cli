@@ -448,8 +448,8 @@ mutations = [
     (
         "stream gate recheck",
         "internal/project/templates/candidate_stream_scope.go.tmpl",
-        "err := e.scopeGate.Use(",
-        "err := e.scopeGate.Disabled(",
+        "return e.scopeGate.Use(",
+        "return e.scopeGate.Disabled(",
         "./internal/project#TestStreamManagedFiles",
     ),
     (
