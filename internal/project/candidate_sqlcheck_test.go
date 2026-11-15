@@ -220,3 +220,24 @@ func regenerate(t *testing.T, root string) {
 		t.Fatalf("sqlc generate: %v\n%s", err, output)
 	}
 }
+
+func TestTableMigrationForcesRowSecurityAndAppendOnly(t *testing.T) {
+	sql := tableMigrationSQL(Table{
+		Group:        "audit",
+		Name:         "audit_events",
+		TenantColumn: "org_id",
+		AppendOnly:   true,
+		RowSecurity:  true,
+	})
+
+	for _, want := range []string{
+		"ENABLE ROW LEVEL SECURITY",
+		"FORCE ROW LEVEL SECURITY",
+		"WITH CHECK",
+		"audit_events_append_only",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("migration lacks %q:\n%s", want, sql)
+		}
+	}
+}

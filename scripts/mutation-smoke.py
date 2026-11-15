@@ -331,7 +331,7 @@ mutations = [
         "internal/project/candidate_table_migrations.go",
         "ALTER TABLE %[1]s FORCE ROW LEVEL SECURITY;\n",
         "",
-        "./internal/project#TestAuthoredSQLRejectsBypasses",
+        "./internal/project#TestTableMigrationForcesRowSecurityAndAppendOnly",
     ),
 ]
 
