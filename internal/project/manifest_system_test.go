@@ -290,6 +290,50 @@ func TestSystemManifestRejections(t *testing.T) {
 	}
 }
 
+// A provision body may join another group's port only through declared tx
+// methods, and only when that port lists it as a caller.
+func TestSystemProvisionForeignTxPorts(t *testing.T) {
+	build := func(callers []string) Manifest {
+		m := systemFixture(t)
+
+		audit := &m.Ports[0]
+		audit.Methods = append(
+			audit.Methods,
+			"AppendTx(scope.Tx, models.Event) error",
+		)
+		audit.TxMethods = []string{"AppendTx"}
+		audit.TxCallers = callers
+
+		operation := &m.Operations[len(m.Operations)-2]
+		operation.Ports = append(operation.Ports, audit.ID)
+
+		return m
+	}
+
+	if err := build([]string{"orgs.Provision"}).Validate(); err != nil {
+		t.Fatalf("declared tx caller rejected: %v", err)
+	}
+
+	for name, callers := range map[string][]string{
+		"unlisted": {"audit.Append"},
+		"foreign":  {"audit.Missing"},
+	} {
+		err := build(callers).Validate()
+		if err == nil {
+			t.Fatalf("%s tx caller accepted a foreign provision port", name)
+		}
+	}
+
+	m := systemFixture(t)
+	operation := &m.Operations[len(m.Operations)-2]
+	operation.Ports = append(operation.Ports, m.Ports[0].ID)
+
+	err := m.Validate()
+	if err == nil || !strings.Contains(err.Error(), "tx_callers") {
+		t.Fatalf("plain foreign port accepted by provision: %v", err)
+	}
+}
+
 func TestSystemScopeRequiresCandidateProfile(t *testing.T) {
 	m := systemFixture(t)
 	m.Boundary.Mode = ""

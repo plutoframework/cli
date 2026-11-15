@@ -360,8 +360,10 @@ func (o Operation) validateProvision(
 			return fmt.Errorf("references undeclared port %s", id)
 		}
 
-		if group, _, _ := splitQualified(id); group != o.Group {
-			return fmt.Errorf("port %s belongs to another group", id)
+		// Another group's port is admitted only through its declared tx
+		// methods, which join the provisioning transaction.
+		if err := o.checkPortGroup(ports[id]); err != nil {
+			return err
 		}
 	}
 

@@ -260,5 +260,14 @@ func sqlcheckLookups(m Manifest) []sqlcheck.Lookup {
 		})
 	}
 
+	if index, ok := m.MemberIndexOf(); ok {
+		lookups = append(lookups, sqlcheck.Lookup{
+			Table:   index.Table,
+			Key:     index.Subject,
+			Policy:  index.PolicyName(),
+			Setting: index.Setting(),
+		})
+	}
+
 	return lookups
 }

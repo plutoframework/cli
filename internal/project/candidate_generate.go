@@ -314,6 +314,18 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 
 			files[path] = source
 		}
+
+		if m.AuthEventsOn() {
+			source, err := render(
+				"candidate_auth_events.go",
+				dataFor(m, Endpoint{}),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("auth events: %w", err)
+			}
+
+			files["internal/app/candidate_auth_events_gen.go"] = source
+		}
 	}
 
 	adapterFiles, err := candidateAdapterFiles(m)

@@ -31,6 +31,7 @@ type operationBlueprint struct {
 	Memberships        *project.Memberships        `toml:"memberships"`
 	Lookups            []project.Lookup            `toml:"lookups"`
 	Principals         []project.Principal         `toml:"principals"`
+	Auth               *project.AuthSection        `toml:"auth"`
 	Database           *blueprintDatabase          `toml:"database"`
 }
 
@@ -105,7 +106,7 @@ func readOperationBlueprint(path string) (operationBlueprint, error) {
 	)+len(
 		blueprint.Principals,
 	) == 0 && blueprint.Authored == nil && blueprint.Memberships == nil &&
-		blueprint.Database == nil {
+		blueprint.Auth == nil && blueprint.Database == nil {
 		return blueprint, fmt.Errorf(
 			"blueprint must declare application contracts",
 		)
@@ -221,6 +222,16 @@ func addBlueprintCommand(options Options) *cobra.Command {
 				}
 
 				manifest.Memberships = blueprint.Memberships
+			}
+
+			if blueprint.Auth != nil {
+				if manifest.Auth != nil {
+					return fmt.Errorf(
+						"blueprint cannot replace existing [auth]",
+					)
+				}
+
+				manifest.Auth = blueprint.Auth
 			}
 
 			if blueprint.Database != nil {

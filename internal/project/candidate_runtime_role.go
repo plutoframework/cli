@@ -81,6 +81,13 @@ func ProposeRuntimeRoleMigration(
 		tables = append(tables, grantTarget{name: name})
 	}
 
+	if index, ok := m.MemberIndexOf(); ok {
+		tables = append(tables, grantTarget{
+			name:     index.ViewName(),
+			readOnly: true,
+		})
+	}
+
 	sort.Slice(tables, func(i, j int) bool {
 		return tables[i].name < tables[j].name
 	})
@@ -107,6 +114,9 @@ func ProposeRuntimeRoleMigration(
 type grantTarget struct {
 	name       string
 	appendOnly bool
+
+	// readOnly is a generated view the runtime role may only read.
+	readOnly bool
 }
 
 // scanRuntimeRoleState reads migrations on disk for tables already granted to
@@ -198,6 +208,10 @@ GRANT USAGE ON SCHEMA public TO %[1]s;
 		privileges := "SELECT, INSERT, UPDATE, DELETE"
 		if target.appendOnly {
 			privileges = "SELECT, INSERT"
+		}
+
+		if target.readOnly {
+			privileges = "SELECT"
 		}
 
 		fmt.Fprintf(

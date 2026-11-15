@@ -41,3 +41,13 @@ func EventHash(eventType string, payload []byte) string {
 
 	return hex.EncodeToString(sum.Sum(nil))
 }
+
+// ValidAuthEvent admits the event kinds the managed hook records.
+func ValidAuthEvent(kind string) bool {
+	switch kind {
+	case "login", "logout", "oidc_login":
+		return true
+	}
+
+	return false
+}

@@ -39,6 +39,7 @@ type Manifest struct {
 	Memberships        *Memberships        `toml:"memberships,omitempty"`
 	Lookups            []Lookup            `toml:"lookups,omitempty"`
 	Principals         []Principal         `toml:"principals,omitempty"`
+	Auth               *AuthSection        `toml:"auth,omitempty"`
 	Migrations         Migrations          `toml:"migrations,omitempty"`
 
 	// Kind is empty for Go applications and KindFrontend for a frontend that

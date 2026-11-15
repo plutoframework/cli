@@ -340,6 +340,13 @@ adapter uses only `queriesOf(tx)`; the tenant is the caller's. Any other
 operation naming the port, or a read operation, fails validation.
 `scope.Tx.Enqueue` stays fail-closed.
 
+A `scope = "provision"` operation may list such a port too (it must appear in the
+port's `tx_callers`). The provision body then receives the narrow interface and
+`TxDB`; `TxDB.Provision(ctx, p, run)` opens the one transaction bound to the NEW
+tenant, so the organization, its first admin and its first audit row commit or
+roll back together, attributed to the verified subject (`tx.SubjectID()`). The
+provisioning authority still mints at most one tenant per request.
+
 ## Tenant-less system operations
 
 Everything is tenant scoped except two explicit shapes. Declare the tenant root
