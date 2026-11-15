@@ -278,7 +278,7 @@ func seamOperation(m Manifest, o Operation) (SeamOperation, error) {
 	// A provision endpoint decodes a JSON body into its declared input model;
 	// it has no query parser.
 	if o.Scope == ScopeProvision || o.Scope == ScopeEnroll ||
-		o.isMachine() && o.Write {
+		o.isMachine() && o.Write && !o.isStream() {
 		out.Endpoint = false
 	}
 

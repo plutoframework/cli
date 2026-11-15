@@ -90,6 +90,13 @@ type gwFixture struct {
 func gwSetup(t *testing.T) *gwFixture {
 	t.Helper()
 
+	return gwSetupEnv(t, map[string]string{})
+}
+
+// gwSetupEnv is gwSetup with extra configuration, such as feature flags.
+func gwSetupEnv(t *testing.T, env map[string]string) *gwFixture {
+	t.Helper()
+
 	address := os.Getenv("PLUTO_CLI_TEST_DATABASE_URL")
 	if address == "" {
 		t.Fatal("audit fixture needs PLUTO_CLI_TEST_DATABASE_URL")
@@ -212,7 +219,13 @@ func gwSetup(t *testing.T) *gwFixture {
 
 	cfg, err := config.LoadFrom(
 		func(key string) (string, bool) {
-			return address, key == config.Prefix+"DATABASE_URL"
+			if key == config.Prefix+"DATABASE_URL" {
+				return address, true
+			}
+
+			value, ok := env[key]
+
+			return value, ok
 		},
 	)
 	if err != nil {

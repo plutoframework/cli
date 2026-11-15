@@ -612,7 +612,8 @@ func NewCandidateRuntime(
 	}
 
 	source.WriteString(
-		`	transport.RegisterSessions(reg, authentication)
+		`
+	transport.RegisterSessions(reg, authentication)
 `,
 	)
 

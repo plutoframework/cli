@@ -1,0 +1,18 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// Rotate clears the gateway's key and returns a new enrollment token.
+func Rotate(
+	ctx context.Context,
+	e scope.Execution,
+	ports RotatePorts,
+	in models.GatewayRef,
+) (models.CreatedGateway, error) {
+	return ports.Registry.Rotate(ctx, e, in)
+}

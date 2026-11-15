@@ -258,6 +258,12 @@ func Contracts(root string, m Manifest) error {
 				return nil
 			}
 
+			// The generated contract grows with the endpoint count and is
+			// regenerated, never edited, so it has no line ceiling.
+			if relative == filepath.Join("openapi", "openapi.json") {
+				return nil
+			}
+
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return err

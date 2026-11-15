@@ -1,0 +1,41 @@
+package gateways
+
+import (
+	"context"
+	"errors"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// Channel acknowledges each heartbeat a signed gateway sends over its job
+// channel. The tenant and subject come only from the verified machine.
+func Channel(
+	ctx context.Context,
+	e scope.Execution,
+	ports ChannelPorts,
+	in models.ChannelRequest,
+	stream scope.Stream[models.Beat, models.Ack],
+) error {
+	_ = in
+
+	for {
+		beat, err := stream.Receive(ctx)
+		if errors.Is(err, scope.ErrStreamClosed) {
+			return nil
+		}
+
+		if err != nil {
+			return err
+		}
+
+		ack, err := ports.Registry.Beat(ctx, e, beat)
+		if err != nil {
+			return err
+		}
+
+		if err := stream.Send(ctx, ack); err != nil {
+			return err
+		}
+	}
+}

@@ -7,6 +7,9 @@ import (
 	logic "{{.Module}}/internal/logic/{{.Group}}"
 	machineauth "{{.Module}}/internal/ports/machineauth"
 	models "{{.Module}}/internal/models/{{.Group}}"
+{{- if .Authored.Pagination}}
+	"github.com/plutoframework/pluto-core/pagination"
+{{- end}}
 )
 
 // {{.Action}}Principal is the machine principal whose signature gates

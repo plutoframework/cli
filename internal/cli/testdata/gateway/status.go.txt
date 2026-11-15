@@ -1,0 +1,18 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// Status reads the verified machine's own record.
+func Status(
+	ctx context.Context,
+	e scope.Execution,
+	ports StatusPorts,
+	in models.StatusRequest,
+) (models.GatewayStatus, error) {
+	return ports.Registry.Status(ctx, e, in)
+}
