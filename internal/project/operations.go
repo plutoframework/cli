@@ -53,6 +53,7 @@ func (o Operation) Endpoint() Endpoint {
 
 	permission, scope, machine := o.Permission, o.Scope, ""
 	if o.isMachine() {
+
 		// Machine permissions never enter the user permission catalog.
 		permission, scope, machine = "", ScopeMachine, o.MachinePrincipal()
 	}

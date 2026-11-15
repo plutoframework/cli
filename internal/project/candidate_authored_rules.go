@@ -126,6 +126,7 @@ func addAuthoredRules(
 		"BindProvisioning",
 		provisionOwners...,
 	)
+
 	if len(machineOwners) > 0 {
 		rules.addCapability(scopeNamespace, "BindMachine", machineOwners...)
 	}

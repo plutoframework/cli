@@ -22,6 +22,7 @@ import (
 // Machine permissions are declared on the principal, never on user roles.
 
 const (
+
 	// ScopeEnroll is the public enrollment operation of a principal.
 	ScopeEnroll = "enroll"
 
