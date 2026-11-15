@@ -17,12 +17,6 @@ const (
 	scopetestFile    = scopeDir + "/scopetest/scopetest_gen.go"
 )
 
-// authoredSeamReady lifts the fail-closed refusal in
-// refuseUngeneratedAuthored. It stays false until every owner of the authored
-// seam (scope/logic, adapters, handlers, memberships, composition) has landed
-// and the end-to-end example passes; tests enable it explicitly.
-var authoredSeamReady = false
-
 // authoredPort is one declared port an authored operation consumes.
 type authoredPort struct {
 	Field string

@@ -33,16 +33,6 @@ response="page"
 item="audit.Entry"
 `
 
-func enableAuthoredSeam(t *testing.T) {
-	t.Helper()
-
-	authoredSeamReady = true
-
-	t.Cleanup(func() {
-		authoredSeamReady = false
-	})
-}
-
 func authoredManifest(t *testing.T) Manifest {
 	t.Helper()
 
@@ -61,8 +51,6 @@ func authoredDiagnostics(
 	files map[string]string,
 ) []ArchitectureDiagnostic {
 	t.Helper()
-	enableAuthoredSeam(t)
-
 	root := candidateReviewFixture(t, files)
 	diagnostics, _ := inspectCandidateBoundaries(
 		root,
@@ -87,8 +75,6 @@ func List(ctx context.Context, e scope.Execution) error {
 `
 
 func TestAuthoredManagedFiles(t *testing.T) {
-	enableAuthoredSeam(t)
-
 	files, err := candidateAuthoredManaged(authoredManifest(t))
 	if err != nil {
 		t.Fatal(err)
@@ -124,12 +110,6 @@ func TestAuthoredManagedFiles(t *testing.T) {
 
 	if _, err := candidateManaged(authoredManifest(t)); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestAuthoredSeamFailsClosedUntilReady(t *testing.T) {
-	if _, err := candidateManaged(authoredManifest(t)); err == nil {
-		t.Fatal("authored operations generated while seam not ready")
 	}
 }
 
@@ -328,8 +308,6 @@ func TestAuthoredBodyMustBeDeclared(t *testing.T) {
 }
 
 func TestAuthoredDeclaredDependencyAllowed(t *testing.T) {
-	enableAuthoredSeam(t)
-
 	root := candidateReviewFixture(t, map[string]string{
 		"internal/logic/audit/list.go": goodBody,
 		"internal/rules/audit/x.go": "package audit\n\nimport _ " +

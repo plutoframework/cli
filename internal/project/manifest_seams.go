@@ -680,19 +680,16 @@ func splitQualified(id string) (string, string, bool) {
 		!strings.Contains(name, ".")
 }
 
-// refuseUngeneratedAuthored fails closed until the seam generators exist: an
-// authored-body operation must never get an endpoint without its gate.
+// refuseUngeneratedAuthored fails closed for authored shapes no generator
+// handles yet: a stream response must never get an endpoint without its gate.
 func refuseUngeneratedAuthored(m Manifest) error {
-	if authoredSeamReady {
-		return nil
-	}
-
 	for _, operation := range m.Operations {
-		if operation.Body == BodyAuthored {
+		if operation.Body == BodyAuthored &&
+			operation.Response == ResponseStream {
 			return fmt.Errorf(
-				"operation %s declares body = \"authored\", but seam "+
-					"generation is not implemented; refusing to generate "+
-					"or vet without its gate",
+				"operation %s declares response = \"stream\", but seam "+
+					"generation does not support streams yet; refusing "+
+					"to generate or vet without its gate",
 				operation.ID(),
 			)
 		}

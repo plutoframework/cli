@@ -196,8 +196,6 @@ func TestAuthoredSeamCompilesAndGatesBody(t *testing.T) {
 		t.Skip("explicit local candidate profile disabled")
 	}
 
-	enableAuthoredSeam(t)
-
 	metadata := fmt.Sprintf(`schema_version=%d
 [project]
 name="auditapp"

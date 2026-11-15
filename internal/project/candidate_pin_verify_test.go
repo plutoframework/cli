@@ -76,9 +76,15 @@ func candidateProxyModules() []fakeCandidateModule {
 		{
 			path:    base + "pluto-rbac/identity",
 			version: "v0.9.0",
-			files: map[string]string{"gate.go": "package identitygate\n\n" +
-				"func New() {}\n\ntype Gate struct{}\n\n" +
-				"func (*Gate) Within() {}\n\nfunc (*Gate) Use() {}\n"},
+			files: map[string]string{
+				"gate.go": "package identitygate\n\n" +
+					"func New() {}\n\ntype Gate struct{}\n\n" +
+					"func (*Gate) Within() {}\n\nfunc (*Gate) Use() {}\n",
+				"identitytest/harness.go": "package identitytest\n\n" +
+					"func New() {}\n\ntype Options struct{}\n\n" +
+					"type Harness struct{}\n\n" +
+					"func (*Harness) Within() {}\n",
+			},
 		},
 		{path: base + "pluto-core", version: "v0.9.0", files: core},
 		{path: base + "pluto-core", version: "v0.9.1", files: core},
