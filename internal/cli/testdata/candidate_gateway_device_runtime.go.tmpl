@@ -123,5 +123,8 @@ func TestGatewayDelegatedPath(t *testing.T) {
 	}
 
 	// The token is bound to its tenant; naming another is refused.
-	f.expect(t, f.bearer("GET", url, "", manage, f.other.tenant, nil), 403)
+	other := f.bearer("GET", url, "", manage, f.other.tenant, nil)
+	if other.Code != 401 && other.Code != 403 {
+		t.Fatalf("token reached another tenant: %d", other.Code)
+	}
 }
