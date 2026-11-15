@@ -1,0 +1,52 @@
+package {{.Group}}
+
+import (
+	"context"
+	"time"
+
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	"{{.Module}}/internal/scope"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
+)
+
+// execute is the only caller of the authored body. It binds the
+// callback-scoped execution to this operation's gate and fixed resource, so
+// every data access the body makes revalidates identity, membership,
+// permission and resource policy, and it runs the body inside scope.RunStream
+// with the limits declared in pluto.toml. The body never sees the connection.
+func (operation *{{.Action}}) execute(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	wire scope.Wire,
+	request models.{{.Action}}Request,
+) error {
+	bound := scope.Bind(
+		execution,
+		operation.{{lowerFirst .Action}}Gate,
+		{{q .Authored.Resource}})
+
+	return scope.RunStream(
+		ctx,
+		wire,
+		bound,
+		scope.StreamLimits{
+			MaxMessageBytes: {{.Authored.Stream.MaxMessageBytes}},
+			Write:           {{.Authored.Stream.WriteSeconds}} * time.Second,
+			Ping:            {{.Authored.Stream.PingSeconds}} * time.Second,
+			Idle:            {{.Authored.Stream.IdleSeconds}} * time.Second,
+			Recheck:         {{.Authored.Stream.RecheckSeconds}} * time.Second,
+		},
+		{{.Authored.Inbound}},
+		func(
+			ctx context.Context,
+			stream scope.Stream[{{.Authored.StreamIn}}, {{.Authored.StreamOut}}],
+		) error {
+			return logic.{{.Action}}(
+				ctx,
+				bound,
+				operation.{{lowerFirst .Action}}Ports,
+				request,
+				stream)
+		})
+}

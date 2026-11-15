@@ -25,6 +25,19 @@ func Document() ([]byte, error) {
 
 		redirect := endpoint.SuccessStatus >= 300 &&
 			endpoint.SuccessStatus < 400
+		{{- if .HasStream}}
+
+		if endpoint.Stream != nil {
+			routes[endpoint.Path][strings.ToLower(endpoint.Method)], err =
+				streamOperation(endpoint)
+			if err != nil {
+				return nil, fmt.Errorf("%s stream: %w", endpoint.ID, err)
+			}
+
+			continue
+		}
+		{{- end}}
+
 		if !redirect {
 			responseSchema, err = modelSchema(endpoint.Response)
 			if err != nil {
@@ -439,3 +452,74 @@ func writeJSON(output *bytes.Buffer, value any, depth, prefix int) error {
 
 	return nil
 }
+{{if .HasStream}}
+// streamOperation documents a WebSocket upgrade: the HTTP handshake is the
+// operation and the JSON messages of each direction are extensions, since
+// OpenAPI has no native WebSocket model.
+func streamOperation(endpoint paths.Endpoint) (map[string]any, error) {
+	spec := endpoint.Stream
+
+	server, err := modelSchema(spec.Server)
+	if err != nil {
+		return nil, err
+	}
+
+	messages := map[string]any{
+		"server_to_client": server,
+		"max_message_bytes": spec.MaxMessageBytes,
+	}
+
+	if spec.Client != nil {
+		client, err := modelSchema(spec.Client)
+		if err != nil {
+			return nil, err
+		}
+
+		messages["client_to_server"] = client
+	}
+
+	if len(spec.Origins) > 0 {
+		messages["allowed_origins"] = spec.Origins
+	}
+
+	parameters := []any{}
+
+	for _, param := range endpoint.Query {
+		parameters = append(parameters, queryParameter(param))
+	}
+
+	return map[string]any{
+		"operationId":  endpoint.ID,
+		"summary":      endpoint.Name,
+		"description": endpoint.Description + " JSON text frames, one " +
+			"object each. Clients without X-Tenant-ID (browsers) pass tenant " +
+			"as a query parameter; the gate verifies membership.",
+		"x-permission": endpoint.Permission,
+		"x-websocket":  messages,
+		"security": []any{
+			map[string]any{"bearerAuth": []string{}},
+			map[string]any{"sessionCookie": []string{}},
+		},
+		"parameters": parameters,
+		"responses": map[string]any{
+			"101": map[string]any{
+				"description": "Switching Protocols: WebSocket upgrade. " +
+					"Authentication and authorization run before the " +
+					"upgrade; the stream closes when they are revoked.",
+			},
+			"default": map[string]any{
+				"description": "Error envelope: code, message, request_id. " +
+					"Returned before the upgrade (401, 403, 400, 503 " +
+					"stream_capacity).",
+				"content": map[string]any{
+					"application/json": map[string]any{
+						"schema": map[string]any{
+							"$ref": "#/components/schemas/Error",
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+{{end}}

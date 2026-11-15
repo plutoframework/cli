@@ -378,6 +378,19 @@ func applyBlueprintChange(
 		}
 	}
 
+	sums := previous["go.sum"]
+	if checked, ok := files["go.sum"]; ok {
+		sums = checked
+	}
+
+	if module, checksums := project.EnsureStreamModule(
+		manifest,
+		files["go.mod"],
+		sums,
+	); string(module) != string(files["go.mod"]) {
+		files["go.mod"], files["go.sum"] = module, checksums
+	}
+
 	paths, err := project.Apply(root, files, previous, dry)
 	if err != nil {
 		return err

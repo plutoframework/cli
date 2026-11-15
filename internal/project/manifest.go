@@ -87,6 +87,11 @@ type Endpoint struct {
 	Feature        string `toml:"feature,omitempty"`
 	ClientVisible  bool   `toml:"feature_client_visible"`
 
+	// Transport is "websocket" for a stream operation; Origins lists the
+	// browser host patterns allowed to open it. See manifest_stream.go.
+	Transport string   `toml:"transport,omitempty"`
+	Origins   []string `toml:"origins,omitempty"`
+
 	// Scope is copied from the referenced operation; see manifest_system.go.
 	Scope string `toml:"-"`
 }
@@ -276,6 +281,10 @@ func (e Endpoint) RequiresIdempotency() bool {
 }
 
 func (e Endpoint) Validate(multi bool) error {
+	if err := e.validateWebSocket(); err != nil {
+		return err
+	}
+
 	if e.Collection && e.Method != "GET" {
 		return fmt.Errorf("collection requires GET")
 	}

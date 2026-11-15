@@ -1,0 +1,112 @@
+package {{.Group}}
+
+import (
+	"errors"
+	"net/http"
+
+	"{{.Module}}/internal/access"
+	commonDomain "{{.Module}}/internal/domain"
+	models "{{.Module}}/internal/models/{{.Group}}"
+	operations "{{.Module}}/internal/operations/{{.Group}}"
+	"{{.Module}}/internal/paths"
+	"{{.Module}}/internal/scope"
+	"{{.Module}}/internal/transport"
+
+	auth "github.com/plutoframework/pluto-auth"
+
+	"github.com/coder/websocket"
+)
+
+type {{.Action}}Operations = operations.{{.Action}}Boundary
+
+// {{.Action}}Origins are the browser host patterns allowed to open this
+// stream, from pluto.toml. With none, only the serving host is allowed;
+// clients that send no Origin header are service clients, not browsers.
+var {{.Action}}Origins = []string{
+{{- range .Origins}}
+	{{q .}},
+{{- end}}
+}
+
+// Register{{.Action}} serves the WebSocket upgrade of {{.Group}}.{{.Action}}.
+// Authentication and the gate run before the upgrade, so a denied caller
+// receives an ordinary HTTP error and never a connection. The tenant is
+// selected by the X-Tenant-ID header or the tenant query parameter and is
+// verified by the gate like any other request.
+func Register{{.Action}}(
+	reg transport.Registrar,
+	operation {{.Action}}Operations,
+	bodyLimit int64,
+) {
+	_ = bodyLimit
+
+	reg.Handle(
+		paths.{{.Symbol}},
+		func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query()
+
+			tenant := r.Header.Get("X-Tenant-ID")
+			if tenant == "" {
+				tenant = query.Get("tenant")
+			}
+
+			query.Del("tenant")
+
+			caller, err := access.CallerFromHTTP(r.Context(), tenant)
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			input, err := models.Parse{{.Action}}Query(query)
+			if err != nil {
+				var rejected *models.QueryError
+				if errors.As(err, &rejected) {
+					transport.Error(w, r, 400, rejected.Code)
+
+					return
+				}
+
+				transport.Error(w, r, 400, "invalid_query_parameter")
+
+				return
+			}
+
+			intent, err := operation.Prepare(r.Context(), caller, input)
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
+			release, admitted := operation.Admit()
+			if !admitted {
+				transport.Error(w, r, 503, "stream_capacity")
+
+				return
+			}
+
+			defer release()
+
+			conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				OriginPatterns: {{.Action}}Origins,
+			})
+			if err != nil {
+				return
+			}
+
+			defer func() { _ = conn.CloseNow() }()
+
+			err = operation.Serve(r.Context(), intent, scope.NewWire(conn))
+			switch {
+			case err == nil:
+			case errors.Is(err, commonDomain.ErrUnauthenticated),
+				errors.Is(err, auth.ErrUnauthenticated),
+				errors.Is(err, commonDomain.ErrForbidden):
+				_ = conn.Close(websocket.StatusPolicyViolation, "unauthorized")
+			default:
+				_ = conn.Close(websocket.StatusInternalError, "internal_error")
+			}
+		})
+}

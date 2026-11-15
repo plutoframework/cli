@@ -177,6 +177,46 @@ path = "/api/audit/verify"
 name = "Verify audit"
 description = "Verify audit event integrity."
 
+[[models]]
+id = "audit.Cursor"
+fields = ["seq:int64"]
+
+[[models]]
+id = "audit.Tick"
+fields = ["seq:int64", "type:string"]
+
+[[operations]]
+group = "audit"
+action = "Watch"
+permission = "audit.read"
+idempotency = "none"
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+response = "stream"
+item = "audit.Tick"
+input = "audit.Cursor"
+query = [{ name = "after", type = "int64" }]
+
+[operations.stream]
+max_message_bytes = 1024
+ping_seconds = 1
+idle_seconds = 5
+recheck_seconds = 1
+max_connections = 3
+
+[[endpoints]]
+group = "audit"
+action = "Watch"
+operation = "audit.Watch"
+transport = "websocket"
+origins = ["app.example.test"]
+method = "GET"
+path = "/api/audit/watch"
+name = "Watch audit"
+description = "Replay audit events over a WebSocket; send {seq} to resume."
+
 [[ports]]
 id = "orgs.Tenants"
 adapter = "orgs.TenantStore"

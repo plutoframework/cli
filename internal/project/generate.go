@@ -387,12 +387,25 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				request = e.Group + "." + e.Action + "Request{}"
 			}
 
+			response := e.Group + "." + e.Action + "Response{}"
+
+			if streamed, ok := m.Operation(e.Operation); ok &&
+				streamed.isStream() {
+				spec, err := streamPathSpec(m, streamed, e)
+				if err != nil {
+					return nil, err
+				}
+
+				query += spec
+				response = "nil"
+			}
+
 			fmt.Fprintf(
 				&paths,
 				"var %s = Endpoint{\nID:%q,\nName:%q,\nDescription:%q,\n"+
 					"Method:%q,\nPath:%q,\nAuthenticated:%t,\n"+
 					"Permission:access.%sPermission,\nFeature:%q,\n"+
-					"Request:%s,\nResponse:%s.%sResponse{},\n"+
+					"Request:%s,\nResponse:%s,\n"+
 					"SuccessStatus:200,\nCollection:%t,\nIdempotent:%t,\n"+
 					"%s}\n",
 				d.Symbol,
@@ -405,8 +418,7 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 				d.Symbol,
 				e.Feature,
 				request,
-				e.Group,
-				e.Action,
+				response,
 				e.Collection,
 				e.RequiresIdempotency(),
 				query,

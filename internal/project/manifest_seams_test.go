@@ -1,10 +1,6 @@
 package project
 
 import (
-	"context"
-	"io"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -524,64 +520,5 @@ func TestSeamQueryRequiresProtectedRead(t *testing.T) {
 	if err := m.Validate(); err == nil ||
 		!strings.Contains(err.Error(), "protected read") {
 		t.Fatalf("got %v", err)
-	}
-}
-
-func streamFixture(t *testing.T) Manifest {
-	t.Helper()
-
-	m := seamFixture(t)
-
-	for index := range m.Operations {
-		if m.Operations[index].ID() == "audit.List" {
-			m.Operations[index].Response = ResponseStream
-			m.Operations[index].Collection = false
-			m.Operations[index].Query = nil
-		}
-	}
-
-	m.Endpoints = nil
-
-	return m
-}
-
-func TestStreamBodyFailsClosed(t *testing.T) {
-	m := streamFixture(t)
-
-	if _, err := Managed(m); err == nil ||
-		!strings.Contains(err.Error(), "does not support streams") {
-		t.Fatalf("Managed: %v", err)
-	}
-
-	if _, err := CandidateManagedPaths(m); err == nil {
-		t.Fatal("CandidateManagedPaths must refuse stream bodies")
-	}
-
-	root := t.TempDir()
-	module := "module " + m.Project.Module + "\n"
-
-	if err := os.WriteFile(
-		filepath.Join(root, "go.mod"),
-		[]byte(module),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	err := Vet(context.Background(), root, m, io.Discard, io.Discard)
-	if err == nil ||
-		!strings.Contains(err.Error(), "does not support streams") {
-		t.Fatalf("Vet must refuse stream bodies for that reason: %v", err)
-	}
-}
-
-func TestRefuseUngeneratedAuthoredNamesOperation(t *testing.T) {
-	err := refuseUngeneratedAuthored(streamFixture(t))
-	if err == nil || !strings.Contains(err.Error(), "audit.List") {
-		t.Fatalf("got %v", err)
-	}
-
-	if err := refuseUngeneratedAuthored(seamFixture(t)); err != nil {
-		t.Fatalf("supported authored shapes refused: %v", err)
 	}
 }

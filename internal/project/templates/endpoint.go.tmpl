@@ -23,7 +23,20 @@ type Endpoint struct {
 	Response      any
 	SuccessStatus int
 	Query         []QueryParam
+{{- if .HasStream}}
+	Stream        *StreamSpec
+{{- end}}
 }
+{{if .HasStream}}
+// StreamSpec describes a WebSocket endpoint: the JSON message models in each
+// direction and the generated limits the stream runtime enforces.
+type StreamSpec struct {
+	Server          any
+	Client          any
+	MaxMessageBytes int
+	Origins         []string
+}
+{{end}}
 
 // QueryParam is one declared typed query parameter of an authored read.
 type QueryParam struct {

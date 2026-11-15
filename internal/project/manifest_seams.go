@@ -146,6 +146,12 @@ func (m Manifest) hasSeamDeclarations() bool {
 		}
 	}
 
+	for _, entry := range m.Endpoints {
+		if entry.Transport != "" || len(entry.Origins) != 0 {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -153,7 +159,8 @@ func (o Operation) usesSeams() bool {
 	return o.Body != "" || o.Resource != "" || o.ResourcePolicy != "" ||
 		len(o.Ports) != 0 || o.Response != "" || o.Item != "" ||
 		o.Output != "" || o.Input != "" || len(o.Query) != 0 ||
-		o.Scope != "" || o.Lookup != "" || o.RateLimit != ""
+		o.Scope != "" || o.Lookup != "" || o.RateLimit != "" ||
+		o.Stream != nil
 }
 
 // validateSeams checks every seam declaration. Published projects may declare
@@ -193,6 +200,10 @@ func validateSeams(m Manifest) error {
 		return err
 	}
 
+	if err := rejectWebSocketDependencies(m.Authored); err != nil {
+		return err
+	}
+
 	if err := validateMemberships(m.Memberships, tables); err != nil {
 		return err
 	}
@@ -205,6 +216,10 @@ func validateSeams(m Manifest) error {
 		if err := operation.validateSeams(ports, models); err != nil {
 			return fmt.Errorf("operation %s: %w", operation.ID(), err)
 		}
+	}
+
+	if err := validateStreams(m); err != nil {
+		return err
 	}
 
 	return validateSystem(m, tables, models)
@@ -706,11 +721,7 @@ func (o Operation) validateModelRefs(models map[string]Model) error {
 		return fmt.Errorf("response page requires collection = true")
 	}
 
-	if o.Write && o.Response == ResponseStream {
-		return fmt.Errorf("stream responses are read-only")
-	}
-
-	return nil
+	return o.validateStreamOperation()
 }
 
 func (o Operation) validateQuery() error {
@@ -796,22 +807,4 @@ func splitQualified(id string) (string, string, bool) {
 
 	return group, name, ok && group != "" && name != "" &&
 		!strings.Contains(name, ".")
-}
-
-// refuseUngeneratedAuthored fails closed for authored shapes no generator
-// handles yet: a stream response must never get an endpoint without its gate.
-func refuseUngeneratedAuthored(m Manifest) error {
-	for _, operation := range m.Operations {
-		if operation.Body == BodyAuthored &&
-			operation.Response == ResponseStream {
-			return fmt.Errorf(
-				"operation %s declares response = \"stream\", but seam "+
-					"generation does not support streams yet; refusing "+
-					"to generate or vet without its gate",
-				operation.ID(),
-			)
-		}
-	}
-
-	return nil
 }

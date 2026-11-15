@@ -16,6 +16,7 @@ const (
 	scopeDir         = "internal/scope"
 	scopeFile        = scopeDir + "/scope_gen.go"
 	scopetestFile    = scopeDir + "/scopetest/scopetest_gen.go"
+	scopeStreamFile  = scopeDir + "/stream_gen.go"
 )
 
 // authoredPort is one declared port an authored operation consumes.
@@ -55,6 +56,14 @@ type authoredOp struct {
 	// Transactional is set when the operation writes through another group's
 	// tx methods and therefore receives a scope.DB to open its transaction.
 	Transactional bool
+
+	// Stream describes a response = "stream" body: the typed channel it
+	// receives and the limits the generated workflow enforces.
+	IsStream  bool
+	Stream    StreamLimits
+	Inbound   bool
+	StreamIn  string
+	StreamOut string
 }
 
 // Returns is the Go result list of the authored body, gate and workflow.
@@ -104,10 +113,15 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 	case ResponseObject:
 		view.Result = "models." + modelName(operation.Output)
 	case ResponseStream:
-		return view, fmt.Errorf(
-			"operation %s: stream responses are a later phase",
-			operation.ID(),
-		)
+		view.IsStream = true
+		view.Stream = operation.StreamSettings()
+		view.Inbound = operation.Input != ""
+		view.StreamIn = "scope.NoMessage"
+		view.StreamOut = "models." + modelName(operation.Item)
+
+		if view.Inbound {
+			view.StreamIn = "models." + modelName(operation.Input)
+		}
 	}
 
 	if operation.Write && operation.Idempotency == "required" {
@@ -200,10 +214,16 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 
 	data := dataFor(m, Endpoint{})
 
-	for path, name := range map[string]string{
+	scopeFiles := map[string]string{
 		scopeFile:     "candidate_scope.go",
 		scopetestFile: "candidate_scopetest.go",
-	} {
+	}
+
+	if m.hasStreams() {
+		scopeFiles[scopeStreamFile] = "candidate_stream_scope.go"
+	}
+
+	for path, name := range scopeFiles {
 		source, err := render(name, data)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
@@ -254,6 +274,13 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 			layout = map[string]string{
 				"_gate_gen.go":     "candidate_provision_gate.go",
 				"_workflow_gen.go": "candidate_provision_workflow.go",
+			}
+		}
+
+		if view.IsStream {
+			layout = map[string]string{
+				"_gate_gen.go":     "candidate_stream_gate.go",
+				"_workflow_gen.go": "candidate_stream_workflow.go",
 			}
 		}
 

@@ -117,6 +117,10 @@ func addAuthoredRules(
 	rules.managed[scopeFile] = true
 	rules.managed[scopetestFile] = true
 
+	if m.hasStreams() {
+		addStreamRules(rules, m, scopeNamespace)
+	}
+
 	rules.addCapability(scopeNamespace, "Bind", bindOwners...)
 	rules.addCapability(
 		scopeNamespace,
@@ -160,6 +164,54 @@ func addAuthoredRules(
 		}
 
 		rules.globalPrivate[name][scopeFile] = true
+
+		if m.hasStreams() {
+			rules.globalPrivate[name][scopeStreamFile] = true
+		}
+	}
+}
+
+// addStreamRules restricts the stream runtime: only generated handlers build
+// a Wire from an accepted connection, only generated workflows run a stream,
+// and only the scope test harness mints an in-memory one.
+func addStreamRules(rules *candidateRules, m Manifest, namespace string) {
+	handlers := []string{}
+	workflows := []string{}
+
+	for _, operation := range m.Operations {
+		if !operation.isStream() {
+			continue
+		}
+
+		lower := lowerAction(operation.Action)
+		handlers = append(
+			handlers,
+			"internal/handlers/"+operation.Group+"/"+lower+".go",
+		)
+		workflows = append(
+			workflows,
+			"internal/operations/"+operation.Group+"/"+lower+"_workflow_gen.go",
+		)
+	}
+
+	rules.managed[scopeStreamFile] = true
+	rules.addCapability(namespace, "NewWire", handlers...)
+	rules.addCapability(namespace, "RunStream", workflows...)
+	rules.addCapability(namespace, "NewMemoryWire", scopetestFile)
+
+	for _, name := range []string{
+		"scopeWireTransport", "scopeSocketConn", "scopeStream",
+		"scopeStreamTransport", "scopeStreamLimits", "scopeStreamInbound",
+		"scopeStreamEnabled", "scopeStreamWrite", "scopeStreamCancel",
+		"scopeStreamOnce", "scopeStreamCode", "scopeStreamReason",
+		"scopePeerToServer", "scopePeerToClient", "scopePeerClosed",
+		"scopePeerOnce", "scopeMemoryPeer",
+	} {
+		if rules.globalPrivate[name] == nil {
+			rules.globalPrivate[name] = map[string]bool{}
+		}
+
+		rules.globalPrivate[name][scopeStreamFile] = true
 	}
 }
 

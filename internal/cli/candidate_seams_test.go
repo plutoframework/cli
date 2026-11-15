@@ -152,6 +152,7 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 	seamFile(t, root, "list.go.txt", "internal/logic/audit/list.go")
 	seamFile(t, root, "append.go.txt", "internal/logic/audit/append.go")
 	seamFile(t, root, "verify.go.txt", "internal/logic/audit/verify.go")
+	seamFile(t, root, "watch.go.txt", "internal/logic/audit/watch.go")
 	seamFile(
 		t,
 		root,
