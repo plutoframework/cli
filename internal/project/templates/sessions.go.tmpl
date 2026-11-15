@@ -71,7 +71,7 @@ func (s sessionPrincipal) Authenticate(
 		}
 
 		if tenant != session.Delegation.Tenant {
-			return domain.Principal{}, domain.ErrUnauthenticated
+			return domain.Principal{}, domain.ErrDelegatedTenant
 		}
 	}{{else}} {
 		return domain.Principal{}, domain.ErrUnauthenticated

@@ -240,8 +240,7 @@ func TestDeviceEndToEnd(t *testing.T) {
 		t.Fatalf("delegated read in its tenant: %d", status)
 	}
 
-	if status := f.listAs(t, reader.access, "south"); status != 403 &&
-		status != 401 {
+	if status := f.listAs(t, reader.access, "south"); status != 403 {
 		t.Fatalf("delegated token reached another tenant: %d", status)
 	}
 
@@ -595,7 +594,7 @@ func TestDeviceStream(t *testing.T) {
 	// The token is bound to its tenant even though the owner is in south.
 	if _, status, err := dialBearer(
 		t, server, reader.access, "south",
-	); err == nil || (status != 403 && status != 401) {
+	); err == nil || status != 403 {
 		t.Fatalf("stream reached another tenant: status %d err %v", status, err)
 	}
 
@@ -607,9 +606,7 @@ func TestDeviceStream(t *testing.T) {
 		t.Fatalf("revoke: %d", status)
 	}
 
-	// The close frame can lose the race with connection teardown under
-	// load (-1); what matters is that the stream ends and never as success.
-	if code := expectClose(t, conn, 8*time.Second); code != 1008 && code != -1 {
+	if code := expectClose(t, conn, 8*time.Second); code != 1008 {
 		t.Fatalf("revoked stream closed with %d", code)
 	}
 }

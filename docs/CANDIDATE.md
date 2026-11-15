@@ -898,7 +898,10 @@ HTTP operations, path-parameter endpoints (the gate runs `Permits` before
 the lookup, so a scope miss is 403 and a tenant-invisible id is the same
 `404 not_found` the owner gets), and WebSocket streams (`Permits` runs in
 `Prepare` before the upgrade and again at every recheck, so revoking the
-grant closes an open stream with 1008). Machine routes and per-tenant jobs
+grant closes an open stream with close code 1008, written before the
+connection is torn down). A delegated token naming any tenant other than the
+one it was approved for is `403`, before and regardless of membership, so it
+reveals nothing about the owner's other tenants. Machine routes and per-tenant jobs
 have no human caller and never accept a delegated token.
 
 Metadata: authored bodies read `e.Actor()` on `scope.Execution` (`Kind()` is

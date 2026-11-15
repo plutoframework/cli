@@ -122,9 +122,20 @@ func TestGatewayDelegatedPath(t *testing.T) {
 		t.Fatal("a delegated edit did not apply")
 	}
 
-	// The token is bound to its tenant; naming another is refused.
-	other := f.bearer("GET", url, "", manage, f.other.tenant, nil)
-	if other.Code != 401 && other.Code != 403 {
-		t.Fatalf("token reached another tenant: %d", other.Code)
+	// The token is bound to its tenant. Naming another tenant the owner
+	// belongs to is a valid token used out of scope: 403.
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"INSERT INTO users (org_id, id, role) VALUES ($1, $2, 'admin')",
+		f.other.tenant, f.org.admin.id,
+	); err != nil {
+		t.Fatal(err)
 	}
+
+	f.expect(t, f.bearer("GET", url, "", manage, f.other.tenant, nil), 403)
+
+	// Any tenant but the token's is 403, member or not: the check precedes
+	// membership, so a token reveals nothing about the owner's tenants.
+	third := f.gwFixture.org(t, "device-third@example.test")
+	f.expect(t, f.bearer("GET", url, "", manage, third.tenant, nil), 403)
 }

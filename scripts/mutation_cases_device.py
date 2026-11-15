@@ -71,4 +71,20 @@ cases = [
         "if false {",
         "TestCandidateDeviceEndToEnd",
     ),
+    (
+        "delegated tenant mismatch is forbidden",
+        "internal/project/templates/register.go.tmpl",
+        "if errors.Is(err, domain.ErrDelegatedTenant) {",
+        "if false {",
+        "TestCandidateDeviceEndToEnd",
+    ),
+    (
+        "stream close frame written before cancel",
+        "internal/project/templates/candidate_stream_scope.go.tmpl",
+        "state.scopeStreamTransport.close(code, reason)\n"
+        "\t\tstate.scopeStreamCancel(cause)",
+        "state.scopeStreamCancel(cause)\n"
+        "\t\tstate.scopeStreamTransport.close(code, reason)",
+        "TestCandidateDeviceEndToEnd",
+    ),
 ]
