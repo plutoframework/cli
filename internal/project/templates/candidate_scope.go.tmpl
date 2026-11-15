@@ -154,11 +154,9 @@ func (d DB) transact(
 		return err
 	}
 
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback(context.WithoutCancel(ctx))
-		}
-	}()
+	// Rollback after Commit is a no-op, so every exit, including a panic in
+	// run, releases the transaction.
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
 	if _, err = tx.Exec(
 		ctx,
@@ -175,9 +173,10 @@ func (d DB) transact(
 	return tx.Commit(ctx)
 }
 
-// Queries binds an sqlc constructor to the transaction, for example
-// scope.Queries(tx, queries.New). It panics when the constructor does not take
-// a pgx-compatible DBTX, which sqlc's pgx/v5 output always does.
+// Queries binds an sqlc constructor to the transaction. Only the generated
+// per-group queriesOf helper may call it; authored adapters call queriesOf(tx).
+// It panics when the constructor does not take a pgx-compatible DBTX, which
+// sqlc's pgx/v5 output always does.
 func Queries[Q, D any](t Tx, constructor func(D) Q) Q {
 	db, ok := any(t.scopeTx).(D)
 	if !ok || t.scopeTx == nil {

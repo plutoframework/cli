@@ -103,6 +103,14 @@ func addAuthoredRules(
 		scopetestFile,
 	)
 
+	queryOwners := []string{}
+	for _, set := range m.Queries {
+		queryOwners = append(queryOwners, queriesHelperPath(set.Group))
+		rules.managed[queriesHelperPath(set.Group)] = true
+	}
+
+	rules.addCapability(scopeNamespace, "Queries", queryOwners...)
+
 	for _, name := range []string{"Execution", "Tenant", "DB", "Tx"} {
 		rules.protectedTypes[scopeNamespace+"."+name] = true
 	}

@@ -26,7 +26,7 @@ func (s *EventStore) Append(
 	in models.NewEvent,
 ) error {
 	return s.db.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
-		_, err := scope.Queries(tx, queries.New).AppendEvent(
+		_, err := queriesOf(tx).AppendEvent(
 			ctx,
 			queries.AppendEventParams{
 				OrgID:   tx.Tenant(),
@@ -54,7 +54,7 @@ func (s *EventStore) Query(
 	}
 
 	err = s.db.Read(ctx, e, func(ctx context.Context, tx scope.Tx) error {
-		rows, err := scope.Queries(tx, queries.New).ListEvents(
+		rows, err := queriesOf(tx).ListEvents(
 			ctx,
 			queries.ListEventsParams{
 				OrgID:     tx.Tenant(),
@@ -97,7 +97,7 @@ func (s *EventStore) Scan(
 	var entries []models.Entry
 
 	err := s.db.Read(ctx, e, func(ctx context.Context, tx scope.Tx) error {
-		rows, err := scope.Queries(tx, queries.New).ScanEvents(
+		rows, err := queriesOf(tx).ScanEvents(
 			ctx,
 			queries.ScanEventsParams{
 				OrgID:   tx.Tenant(),

@@ -205,6 +205,46 @@ func assertSeamNegatives(t *testing.T, root string) {
 			},
 		},
 		{
+			name:  "dbtx passthrough constructor with raw set_config",
+			check: "ARCH611",
+			path:  "internal/adapters/audit/raw.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport (\n\t\"context\"\n\n" +
+					"\t\"" + module + "internal/scope\"\n" +
+					"\tqueries \"" + module +
+					"internal/storage/queries/audit\"\n)\n\n" +
+					"func raw(ctx context.Context, tx scope.Tx) error {\n" +
+					"\tdb := scope.Queries(tx, func(d queries.DBTX) " +
+					"queries.DBTX { return d })\n" +
+					"\t_, err := db.Exec(ctx, \"SELECT set_config(" +
+					"'app.tenant_id', 'other', true)\")\n\n" +
+					"\treturn err\n}\n"
+			},
+		},
+		{
+			name:  "adapter chooses its own scope.Queries constructor",
+			check: "ARCH603",
+			path:  "internal/adapters/audit/choose.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport (\n" +
+					"\t\"" + module + "internal/scope\"\n" +
+					"\tqueries \"" + module +
+					"internal/storage/queries/audit\"\n)\n\n" +
+					"func choose(tx scope.Tx) *queries.Queries {\n" +
+					"\treturn scope.Queries(tx, queries.New)\n}\n"
+			},
+		},
+		{
+			name:  "sqlc WithTx handle",
+			check: "ARCH611",
+			path:  "internal/adapters/audit/withtx.go",
+			mutate: func(string) string {
+				return "package audit\n\nimport queries \"" + module +
+					"internal/storage/queries/audit\"\n\n" +
+					"func withTx() { queries.New(nil).WithTx(nil) }\n"
+			},
+		},
+		{
 			name:  "forged scope tenant",
 			check: "ARCH604",
 			path:  "internal/logic/audit/forge.go",

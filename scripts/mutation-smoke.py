@@ -320,6 +320,13 @@ mutations = [
         "./internal/project#TestAuthoredRoleViolations",
     ),
     (
+        "adapter sqlc transaction handle",
+        "internal/project/candidate_adapter_role.go",
+        'case "DBTX", "WithTx":',
+        'case "DBTXdisabled", "WithTxDisabled":',
+        "./internal/project#TestAuthoredRoleViolations",
+    ),
+    (
         "authored role shape",
         "internal/project/candidate_authored_rules.go",
         'inspectAuthoredShape(file, role.role+" role", emit)',
@@ -370,6 +377,20 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "execution.SubjectID(),\n\t\t\texecution.TenantID()))",
                 '""))',
                 "TestCandidateAuthoredSeamEndToEnd",
+            ),
+            (
+                "scope queries constructor ownership",
+                "internal/project/candidate_authored_rules.go",
+                'rules.addCapability(scopeNamespace, "Queries", queryOwners...)',
+                "_ = queryOwners",
+                "TestCandidateAuthoredSeamEndToEnd",
+            ),
+            (
+                "scope transaction always rolls back",
+                "internal/project/templates/candidate_scope.go.tmpl",
+                "defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()",
+                "defer func() {}()",
+                "./internal/project#TestScopeAlwaysRollsBack",
             ),
             (
                 "authored tenant transaction binding",

@@ -131,6 +131,13 @@ func candidateAdapterFiles(m Manifest) (map[string][]byte, error) {
 		)
 	}
 
+	for _, set := range m.Queries {
+		files[queriesHelperPath(set.Group)] = renderQueriesHelper(
+			m.Project.Module,
+			set.Group,
+		)
+	}
+
 	if len(m.Queries) > 0 {
 		files["sqlc.yaml"] = candidateSQLCConfig(m)
 		files[".golangci.yml"] = candidateLintConfig(m)
@@ -451,4 +458,28 @@ func stubMethod(adapter authoredAdapter, method portMethod) string {
 		strings.Join(results, ", "),
 		adapter.Group+"."+adapter.Name+"."+method.Name+" is not implemented",
 	)
+}
+
+// queriesHelperPath is the one generated file per group that binds the group's
+// sqlc constructor to a scoped transaction.
+func queriesHelperPath(group string) string {
+	return "internal/adapters/" + group + "/queries_gen.go"
+}
+
+// renderQueriesHelper is the only caller of scope.Queries. Adapters obtain
+// their sqlc handle through queriesOf, so they never choose the constructor
+// and can never reach the transaction behind the sqlc DBTX interface.
+func renderQueriesHelper(module, group string) []byte {
+	return []byte(fmt.Sprintf(`package %[1]s
+
+import (
+	%[2]q
+	queries %[3]q
+)
+
+// queriesOf returns the group's sqlc handle bound to the scoped transaction.
+func queriesOf(tx scope.Tx) *queries.Queries {
+	return scope.Queries(tx, queries.New)
+}
+`, group, module+"/internal/scope", module+"/"+CandidateQueryPackage(group)))
 }

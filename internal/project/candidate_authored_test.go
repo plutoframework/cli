@@ -212,6 +212,18 @@ func TestAuthoredRoleViolations(t *testing.T) {
 			"package audit\n\nimport _ \"example.test/candidate/internal/" +
 				"models/other\"\n", "ARCH610",
 		},
+		"adapter dbtx passthrough": {
+			"internal/adapters/audit/x.go",
+			"package audit\n\nimport \"example.test/candidate/internal/" +
+				"scope\"\n\nvar _ = scope.DB{}\n\ntype raw = queries.DBTX\n",
+			"ARCH611",
+		},
+		"adapter with tx": {
+			"internal/adapters/audit/x.go",
+			"package audit\n\nfunc f(q interface{ WithTx(int) }) {" +
+				" q.WithTx(1) }\n",
+			"ARCH611",
+		},
 		"logic undeclared third party": {
 			"internal/logic/audit/x.go",
 			"package audit\n\nimport _ \"example.org/lib\"\n", "ARCH610",
@@ -342,5 +354,22 @@ func TestAuthoredOutsideRoleStillARCH602(t *testing.T) {
 		if !candidateReviewHas(diagnostics, "ARCH602", path) {
 			t.Fatalf("%s escaped ARCH602: %+v", path, diagnostics)
 		}
+	}
+}
+
+func TestScopeAlwaysRollsBack(t *testing.T) {
+	files, err := candidateManaged(authoredManifest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(files[scopeFile])
+
+	if !strings.Contains(
+		source,
+		"defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()",
+	) && !strings.Contains(source, "defer func() {\n\t_ = tx.Rollback(") {
+		t.Fatalf("scope must roll back on every exit, including panics:\n%s",
+			source)
 	}
 }

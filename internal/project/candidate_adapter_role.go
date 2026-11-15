@@ -77,11 +77,54 @@ func inspectCandidateAdapter(
 				"internal/storage/queries/"+group+", the group's rules, "+
 				"models and ports, pgx pgtype, pagination, the standard "+
 				"library and declared authored dependencies. Never hold a "+
-				"pool or driver; obtain queries through scope.Queries.",
+				"pool or driver; obtain queries through the generated queriesOf helper.",
 		)
 	}
 
 	inspectAuthoredShape(file, "adapter", emit)
+	inspectAdapterQueryAccess(file, emit)
+}
+
+// inspectAdapterQueryAccess rejects every route from authored adapter code to
+// the transaction behind the sqlc package: its exported DBTX interface, its
+// WithTx method, and a caller-chosen constructor for scope.Queries. Adapters
+// get their handle from the generated queriesOf helper only.
+func inspectAdapterQueryAccess(
+	file *candidateSource,
+	emit func(id string, pos token.Pos, message, repair string),
+) {
+	ast.Inspect(file.tree, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+
+		switch selector.Sel.Name {
+		case "DBTX", "WithTx":
+			emit(
+				"ARCH611",
+				selector.Pos(),
+				"authored adapter reaches the sqlc transaction handle: "+
+					selector.Sel.Name,
+				"Use queriesOf(tx) and the generated query methods only; "+
+					"DBTX and WithTx expose a raw transaction.",
+			)
+		case "Queries":
+			if ident, ok := selector.X.(*ast.Ident); ok &&
+				ident.Name == "scope" {
+				emit(
+					"ARCH603",
+					selector.Pos(),
+					"authored adapter chooses its own scope.Queries "+
+						"constructor",
+					"Call queriesOf(tx); the generated helper is the "+
+						"only caller of scope.Queries.",
+				)
+			}
+		}
+
+		return true
+	})
 }
 
 // inspectAuthoredShape enforces the shape rules shared by authored roles: no
