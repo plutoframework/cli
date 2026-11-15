@@ -102,8 +102,19 @@ Authored seams (candidate): declare, then write only authored role files.
   its id. Machine permissions live on the principal, never on user roles.
   Register machines in an authored write with `tx.IssueEnrollment(ctx,
   principal, machineID)`; never accept a tenant or actor from machine input.
-  Revoke by changing the state column; the next request is denied.
+  Rotate and revoke with `tx.RotateMachine` / `tx.RevokeMachine`: authored SQL
+  may not name the key or state columns (ARCH612; the state column needs
+  `DEFAULT '<pending_value>'`). Verified requests are budgeted by
+  `request_limit` (429). A machine operation may also be a signed paginated
+  read (`response = "page"`) or a signed stream (`response = "stream"`); with
+  `[auth.events]`, enrollment records `event = "machine_enroll"`.
 {{- end}}
+- Authored write endpoints: an authored `write = true` operation with an
+  `input` model and `response = "object"` may be exposed by a POST, PUT, PATCH
+  or DELETE `[[endpoints]]` entry. Generated code decodes the strict JSON body
+  into the input model, runs the gate first and, for `idempotency = "required"`,
+  claims the `Idempotency-Key` only after authorization. No path or query
+  parameters; never return secrets from an idempotent write (use `exempt`).
 - Streams: `response = "stream"` (`item` = server message model, optional
   `input` = client message model) exposed by one `[[endpoints]]` with
   `transport = "websocket"`. The body is `func(ctx, scope.Execution, ports,

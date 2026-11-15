@@ -267,9 +267,9 @@ Rules, all enforced before any write:
 - Each principal needs exactly one `enroll` operation; machine permissions are
   declared only on the principal and must not equal any user role or operation
   permission, so they never enter the user permission catalog. Machine
-  operations use `body = "authored"`, a non-collection `response = "object"`,
-  `resource_policy = "tenant"` and exactly one endpoint (POST for writes, GET
-  for reads). Machines require `tenancy = "multi"` and local credentials (the
+  operations use `body = "authored"`, `response = "object"`, `"page"` or
+  `"stream"`, `resource_policy = "tenant"` and exactly one endpoint (POST for
+  object writes, GET for reads, pages and streams). Machines require `tenancy = "multi"` and local credentials (the
   shared attempt limiter rate limits enrollment).
 - Registration is authored: insert the pending row (`state = pending_value`,
   key null) and, in the same write transaction, call
@@ -307,10 +307,107 @@ Rules, all enforced before any write:
   (ARCH610). Client helpers: `transport.SignMachineRequest` signs a request in
   Go; any ed25519 client can build the headers from the canonical string.
 
-Limits: key rotation, revocation and offline detection are authored on the
-machine table (change the state or key column; liveness is a normal tenant
-column); machine operations cannot paginate or stream yet; the registering
-operation is an authored write and so has no HTTP endpoint of its own.
+Credential columns are generated-only:
+
+- The principal's `key_column` and `state_column` are protected: ARCH612
+  rejects any authored `INSERT` that names them and any authored `UPDATE` that
+  sets them, so authored code can neither forge a key nor revive a machine. A
+  registering `INSERT` omits both; give the state column
+  `DEFAULT '<pending_value>'` (a row in any other state is refused by
+  `IssueEnrollment`) and leave the key null. The enrollment tokens live in the
+  generated, forced-RLS `pluto_machine_enrollments` table, which authored SQL
+  cannot touch either.
+- Registration, rotation and revocation are generated `scope.Tx` methods an
+  authored write calls inside its own transaction, so they commit or roll back
+  with the business change: `tx.IssueEnrollment(ctx, principal, id)`,
+  `tx.RotateMachine(ctx, principal, id)` (clears the key, which stops the
+  machine authenticating at once, and returns a new single-use token) and
+  `tx.RevokeMachine(ctx, principal, id)` (moves a pending or active machine to
+  `revoked_value`, default `revoked`, and deletes its unused tokens). A revoked
+  machine cannot be rotated back; both fail with a conflict
+  (`scope.ErrMachineState`) for an unknown, foreign or revoked id.
+- A verified machine has a request budget: `request_limit` (default 600, max
+  100000) verified requests per two replay windows, counted from the nonce
+  table so every replica shares it. Over budget answers `429 rate_limited`;
+  only requests whose signature verified count, so an unauthenticated caller
+  cannot spend or probe a machine's budget.
+- With `[auth.events]` declared, a successful enrollment is recorded through
+  the same operation with `event = "machine_enroll"`, bound to the machine's own
+  tenant and attributed to the machine id (`e.SubjectID()`). Under the closed
+  policy a failed record withdraws the enrollment (the machine is revoked) and
+  the enroll call fails; best effort logs and proceeds. The event operation
+  gains a generated `ExecuteMachine` entry used only by enrollment; the
+  `RecordAuthEvent` body must therefore accept that kind.
+
+Machine operations take three response shapes. `response = "object"` (a read
+with query parameters, or a write with a JSON input) as above. `response =
+"page"` with `collection = true` and an `item` model is a signed paginated read:
+the cursor is bound to the verified machine, its tenant, the resource and the
+filters, so another machine cannot replay it. `response = "stream"` is a signed
+WebSocket channel (see Streams): the upgrade request is verified once (signature
+over `GET`, path and query, empty body), the body runs as the machine in its
+tenant with `e.SubjectID()` = the machine id, every data access and a periodic
+recheck (`recheck_seconds`) confirm the machine is still active with the
+verified key, and revoking it closes the stream (1008). Machine streams have no
+user Origin allowance: service clients send none, and a browser Origin is
+refused unless `origins` lists it.
+
+Limits: liveness is a normal tenant column (see the per-tenant job below); a
+machine stream is verified at the upgrade, not per message; the registering
+operation is an authored write exposed like any other (see authored write
+endpoints).
+
+## Authored write endpoints
+
+An authored operation with `write = true` and an `input` model is exposed by an
+ordinary `[[endpoints]]` entry using `POST`, `PUT`, `PATCH` or `DELETE` (a
+write behind a read method is refused). The input is the request body, whatever
+the method; the response is `response = "object"` with an `output` model.
+
+```toml
+[[operations]]
+group = "gateways"
+action = "Rename"
+permission = "gateways.manage"
+write = true
+idempotency = "required"          # or exempt + replay_reason
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.RenameGateway"
+output = "gateways.GatewayInfo"
+feature = "gateways"              # optional default-off flag
+
+[[endpoints]]
+group = "gateways"
+action = "Rename"
+operation = "gateways.Rename"
+method = "PATCH"
+path = "/api/gateways"
+```
+
+The generated handler, in order: the route gate (feature flag, session);
+the verified caller and tenant; a body read limited by the server body limit
+(`413 body_too_large`); a strict decode into the declared model (unknown fields,
+trailing data, non-object JSON and wrong types are `400`); then the identity
+gate (membership, permission, resource) before the authored body runs. The
+OpenAPI request schema is the input model. Field values beyond their type
+(lengths, formats, ranges) are domain rules: validate them in the body or the
+`rules` package.
+
+`idempotency = "required"` adds generated `Idempotency-Key` handling over the
+durable store: the claim is taken only after the gate has authorized the exact
+request (an unauthorized caller never creates or replays one), a replay of the
+same key and body returns the stored response without running the body, and the
+same key with another body is `409`. Claims are never released on error, so a
+failed execution is not retried under its key. The stored response is replayed
+verbatim: do not return secrets (such as an enrollment token) from an
+idempotent write; declare those `exempt` with a `replay_reason`. `required`
+needs an HTTP endpoint; an authored write that no endpoint exposes stays
+`exempt`. The operation cannot take path or query parameters: carry identifiers
+in the body.
 
 ## Same-transaction writes across groups
 
