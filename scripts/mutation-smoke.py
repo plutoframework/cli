@@ -637,6 +637,67 @@ mutations.extend(
     ]
 )
 
+mutations.extend(
+    [
+        (
+            "protected columns rejected on update",
+            "internal/sqlcheck/query.go",
+            'named := stmt.Kind == "update" && setsColumn(stmt.Set, column)',
+            'named := false && setsColumn(stmt.Set, column)',
+            "./internal/sqlcheck#TestAnalyzeQueryProtectedColumns",
+        ),
+        (
+            "protected columns rejected on insert",
+            "internal/sqlcheck/query.go",
+            "named = named || tableKey(inserted) == tableKey(column)",
+            "named = named || false",
+            "./internal/sqlcheck#TestAnalyzeQueryProtectedColumns",
+        ),
+        (
+            "machine credential columns protected",
+            "internal/project/manifest_machine.go",
+            "columns = append(columns, principal.KeyColumn, principal.StateColumn)",
+            "columns = append(columns, principal.KeyColumn)",
+            "./internal/project#TestMachineProtectedColumnsReachSQLCheck",
+        ),
+        (
+            "authored write endpoint needs an input model",
+            "internal/project/candidate_seam_models.go",
+            'if out.Input == "" || o.Response != ResponseObject || o.Collection {',
+            'if false {',
+            "./internal/project#TestAuthoredWriteEndpointRejections",
+        ),
+        (
+            "authored write claims idempotency after the gate",
+            "internal/project/templates/candidate_seam_write_handler.go.tmpl",
+            "reg.Idempotency.Serve(",
+            "reg.Idempotency.Do(",
+            "./internal/project#TestAuthoredWriteEndpointIdempotent",
+        ),
+        (
+            "authored write body strictly decoded",
+            "internal/project/templates/candidate_seam_write_handler.go.tmpl",
+            "transport.Decode(w, r, &input, bodyLimit)",
+            "json.NewDecoder(r.Body).Decode(&input)",
+            "./internal/project#TestAuthoredWriteEndpointExempt",
+        ),
+        (
+            "unexposed authored write cannot claim idempotency",
+            "internal/project/candidate_authored.go",
+            "!(operation.isAuthoredWriteBody() && m.hasEndpoint(operation)) {",
+            "false {",
+            "./internal/project#TestInternalAuthoredWriteCannotRequireIdempotency",
+        ),
+        (
+            "machine stream rechecks the machine",
+            "internal/project/templates/candidate_machine_stream_workflow.go.tmpl",
+            "Verifier.Recheck(ctx, verified)",
+            "Verifier.Check(ctx, verified)",
+            "./internal/project#TestMachinePageAndStreamAreGenerated",
+        ),
+    ]
+)
+
 if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
     mutations.extend(
         [
@@ -721,6 +782,41 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "return []rbac.RoleID{rbac.RoleID(%[2]s)}, nil",
                 "return []rbac.RoleID{}, nil",
                 "TestCandidateTenantJobsEndToEnd",
+            ),
+            (
+                "machine request budget",
+                "internal/project/templates/candidate_machine.go.tmpl",
+                "if recent >= cfg.limit {",
+                "if false {",
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "machine revoke only pending or active",
+                "internal/project/candidate_machine.go",
+                '"::text = $2 AND " + state + "::text IN ($3, $4)",\n\t\t\tReset:',
+                '"::text = $2",\n\t\t\tReset:',
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "failed enrollment audit withdraws the machine",
+                "internal/project/templates/candidate_enroll_gate.go.tmpl",
+                "context.WithoutCancel(ctx),\n\t\t\tverified)",
+                "context.WithoutCancel(ctx),\n\t\t\tmachineauth.Verified{})",
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "machine stream closes on revocation",
+                "internal/project/templates/candidate_machine_stream_workflow.go.tmpl",
+                "return operation.{{lowerFirst .Action}}Verifier.Recheck(ctx, verified)",
+                "return nil",
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "machine page cursor binds the machine",
+                "internal/project/templates/candidate_machine_workflow.go.tmpl",
+                "verified.MachineID(),\n\t\t\tverified.TenantID()))",
+                '"",\n\t\t\tverified.TenantID()))',
+                "TestCandidateGatewayEndToEnd",
             ),
             (
                 "authored tenant transaction binding",
