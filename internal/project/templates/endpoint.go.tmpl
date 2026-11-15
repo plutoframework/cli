@@ -22,6 +22,15 @@ type Endpoint struct {
 	Request       any
 	Response      any
 	SuccessStatus int
+	Query         []QueryParam
+}
+
+// QueryParam is one declared typed query parameter of an authored read.
+type QueryParam struct {
+	Name  string
+	Type  string
+	Max   int
+	After string
 }
 
 type FeaturesResponse struct {

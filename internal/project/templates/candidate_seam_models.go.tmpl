@@ -1,0 +1,20 @@
+package {{.Group}}
+
+import (
+	"encoding/json"
+	"time"
+)
+
+// Declared wire models. They are generated from [[models]] in pluto.toml and
+// are the only wire shapes authored operations may return.
+{{range .Models}}
+type {{.Name}} struct {
+{{- range .Fields}}
+	{{.GoName}} {{.GoType}} `json:"{{.Name}}"{{.Tag}}`{{if .Comment}} {{.Comment}}{{end}}
+{{- end}}
+}
+{{end}}
+var (
+	_ = json.RawMessage(nil)
+	_ time.Time
+)

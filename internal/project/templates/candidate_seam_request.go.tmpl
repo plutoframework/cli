@@ -1,0 +1,169 @@
+package {{.Group}}
+
+import (
+	{{- if .Endpoint}}
+	"net/url"
+	{{- end}}
+	{{- if .Strconv}}
+	"strconv"
+	{{- end}}
+	{{- if .Time}}
+	"time"
+	{{- end}}
+	{{- if .Pagination}}
+
+	"github.com/plutoframework/pluto-core/pagination"
+	{{- end}}
+)
+{{if .Endpoint}}
+// {{.Action}}Request carries the strictly parsed query of {{.Group}}.{{.Action}}.
+type {{.Action}}Request struct {
+{{- range .Query}}
+	{{.GoName}} {{.GoType}} `json:"{{.Name}},omitempty"`
+{{- end}}
+{{- if .Collection}}
+	Limit  int                `json:"limit,omitempty"`
+	Cursor string             `json:"cursor,omitempty"`
+	Page   pagination.Request `json:"-"`
+{{- end}}
+}
+
+// Values returns the canonical filters for binding pagination cursors.
+func (r {{.Action}}Request) Values() url.Values {
+	values := url.Values{}
+{{- range .Query}}
+{{- if eq .Kind "string"}}
+	if r.{{.GoName}} != "" {
+		values.Set({{q .Name}}, r.{{.GoName}})
+	}
+{{- else if eq .Kind "int64"}}
+	if r.{{.GoName}} != nil {
+		values.Set({{q .Name}}, strconv.FormatInt(*r.{{.GoName}}, 10))
+	}
+{{- else if eq .Kind "bool"}}
+	if r.{{.GoName}} != nil {
+		values.Set({{q .Name}}, strconv.FormatBool(*r.{{.GoName}}))
+	}
+{{- else}}
+	if !r.{{.GoName}}.IsZero() {
+		values.Set({{q .Name}}, r.{{.GoName}}.UTC().Format(time.RFC3339Nano))
+	}
+{{- end}}
+{{- end}}
+
+	return values
+}
+
+// Parse{{.Action}}Query rejects unknown, repeated, empty, oversized and
+// malformed parameters before any operation runs.
+func Parse{{.Action}}Query(query url.Values) ({{.Action}}Request, error) {
+	var request {{.Action}}Request
+
+	if err := queryUnknown(query{{if .Collection}}, "limit", "cursor"{{end}}{{range .Query}}, {{q .Name}}{{end}}); err != nil {
+		return request, err
+	}
+{{range .Query}}
+{{- if eq .Kind "string"}}
+	if value, ok, err := queryOne(query, {{q .Name}}); err != nil {
+		return request, err
+	} else if ok {
+		if len(value) > {{.Max}} {
+			return request, &QueryError{Code: "query_parameter_too_long", Param: {{q .Name}}}
+		}
+
+		if !queryText(value) {
+			return request, &QueryError{Code: "invalid_query_parameter", Param: {{q .Name}}}
+		}
+
+		request.{{.GoName}} = value
+	}
+{{else if eq .Kind "int64"}}
+	if value, ok, err := queryOne(query, {{q .Name}}); err != nil {
+		return request, err
+	} else if ok {
+		number, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || number < 0{{if .Max}} || number > {{.Max}}{{end}} {
+			return request, &QueryError{Code: "invalid_query_parameter", Param: {{q .Name}}}
+		}
+
+		request.{{.GoName}} = &number
+	}
+{{else if eq .Kind "bool"}}
+	if value, ok, err := queryOne(query, {{q .Name}}); err != nil {
+		return request, err
+	} else if ok {
+		if value != "true" && value != "false" {
+			return request, &QueryError{Code: "invalid_query_parameter", Param: {{q .Name}}}
+		}
+
+		flag := value == "true"
+		request.{{.GoName}} = &flag
+	}
+{{else}}
+	if value, ok, err := queryOne(query, {{q .Name}}); err != nil {
+		return request, err
+	} else if ok {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return request, &QueryError{Code: "invalid_query_parameter", Param: {{q .Name}}}
+		}
+
+		request.{{.GoName}} = parsed.UTC()
+	}
+{{end}}
+{{- end}}
+{{- range .Query}}{{if .After}}
+	if !request.{{.GoName}}.IsZero() && !request.{{goName .After}}.IsZero() &&
+		!request.{{.GoName}}.After(request.{{goName .After}}) {
+		return request, &QueryError{Code: "invalid_time_range", Param: {{q .Name}}}
+	}
+{{end}}{{end}}
+{{- if .Collection}}
+	if value, ok, err := queryOne(query, "limit"); err != nil {
+		return request, err
+	} else if ok {
+		limit, err := queryLimit(value)
+		if err != nil {
+			return request, err
+		}
+
+		request.Limit = limit
+	}
+
+	if value, ok, err := queryOne(query, "cursor"); err != nil {
+		return request, err
+	} else if ok {
+		if len(value) > pagination.MaxCursor {
+			return request, &QueryError{Code: "invalid_cursor", Param: "cursor"}
+		}
+
+		request.Cursor = value
+	}
+{{end}}
+	return request, nil
+}
+{{else if .Input}}
+// {{.Action}}Request is the declared input model of the internal operation.
+type {{.Action}}Request = {{.Input}}
+{{else}}
+// {{.Action}}Request has no caller-supplied fields.
+type {{.Action}}Request struct{}
+{{end}}
+{{- if eq .Response "page"}}
+type {{.Action}}Data = pagination.Page[{{.Item}}]
+type {{.Action}}Page = {{.Action}}Data
+type {{.Action}}Item = {{.Item}}
+
+type {{.Action}}Response struct {
+	Data []{{.Item}}         `json:"data"`
+	Page pagination.Metadata `json:"page"`
+}
+{{else if eq .Response "object"}}
+type {{.Action}}Data = {{.Output}}
+
+type {{.Action}}Response struct {
+	Data {{.Output}} `json:"data"`
+}
+{{else}}
+type {{.Action}}Data struct{}
+{{end}}
