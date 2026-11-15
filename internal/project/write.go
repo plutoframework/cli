@@ -117,7 +117,7 @@ func Apply(
 
 			// A managed file still matching what an older CLI wrote is
 			// pristine. Authored files are never in previous.
-			if !pristine && !(owned && lock.Matches(name, data)) {
+			if !pristine && (!owned || !lock.Matches(name, data)) {
 				return nil, fmt.Errorf(
 					"refusing to overwrite %s (existing or modified)",
 					path,
