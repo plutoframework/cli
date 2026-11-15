@@ -41,6 +41,7 @@ type Operation struct {
 	// The flag never grants authorization; see feature_gate.go.
 	Feature       string `toml:"feature,omitempty"`
 	ClientVisible bool   `toml:"feature_client_visible,omitempty"`
+
 	// Machine identity; see manifest_machine.go. Auth is
 	// "machine:<principal>" and Principal names the principal an enroll
 	// operation activates.

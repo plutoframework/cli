@@ -581,7 +581,11 @@ func (m Manifest) protectedColumns(table Table) []string {
 
 	for _, principal := range m.Principals {
 		if principal.Group() == table.Group && principal.Table == table.Name {
-			columns = append(columns, principal.KeyColumn, principal.StateColumn)
+			columns = append(
+				columns,
+				principal.KeyColumn,
+				principal.StateColumn,
+			)
 		}
 	}
 
@@ -608,6 +612,7 @@ func (o Operation) validateMachineResponse() error {
 			)
 		}
 	case ResponseStream:
+
 		// Item, input and limits are checked with the stream declaration.
 	default:
 		return fmt.Errorf(

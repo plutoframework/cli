@@ -173,7 +173,11 @@ func checkTenantRootWrite(q query, stmt *statement, env queryEnv) []Diagnostic {
 
 // checkProtectedColumns rejects authored writes of columns that only
 // generated code may change, such as a machine's key and state.
-func checkProtectedColumns(q query, stmt *statement, env queryEnv) []Diagnostic {
+func checkProtectedColumns(
+	q query,
+	stmt *statement,
+	env queryEnv,
+) []Diagnostic {
 	if stmt.Kind != "insert" && stmt.Kind != "update" {
 		return nil
 	}

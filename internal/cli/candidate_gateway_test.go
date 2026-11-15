@@ -94,7 +94,10 @@ func gatewayApp(t *testing.T) string {
 	)
 	gatewayFile(t, root, "store.go.txt", "internal/adapters/gateways/store.go")
 	gatewayFile(
-		t, root, "audit_store.go.txt", "internal/adapters/gateways/audit_store.go",
+		t,
+		root,
+		"audit_store.go.txt",
+		"internal/adapters/gateways/audit_store.go",
 	)
 
 	external(t, root, "sqlc", "generate")
