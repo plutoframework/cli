@@ -19,9 +19,11 @@ const (
 	roleAdapter = "adapter"
 
 	candidateFactory = "internal/app/candidate_operations_gen.go"
-	corePagination   = "github.com/plutoframework/pluto-core/pagination"
-	coreState        = "github.com/plutoframework/pluto-core/state"
-	pgxPgtype        = "github.com/jackc/pgx/v5/pgtype"
+
+	candidateAdaptersFile = "internal/app/candidate_adapters_gen.go"
+	corePagination        = "github.com/plutoframework/pluto-core/pagination"
+	coreState             = "github.com/plutoframework/pluto-core/state"
+	pgxPgtype             = "github.com/jackc/pgx/v5/pgtype"
 )
 
 // addAuthoredRules registers role directories, capability owners, protected
@@ -97,6 +99,7 @@ func addAuthoredRules(
 		scopeNamespace,
 		"NewDB",
 		candidateFactory,
+		candidateAdaptersFile,
 		scopetestFile,
 	)
 

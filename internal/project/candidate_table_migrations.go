@@ -85,9 +85,9 @@ func ProposeTableMigrations(
 	return proposals, nil
 }
 
-// nextMigrationNumber is one past the highest number on disk or allocated to
-// a recorded [migrations.framework] migration, so a proposal never lands on a
-// number the framework owns even when that file is not rendered yet.
+// nextMigrationNumber is one past the highest number below the reserved range
+// on disk or recorded in [migrations.framework], so a proposal never lands on
+// a number the framework owns even when that file is not rendered yet.
 func nextMigrationNumber(root string, m Manifest) (int, error) {
 	entries, err := os.ReadDir(filepath.Join(root, "db/migrations"))
 	if err != nil {
@@ -109,9 +109,16 @@ func nextMigrationNumber(root string, m Manifest) (int, error) {
 		}
 
 		number, err := strconv.Atoi(match[1])
-		if err == nil && number > highest {
+		if err == nil && number > highest &&
+			!ReservedMigrationNumber(fmt.Sprintf("%03d", number)) {
 			highest = number
 		}
+	}
+
+	if ReservedMigrationNumber(fmt.Sprintf("%03d", highest+1)) {
+		return 0, fmt.Errorf(
+			"no free migration number below 099 for table policies",
+		)
 	}
 
 	return highest + 1, nil

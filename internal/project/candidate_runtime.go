@@ -145,6 +145,38 @@ jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 		}
 	}
 
+	authoredGroups := map[string]bool{}
+
+	for _, operation := range m.Operations {
+		if operation.isAuthored() {
+			authoredGroups[operation.Group] = true
+		}
+	}
+
+	if len(authoredGroups) > 0 {
+		source.WriteString(
+			`rbac "github.com/plutoframework/pluto-rbac"
+`,
+		)
+
+		names := []string{}
+		for group := range authoredGroups {
+			names = append(names, group)
+		}
+
+		sort.Strings(names)
+
+		for _, group := range names {
+			fmt.Fprintf(
+				&source,
+				`%slogic %s
+`,
+				group,
+				q(m.Project.Module+"/internal/logic/"+group),
+			)
+		}
+	}
+
 	source.WriteString(`)
 
 type CandidateOperations struct {
@@ -316,7 +348,21 @@ func NewCandidateRuntime(
 		)
 	}
 
+	if len(authoredGroups) > 0 && len(m.Ports) > 0 {
+		source.WriteString(
+			`
+	adapters := NewAuthoredAdapters(pool)
+`,
+		)
+	}
+
 	for index, operation := range m.Operations {
+		if operation.isAuthored() {
+			writeAuthoredOperation(&source, operation, index)
+
+			continue
+		}
+
 		contract := contracts[operation.ID()]
 		resource := resources[contract.Resource]
 		suffix := fmt.Sprint(index)
@@ -557,6 +603,10 @@ func (r *CandidateRuntime) Worker(
 `,
 	)
 
+	if len(authoredGroups) > 0 {
+		source.WriteString(candidateTenantResourceSource)
+	}
+
 	// Keep imported candidate framework modules available for bootstrap
 	// projects.
 	source.WriteString(`var _ = identitygate.New
@@ -564,3 +614,88 @@ func (r *CandidateRuntime) Worker(
 
 	return format.Source(source.Bytes())
 }
+
+// writeAuthoredOperation wires one authored-body operation: its gate with the
+// tenant resource policy, and the declared adapters as the logic ports. The
+// gate is the only way the authored body runs.
+func writeAuthoredOperation(
+	source *bytes.Buffer,
+	operation Operation,
+	index int,
+) {
+	suffix := fmt.Sprint(index)
+
+	fmt.Fprintf(
+		source,
+		`
+	requirement%[1]s, err := authorizer.Require(%[2]s)
+	if err != nil {
+		return nil, err
+	}
+
+	resource%[1]s, err := requirement%[1]s.WithResourcePolicy(
+		candidateTenantResource(%[3]s),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	gate%[1]s, err := identitygate.New(
+		authentication.Manager,
+		resource%[1]s,
+		memberships,
+	)
+	if err != nil {
+		return nil, err
+	}
+`,
+		suffix,
+		strconv.Quote(operation.Permission),
+		strconv.Quote(operation.Resource),
+	)
+
+	var ports bytes.Buffer
+
+	for _, id := range operation.Ports {
+		fmt.Fprintf(
+			&ports,
+			"%s: adapters.%s, ",
+			modelName(id),
+			adapterField(Port{ID: id}),
+		)
+	}
+
+	fmt.Fprintf(
+		source,
+		`
+	runtime.Operations.%[1]s = %[2]soperations.New%[3]s(
+		gate%[4]s,
+		%[2]slogic.%[3]sPorts{%[5]s},
+	)
+`,
+		symbol(operation.Endpoint()),
+		operation.Group,
+		operation.Action,
+		suffix,
+		ports.String(),
+	)
+}
+
+// candidateTenantResourceSource is the tenant resource policy of authored
+// operations: membership and permission are verified by the gate, row-level
+// security isolates the data, and the resource must be the declared one.
+const candidateTenantResourceSource = `
+func candidateTenantResource(resource string) rbac.ResourcePolicyFunc {
+	return func(
+		_ context.Context,
+		request rbac.Request,
+		id string,
+	) error {
+		if id != resource || request.Scope.TenantID == "" {
+			return rbac.ErrForbidden
+		}
+
+		return nil
+	}
+}
+`

@@ -125,7 +125,7 @@ func candidateAdapterFiles(m Manifest) (map[string][]byte, error) {
 			files["internal/adapters/"+group+"/contract_gen.go"] = source
 		}
 
-		files["internal/app/candidate_adapters_gen.go"] = renderAdapterWiring(
+		files[candidateAdaptersFile] = renderAdapterWiring(
 			m.Project.Module,
 			adapters,
 		)
