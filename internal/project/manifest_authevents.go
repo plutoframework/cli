@@ -34,6 +34,7 @@ type AuthSection struct {
 // by no endpoint, job or agent, so only the generated hook can run it, once
 // per organization the verified subject belongs to.
 type AuthEvents struct {
+
 	// Operation is the <group>.<Action> id of the authored write.
 	Operation string `toml:"operation"`
 
@@ -74,13 +75,19 @@ type MemberIndex struct {
 }
 
 // Setting is the transaction-local subject the policy admits.
-func (MemberIndex) Setting() string { return "app.auth_event_subject" }
+func (MemberIndex) Setting() string {
+	return "app.auth_event_subject"
+}
 
 // PolicyName is the SELECT policy that admits the subject's own rows.
-func (MemberIndex) PolicyName() string { return "pluto_auth_event_members" }
+func (MemberIndex) PolicyName() string {
+	return "pluto_auth_event_members"
+}
 
 // ViewName is the view exposing only the organization ids.
-func (MemberIndex) ViewName() string { return "pluto_auth_event_members" }
+func (MemberIndex) ViewName() string {
+	return "pluto_auth_event_members"
+}
 
 // MemberIndexOf returns the index when auth events are declared.
 func (m Manifest) MemberIndexOf() (MemberIndex, bool) {

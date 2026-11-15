@@ -347,6 +347,76 @@ tenant, so the organization, its first admin and its first audit row commit or
 roll back together, attributed to the verified subject (`tx.SubjectID()`). The
 provisioning authority still mints at most one tenant per request.
 
+## Authentication events
+
+Managed credential handlers cannot call authored code, so events are declared
+and generated instead of hooked by hand. `[auth.events]` names one authored
+operation the generated glue runs when a session is issued or ended:
+
+```toml
+[auth.events]
+operation = "audit.RecordAuthEvent"
+on_error = "closed"   # or "best_effort"; default closed
+
+[[models]]
+id = "audit.AuthEvent"
+fields = ["event:string"]
+
+[[operations]]
+group = "audit"
+action = "RecordAuthEvent"
+permission = "audit.record"
+write = true
+idempotency = "exempt"
+replay_reason = "Authentication events are recorded once per sign-in."
+body = "authored"
+resource = "audit.events"
+resource_policy = "tenant"
+ports = ["audit.Events"]
+input = "audit.AuthEvent"
+```
+
+The operation is an ordinary protected authored write: its body appends through
+`queriesOf` under RLS (for example into an append-only audit group). Validation
+requires local credentials and `[memberships]`; an input model of exactly
+`event:string`; no response; no endpoint, job or agent (so only the generated
+hook can run it); and every declared role must hold its permission, so a
+fail-closed policy can never lock out a member whose role lacks it.
+
+Recorded events, with `event` set to `login`, `oidc_login` (when OIDC is on) or
+`logout`:
+
+- **Sign-in / OIDC sign-in**: the handler's response is held until the record
+  is written. The subject is verified through the new live session; its
+  organizations come from its active memberships (`active_column` applies);
+  the operation runs once in each, through the normal identity gate
+  (membership, permission, RLS) and is attributed to the verified subject
+  (`tx.SubjectID()`). More than 16 organizations is a failure. Nothing is read
+  from the request: a presented `X-Tenant-ID` is ignored.
+- **Sign-out**: recorded before revocation (a revoked session cannot prove the
+  subject), after the same Origin and ingress checks as the handler.
+- **Not recorded in any org**: sign-up, verification, recovery, reset, failed
+  sign-in, and any event of a subject with no organization (for example sign-in
+  before provisioning). With no verified subject and organization there is no
+  scope to write into without letting a stranger choose or probe one, so they
+  are logged by kind only. Failed sign-in is deliberately identical for known
+  and unknown accounts; recording it per organization would need an
+  unauthenticated account-to-org lookup. The provisioning transaction records
+  the organization's first audit row itself (see above).
+- **Policy**: `closed` (default) denies the sign-in with 503, revokes the
+  just-issued session and delivers no credential; sign-out is refused with 503
+  and the session stays. `best_effort` logs the failure by event kind and
+  proceeds. A response too large to hold is never delivered.
+
+Organizations are resolved through a generated subject index on the memberships
+table, created by the proposed migration: a SELECT policy admitting only rows
+whose subject equals the transaction-local `app.auth_event_subject`, and a
+security-invoker view `pluto_auth_event_members` exposing only the organization
+id of active memberships. Only the generated hook sets the setting, from a live
+verified session; ARCH612 accepts exactly this policy beside tenant isolation,
+and the runtime role gets SELECT on the view only. Without `[auth.events]`
+neither the policy, the view, nor any read exists.
+
 ## Tenant-less system operations
 
 Everything is tenant scoped except two explicit shapes. Declare the tenant root
