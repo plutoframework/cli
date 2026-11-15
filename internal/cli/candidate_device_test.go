@@ -100,7 +100,10 @@ func deviceApp(t *testing.T) string {
 
 	seamFile(t, root, "provision.go.txt", "internal/logic/orgs/provision.go")
 	seamFile(
-		t, root, "tenant_store.go.txt", "internal/adapters/orgs/tenant_store.go",
+		t,
+		root,
+		"tenant_store.go.txt",
+		"internal/adapters/orgs/tenant_store.go",
 	)
 	seamFile(t, root, "watch.go.txt", "internal/logic/audit/watch.go")
 	seamFile(

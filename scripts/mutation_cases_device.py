@@ -60,8 +60,8 @@ cases = [
     (
         "device grant importable by authored code",
         "internal/project/candidate_boundary.go",
-        'strings.HasPrefix(path, "github.com/plutoframework/pluto-auth/device") ||',
-        "false ||",
+        '"github.com/plutoframework/pluto-auth/device",\n\t\t) ||',
+        '"disabled/device",\n\t\t) ||',
         "./internal/project#TestDeviceGrantIsCriticalForAuthoredCode",
     ),
     (
