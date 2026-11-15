@@ -18,6 +18,10 @@ func ValidateManifestContracts(m Manifest) error {
 		return err
 	}
 
+	if err := validateSeams(m); err != nil {
+		return err
+	}
+
 	if err := validateContractFilenames(m); err != nil {
 		return err
 	}
@@ -211,7 +215,11 @@ func ValidateManifestContracts(m Manifest) error {
 		contracts[contract.ID] = contract
 	}
 
-	for id := range operations {
+	for id, operation := range operations {
+		if operation.Body == BodyAuthored {
+			continue
+		}
+
 		if _, ok := contracts[id]; !ok {
 			return fmt.Errorf(
 				"candidate operation %s requires exactly one typed behavior "+
@@ -235,6 +243,10 @@ func ValidateManifestContracts(m Manifest) error {
 				"effect operations require managed worker delivery, not HTTP " +
 					"entries",
 			)
+		}
+
+		if operations[endpoint.Operation].Body == BodyAuthored {
+			continue
 		}
 
 		if err := validateResourceSource(endpoint, contract); err != nil {

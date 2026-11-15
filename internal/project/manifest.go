@@ -31,6 +31,12 @@ type Manifest struct {
 	Endpoints          []Endpoint          `toml:"endpoints,omitempty"`
 	Jobs               []Job               `toml:"jobs,omitempty"`
 	Frontend           *Frontend           `toml:"frontend,omitempty"`
+	Tables             []Table             `toml:"tables,omitempty"`
+	Queries            []QuerySet          `toml:"queries,omitempty"`
+	Ports              []Port              `toml:"ports,omitempty"`
+	Models             []Model             `toml:"models,omitempty"`
+	Authored           *Authored           `toml:"authored,omitempty"`
+	Memberships        *Memberships        `toml:"memberships,omitempty"`
 
 	// Kind is empty for Go applications and KindFrontend for a frontend that
 	// lives in its own repository.

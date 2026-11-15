@@ -17,6 +17,17 @@ type Operation struct {
 	Collection   bool   `toml:"collection,omitempty"`
 	Idempotency  string `toml:"idempotency"`
 	ReplayReason string `toml:"replay_reason,omitempty"`
+
+	// Candidate seam declarations; see manifest_seams.go.
+	Body           string           `toml:"body,omitempty"`
+	Resource       string           `toml:"resource,omitempty"`
+	ResourcePolicy string           `toml:"resource_policy,omitempty"`
+	Ports          []string         `toml:"ports,omitempty"`
+	Response       string           `toml:"response,omitempty"`
+	Item           string           `toml:"item,omitempty"`
+	Output         string           `toml:"output,omitempty"`
+	Input          string           `toml:"input,omitempty"`
+	Query          []OperationQuery `toml:"query,omitempty"`
 }
 
 func (o Operation) ID() string {
