@@ -56,8 +56,24 @@ func (s *TenantStore) Provision(
 
 		return nil
 	})
+	if err != nil {
+		return out, err
+	}
 
-	return out, err
+	// A provisioning authority mints one tenant: the second attempt must be
+	// refused, so this body can never create a second organization.
+	if in.Slug == "double" {
+		again := s.db.Provision(
+			ctx,
+			p,
+			func(context.Context, scope.Tx) error { return nil },
+		)
+		if again == nil {
+			return out, rules.ErrSlugTaken
+		}
+	}
+
+	return out, nil
 }
 
 func (s *TenantStore) CountMembers(

@@ -377,7 +377,11 @@ func NewCandidateRuntime(
 
 	for index, operation := range m.Operations {
 		if operation.Scope != "" {
-			if err := writeSystemOperation(&source, operation, index); err != nil {
+			if err := writeSystemOperation(
+				&source,
+				operation,
+				index,
+			); err != nil {
 				return nil, err
 			}
 

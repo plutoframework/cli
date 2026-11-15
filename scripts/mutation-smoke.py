@@ -308,8 +308,8 @@ mutations = [
     (
         "authored forged scope tenant",
         "internal/project/candidate_authored_rules.go",
-        '[]string{"Execution", "Tenant", "DB", "Tx"}',
-        '[]string{"Execution", "DB", "Tx"}',
+        '"Execution", "Tenant", "DB", "Tx", "Provisioning",',
+        '"Execution", "DB", "Tx", "Provisioning",',
         "./internal/project#TestAuthoredRoleViolations",
     ),
     (
@@ -332,6 +332,41 @@ mutations = [
         'inspectAuthoredShape(file, role.role+" role", emit)',
         "_ = inspectAuthoredShape",
         "./internal/project#TestAuthoredRoleViolations",
+    ),
+    (
+        "tenant root insert confined to provisioning",
+        "internal/sqlcheck/query.go",
+        'if stmt.Kind != "insert" || env.provision {',
+        'if stmt.Kind != "insert" || true {',
+        "./internal/sqlcheck#TestAnalyzeQueryTenantRootInsert",
+    ),
+    (
+        "lookup policy is select only",
+        "internal/sqlcheck/migrations.go",
+        'if policy.LookupOK && policy.Command == "select" && !policy.HasCheck {',
+        "if policy.LookupOK && !policy.HasCheck {",
+        "./internal/sqlcheck#TestCheckMigrationsLookupPolicy",
+    ),
+    (
+        "lookup policy has no write check",
+        "internal/sqlcheck/migrations.go",
+        'if policy.LookupOK && policy.Command == "select" && !policy.HasCheck {',
+        'if policy.LookupOK && policy.Command == "select" {',
+        "./internal/sqlcheck#TestCheckMigrationsLookupPolicy",
+    ),
+    (
+        "lookup policy is keyed to its own column",
+        "internal/sqlcheck/migrations_apply.go",
+        "tableKey(lookup.Key),",
+        "tableKey(s.columns[table]),",
+        "./internal/sqlcheck#TestCheckMigrationsLookupPolicy",
+    ),
+    (
+        "system managed output is generated",
+        "internal/project/candidate_system.go",
+        '"internal/storage/" + operation.Group + "/" + name +\n\t\t\t\t"_lookup_gen.go": "candidate_lookup_reader.go",',
+        '"internal/storage/" + operation.Group + "/" + name +\n\t\t\t\t"_lookup_gen.go": "candidate_lookup_gate.go",',
+        "./internal/project#TestSystemManagedOutput",
     ),
     (
         "table row-level security migration",
@@ -391,6 +426,20 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "defer func() {\n\t\t_ = tx.Rollback(context.WithoutCancel(ctx))\n\t}()",
                 "defer func() {\n\t}()",
                 "./internal/project#TestScopeAlwaysRollsBack",
+            ),
+            (
+                "provisioning mints one tenant",
+                "internal/project/templates/candidate_scope.go.tmpl",
+                "if state.used {",
+                "if false {",
+                "TestCandidateSystemSeamEndToEnd",
+            ),
+            (
+                "lookup binds its policy setting",
+                "internal/project/candidate_system.go",
+                'data.LookupBind = "SELECT set_config(\'" + lookup.Setting() +',
+                'data.LookupBind = "SELECT set_config(\'app.unbound" + lookup.Setting() +',
+                "TestCandidateSystemSeamEndToEnd",
             ),
             (
                 "authored tenant transaction binding",

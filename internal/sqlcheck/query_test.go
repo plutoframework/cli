@@ -374,3 +374,47 @@ func TestAnalyzeQueryCatalogTablesMustBeDeclared(t *testing.T) {
 		t.Fatalf("catalog table must be checked, got %v", got)
 	}
 }
+
+func TestAnalyzeQueryTenantRootInsert(t *testing.T) {
+	env := testEnv()
+	env.tables["orgs"] = Table{
+		Name:         "orgs",
+		TenantColumn: "id",
+		TenantRoot:   true,
+	}
+	env.allowed["orgs"] = true
+
+	insert := query{
+		Name:   "CreateOrg",
+		File:   "db/queries/orgs/orgs.sql",
+		Line:   1,
+		Text:   "INSERT INTO orgs (id, slug) VALUES ($1, $2)",
+		Params: params(2),
+	}
+
+	got := analyzeQuery(insert, env)
+	if !strings.Contains(messages(got), "outside a provisioning query set") {
+		t.Fatalf("root INSERT allowed outside provisioning: %v", got)
+	}
+
+	env.provision = true
+	if got := analyzeQuery(insert, env); len(got) != 0 {
+		t.Fatalf("provisioning set rejected: %v", got)
+	}
+
+	// Reads and updates of the verified tenant's own row stay allowed.
+	for _, text := range []string{
+		"SELECT slug FROM orgs WHERE id = $1",
+		"UPDATE orgs SET slug = $2 WHERE id = $1",
+	} {
+		env.provision = false
+
+		read := query{
+			Name: "Read", File: "q.sql", Line: 1, Text: text,
+			Params: params(2),
+		}
+		if got := analyzeQuery(read, env); len(got) != 0 {
+			t.Fatalf("%s rejected: %v", text, got)
+		}
+	}
+}

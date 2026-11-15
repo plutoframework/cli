@@ -163,6 +163,10 @@ func validateSystem(
 		lookups[lookup.ID] = lookup
 	}
 
+	if err := validateLookupShape(m); err != nil {
+		return err
+	}
+
 	used := map[string]string{}
 
 	for _, operation := range m.Operations {
@@ -189,10 +193,6 @@ func validateSystem(
 				id,
 			)
 		}
-	}
-
-	if err := validateLookupShape(m); err != nil {
-		return err
 	}
 
 	if err := validateSystemEndpoints(m); err != nil {

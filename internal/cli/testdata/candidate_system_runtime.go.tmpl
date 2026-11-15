@@ -503,6 +503,24 @@ func TestSystemProvisionRateLimit(t *testing.T) {
 	f.provision(t, user, "four", 429)
 }
 
+// A provisioning authority creates exactly one tenant, even for a body that
+// asks twice.
+func TestSystemProvisionOnce(t *testing.T) {
+	f := sysSetup(t)
+	user := f.enroll(t, "gina@example.test")
+
+	f.provision(t, user, "double", 200)
+
+	var orgs int
+
+	if err := f.admin.QueryRow(
+		t.Context(),
+		"SELECT count(*) FROM orgs",
+	).Scan(&orgs); err != nil || orgs != 1 {
+		t.Fatalf("provisioning created %d organizations: %v", orgs, err)
+	}
+}
+
 // Lookup resolves a tenant by slug before login, returns only the declared
 // columns and is rate limited.
 func TestSystemLookup(t *testing.T) {
@@ -526,19 +544,24 @@ func TestSystemLookup(t *testing.T) {
 		Data map[string]any `json:"data"`
 	}
 
+	body := response.Body.String()
+	leaked := strings.Contains(body, "billing") ||
+		strings.Contains(body, "private@example.test")
+
 	if err := json.Unmarshal(response.Body.Bytes(), &raw); err != nil ||
-		len(raw.Data) != 3 || strings.Contains(response.Body.String(), "billing") ||
-		strings.Contains(response.Body.String(), "private@example.test") {
-		t.Fatalf("lookup leaked columns: %s", response.Body.String())
+		len(raw.Data) != 3 || leaked {
+		t.Fatalf("lookup leaked columns: %s", body)
 	}
 
-	f.expect(t, f.call("GET", "/api/orgs/lookup?slug=missing", "", "", ""), 404)
-	f.expect(t, f.call("GET", "/api/orgs/lookup", "", "", ""), 400)
-	f.expect(t, f.call("GET", "/api/orgs/lookup?slug=a&slug=b", "", "", ""), 400)
-	f.expect(t, f.call("GET", "/api/orgs/lookup?slug=initech&x=1", "", "", ""),
-		400)
-	f.expect(t, f.call("GET", "/api/orgs/lookup?slug="+strings.Repeat("a", 64),
-		"", "", ""), 400)
+	lookup := func(query string) *httptest.ResponseRecorder {
+		return f.call("GET", "/api/orgs/lookup"+query, "", "", "")
+	}
+
+	f.expect(t, lookup("?slug=missing"), 404)
+	f.expect(t, lookup(""), 400)
+	f.expect(t, lookup("?slug=a&slug=b"), 400)
+	f.expect(t, lookup("?slug=initech&x=1"), 400)
+	f.expect(t, lookup("?slug="+strings.Repeat("a", 64)), 400)
 }
 
 func TestSystemLookupRateLimit(t *testing.T) {
@@ -573,7 +596,9 @@ func TestSystemRowLevelBoundaries(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		defer func() { _ = tx.Rollback(t.Context()) }()
+		defer func() {
+			_ = tx.Rollback(t.Context())
+		}()
 
 		if setting != "" {
 			if _, err := tx.Exec(
@@ -616,18 +641,21 @@ func TestSystemRowLevelBoundaries(t *testing.T) {
 		}
 	}
 
+	const (
+		insertUser = "INSERT INTO users (org_id, id, role) " +
+			"VALUES ($1, 'x', 'admin')"
+		insertOrg = "INSERT INTO orgs (id, slug, name) VALUES ($1, $2, 'N')"
+	)
+
 	// A provisioning transaction is bound to the new tenant alone.
 	run("app.tenant_id", acme, func(ctx context.Context, tx pgx.Tx) {
 		if got := rows(ctx, tx, "SELECT count(*) FROM orgs"); got != 1 {
 			t.Fatalf("tenant transaction sees %d orgs", got)
 		}
 
-		denied(ctx, tx, "INSERT INTO users (org_id, id, role) VALUES ($1, 'x', "+
-			"'admin')", globex)
-		denied(ctx, tx, "INSERT INTO orgs (id, slug, name) VALUES ($1, 'z', 'Z')",
-			globex)
-		denied(ctx, tx, "INSERT INTO orgs (id, slug, name) VALUES ($1, 'y', 'Y')",
-			acme)
+		denied(ctx, tx, insertUser, globex)
+		denied(ctx, tx, insertOrg, globex, "z")
+		denied(ctx, tx, insertOrg, acme, "y")
 	})
 
 	// No setting at all sees nothing.
@@ -672,6 +700,6 @@ func TestSystemRowLevelBoundaries(t *testing.T) {
 			t.Fatalf("lookup transaction updated rows: %v %v", tag, err)
 		}
 
-		denied(ctx, tx, "INSERT INTO orgs (id, slug, name) VALUES ('n', 'n', 'N')")
+		denied(ctx, tx, insertOrg, "n", "n")
 	})
 }
