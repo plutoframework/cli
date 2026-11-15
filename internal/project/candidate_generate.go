@@ -270,22 +270,25 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 
 	files["internal/access/roles.go"] = roles
 
-	memberships, err := render(
-		"candidate_memberships.go",
-		dataFor(m, Endpoint{}),
-	)
+	var memberships []byte
+	if m.Memberships != nil {
+		memberships, err = candidateAppMemberships(m)
+	} else {
+		memberships, err = render(
+			"candidate_memberships.go",
+			dataFor(m, Endpoint{}),
+		)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
 	files["internal/storage/identity/memberships_gen.go"] = memberships
-	files["db/migrations/099_memberships.sql"] = []byte(
-		`CREATE TABLE "pluto_resource_memberships" (` +
-			`"tenant_id" text NOT NULL,` +
-			`"actor_id" text NOT NULL,` +
-			`"roles" text[] NOT NULL,` +
-			`PRIMARY KEY("tenant_id","actor_id"));`,
-	)
+
+	if m.Memberships == nil {
+		files["db/migrations/099_memberships.sql"] = candidateMembershipsSchema
+	}
 
 	for _, item := range []struct {
 		path, name string
