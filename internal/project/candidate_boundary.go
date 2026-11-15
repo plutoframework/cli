@@ -594,6 +594,13 @@ func inspectCandidateBoundaries(
 
 		inspectAuthoredImports(file, rules, module, emit)
 
+		if group, ok := adapterDirs[file.directory]; ok {
+			inspectCandidateAdapter(file, group, module, adapterModules, emit)
+			inspectCandidateFile(file, rules, types, functions, emit)
+
+			continue
+		}
+
 		if role, ok := rules.roles[file.directory]; ok {
 			inspectAuthoredRole(file, rules, role, module, emit)
 			inspectCandidateFile(file, rules, types, functions, emit)
@@ -603,13 +610,6 @@ func inspectCandidateBoundaries(
 
 		if credentialSeam != "" && file.directory == credentialSeam {
 			inspectCandidateCredentialSeam(file, module, emit)
-			inspectCandidateFile(file, rules, types, functions, emit)
-
-			continue
-		}
-
-		if group, ok := adapterDirs[file.directory]; ok {
-			inspectCandidateAdapter(file, group, module, adapterModules, emit)
 			inspectCandidateFile(file, rules, types, functions, emit)
 
 			continue

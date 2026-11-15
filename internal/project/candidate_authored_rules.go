@@ -250,49 +250,7 @@ func inspectAuthoredRole(
 		)
 	}
 
-	for _, declaration := range file.tree.Decls {
-		switch value := declaration.(type) {
-		case *ast.FuncDecl:
-			if value.Recv == nil && value.Name.Name == "init" {
-				emit(
-					"ARCH611",
-					value.Pos(),
-					"authored "+role.role+" role declares init",
-					"Authored roles have no hidden registration; wire "+
-						"through declared composition.",
-				)
-			}
-		case *ast.GenDecl:
-			if value.Tok == token.VAR {
-				emit(
-					"ARCH611",
-					value.Pos(),
-					"authored "+role.role+" role declares a package-level "+
-						"variable",
-					"Use const, or pass state through the declared "+
-						"ports and scope.",
-				)
-			}
-		}
-	}
-
-	if role.role == roleRules {
-		return
-	}
-
-	ast.Inspect(file.tree, func(node ast.Node) bool {
-		if statement, ok := node.(*ast.GoStmt); ok {
-			emit(
-				"ARCH611",
-				statement.Pos(),
-				"authored "+role.role+" role starts a goroutine",
-				"An Execution is callback-scoped; run work "+
-					"synchronously inside the body.",
-			)
-		}
-
-		return true
-	})
+	inspectAuthoredShape(file, role.role+" role", emit)
 }
 
 // inspectAuthoredImports applies seam-wide import rules to every unmanaged

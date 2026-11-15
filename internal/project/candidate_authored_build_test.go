@@ -23,7 +23,7 @@ row_security=true
 [[ports]]
 id="audit.Events"
 adapter="audit.EventStore"
-methods=["Query"]
+methods=["Query(scope.Execution) error"]
 [[models]]
 id="audit.Entry"
 fields=["seq:int64"]
