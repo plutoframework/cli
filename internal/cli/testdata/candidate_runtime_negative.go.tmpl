@@ -72,7 +72,7 @@ func TestCandidateRuntimeDeniedBeforeDataOrProvider(t *testing.T) {
 	// A resource in another tenant the caller belongs to is invisible under
 	// row-level security: reads and writes report 404, exactly like an id
 	// that never existed. Missing membership above stays 401/403.
-	for _, probe := range []struct {
+	for index, probe := range []struct {
 		method string
 		path   string
 		tenant string
@@ -89,9 +89,14 @@ func TestCandidateRuntimeDeniedBeforeDataOrProvider(t *testing.T) {
 			`{"resource_id":"never-existed"}`,
 		},
 	} {
+		key := ""
+		if probe.method == "POST" {
+			key = fmt.Sprintf("nf-probe-%s-%02d", probe.tenant, index)
+		}
+
 		got := f.http(
-			t, probe.method, probe.path, f.bob, probe.tenant,
-			"nf-"+probe.tenant+probe.path, probe.body)
+			t, probe.method, probe.path, f.bob, probe.tenant, key,
+			probe.body)
 		if got.Code != 404 ||
 			!strings.Contains(got.Body.String(), `"not_found"`) {
 			t.Fatalf("CROSS_TENANT_NOT_FOUND %s %s %s: %d %s",
