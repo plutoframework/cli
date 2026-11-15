@@ -288,3 +288,28 @@ func TestSeamModelsCompileAndParseStrictly(t *testing.T) {
 		t.Fatalf("%v\n%s", err, output)
 	}
 }
+
+// Authentication must precede query parsing so unauthenticated callers never
+// see query-schema diagnostics.
+func TestSeamHandlerAuthenticatesBeforeParsingQuery(t *testing.T) {
+	m := seamModelsFixture(t)
+
+	for _, operation := range m.Operations {
+		if !operation.isAuthored() || operation.Action == "Append" {
+			continue
+		}
+
+		source, err := seamHandler(m, operation)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		text := string(source)
+		caller := strings.Index(text, "access.CallerFromHTTP")
+		parse := strings.Index(text, "models.Parse"+operation.Action+"Query")
+
+		if caller < 0 || parse < 0 || caller > parse {
+			t.Fatalf("%s must resolve the caller before parsing", operation.ID())
+		}
+	}
+}

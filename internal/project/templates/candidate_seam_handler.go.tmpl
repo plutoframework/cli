@@ -23,6 +23,15 @@ func Register{{.Action}}(
 	reg.Handle(
 		paths.{{.Symbol}},
 		func(w http.ResponseWriter, r *http.Request) {
+			caller, err := access.CallerFromHTTP(
+				r.Context(),
+				r.Header.Get("X-Tenant-ID"))
+			if err != nil {
+				transport.OperationError(w, r, err)
+
+				return
+			}
+
 			input, err := models.Parse{{.Action}}Query(r.URL.Query())
 			if err != nil {
 				var rejected *models.QueryError
@@ -33,15 +42,6 @@ func Register{{.Action}}(
 				}
 
 				transport.Error(w, r, 400, "invalid_query_parameter")
-
-				return
-			}
-
-			caller, err := access.CallerFromHTTP(
-				r.Context(),
-				r.Header.Get("X-Tenant-ID"))
-			if err != nil {
-				transport.OperationError(w, r, err)
 
 				return
 			}
