@@ -125,6 +125,16 @@ func addAuthoredRules(
 	}
 
 	rules.addCapability(scopeNamespace, "Bind", bindOwners...)
+
+	if m.DeviceOn() {
+		rules.addCapability(scopeNamespace, "BindActor", bindOwners...)
+		rules.addCapability(
+			scopeNamespace,
+			"ContextWithActor",
+			authoredGateOwners(m)...,
+		)
+	}
+
 	rules.addCapability(
 		scopeNamespace,
 		"BindProvisioning",
@@ -163,7 +173,7 @@ func addAuthoredRules(
 	rules.addCapability(scopeNamespace, "Queries", queryOwners...)
 
 	for _, name := range []string{
-		"Execution", "Tenant", "DB", "Tx", "Provisioning",
+		"Execution", "Tenant", "DB", "Tx", "Provisioning", "Actor",
 	} {
 		rules.protectedTypes[scopeNamespace+"."+name] = true
 	}
@@ -178,6 +188,10 @@ func addAuthoredRules(
 		"scopeProvision",
 		"scopeSubject",
 		"scopeMachine",
+		"scopeActor",
+		"scopeActorKind",
+		"scopeActorClient",
+		"scopeActorGrant",
 	} {
 		if rules.globalPrivate[name] == nil {
 			rules.globalPrivate[name] = map[string]bool{}
@@ -463,4 +477,19 @@ func checkAuthoredBodies(
 				"that function.",
 		)
 	}
+}
+
+// authoredGateOwners lists the generated gates of authored operations.
+func authoredGateOwners(m Manifest) []string {
+	owners := []string{}
+
+	for _, operation := range m.Operations {
+		if operation.Body == BodyAuthored &&
+			operation.Scope != ScopeProvision {
+			owners = append(owners, "internal/operations/"+operation.Group+
+				"/"+lowerAction(operation.Action)+"_gate_gen.go")
+		}
+	}
+
+	return owners
 }

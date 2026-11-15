@@ -149,6 +149,12 @@ func (operation *{{.Action}}) within(
 	if caller.Identity() == nil {
 		return commonDomain.ErrUnauthenticated
 	}
+{{- if .Manifest.DeviceOn}}
+
+	if err := caller.Permits({{q .Contract.Permission}}); err != nil {
+		return err
+	}
+{{- end}}
 
 	if err := command.Validate(); err != nil {
 		return err

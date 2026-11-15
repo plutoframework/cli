@@ -331,6 +331,17 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 		}
 	}
 
+	if m.DeviceOn() {
+		for path, name := range candidateDeviceLayout() {
+			source, err := render(name, dataFor(m, Endpoint{}))
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+
+			files[path] = source
+		}
+	}
+
 	adapterFiles, err := candidateAdapterFiles(m)
 	if err != nil {
 		return nil, err
@@ -437,5 +448,16 @@ func candidateCredentialLayout() map[string]string {
 		"internal/storage/identity/attempts_gen.go": "candidate_limiter.go",
 		"db/migrations/008_credential_attempts.sql": "candidate_attempts_" +
 			"schema.sql",
+	}
+}
+
+// candidateDeviceLayout lists the managed files of the declared device
+// authorization grant ([auth.device]); see manifest_authdevice.go.
+func candidateDeviceLayout() map[string]string {
+	return map[string]string{
+		"internal/app/candidate_device_gen.go": "candidate_device.go",
+		"internal/access/delegation_gen.go":    "candidate_delegation.go",
+		"internal/paths/device.go":             "device_paths.go",
+		"db/migrations/090_device_grants.sql":  "device_schema.sql",
 	}
 }

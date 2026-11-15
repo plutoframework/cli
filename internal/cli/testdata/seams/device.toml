@@ -1,0 +1,24 @@
+
+[auth.device]
+verification_uri = "https://app.example.test/device"
+poll_interval = "1s"
+
+[[auth.device.scopes]]
+name = "audit.read"
+description = "Read the audit trail."
+permissions = ["audit.read"]
+
+[[auth.device.scopes]]
+name = "audit.write"
+description = "Append audit events."
+permissions = ["audit.write"]
+
+[[auth.device.scopes]]
+name = "members.count"
+permissions = ["members.read"]
+
+[[auth.device.clients]]
+id = "gryt-cli"
+name = "gryt CLI"
+actor_type = "agent"
+scopes = ["audit.read", "audit.write", "members.count"]

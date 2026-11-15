@@ -147,6 +147,18 @@ Keep it to delivery and abuse controls; ARCH609 rejects imports of application
 packages, Pluto authority modules, stores, database clients, reflect or unsafe.
 Never log notifications, tokens or passwords.
 {{end}}
+{{- if .Manifest.DeviceOn}}
+
+Delegated clients (CLI, agents) use the managed device grant declared in
+[auth.device] (RFC 8628): the owner approves in a browser session, the client
+gets scoped short-lived access tokens and rotating refresh tokens (reuse
+revokes the family). A scope names declared operation permissions and only
+narrows: every gate runs `caller.Permits` and then the owner's own live
+membership and permission. Tokens are bound to one tenant. Authored bodies read
+`e.Actor()` (Kind, ClientID, GrantID) for audit and never set it; they cannot
+import pluto-auth/device or call scope.BindActor/ContextWithActor. Delegates
+cannot approve, manage grants or provision tenants.
+{{- end}}
 Apply explicit database migrations before startup. No constructor creates
 schemas,
 users, role assignments or fixture credentials. Candidate dependencies are

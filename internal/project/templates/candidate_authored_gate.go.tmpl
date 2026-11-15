@@ -10,6 +10,9 @@ import (
 {{- if .Authored.MachineEvent}}
 	machineauth "{{.Module}}/internal/ports/machineauth"
 {{- end}}
+{{- if .Manifest.DeviceOn}}
+	"{{.Module}}/internal/scope"
+{{- end}}
 {{- if .Authored.Pagination}}
 	"github.com/plutoframework/pluto-core/pagination"
 {{- end}}
@@ -98,6 +101,16 @@ func (operation *{{.Action}}) within(
 	if caller.Identity() == nil {
 		return commonDomain.ErrUnauthenticated
 	}
+{{- if .Manifest.DeviceOn}}
+
+	if err := caller.Permits({{q .Authored.Permission}}); err != nil {
+		return err
+	}
+
+	// The acting client travels in the context to the generated workflow,
+	// which binds it into the Execution; authored code can read it, not set it.
+	ctx = scope.ContextWithActor(ctx, caller.Identity())
+{{- end}}
 
 	return operation.{{lowerFirst .Action}}Gate.Within(
 		ctx,
