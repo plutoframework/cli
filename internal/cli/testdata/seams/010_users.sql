@@ -12,3 +12,10 @@ CREATE TABLE approval_requests (
     status text NOT NULL DEFAULT 'pending',
     PRIMARY KEY (org_id, id)
 );
+
+CREATE TABLE orgs (
+    id text PRIMARY KEY,
+    slug text NOT NULL UNIQUE,
+    name text NOT NULL,
+    billing_email text NOT NULL DEFAULT 'private@example.test'
+);

@@ -322,6 +322,7 @@ func (d DB) Provision(
 				ctx,
 				pgx.ReadWrite,
 				Tenant{scopeTenant: tenant},
+				state.subject,
 				run,
 			)
 		},

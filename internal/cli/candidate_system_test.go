@@ -22,6 +22,25 @@ func systemFile(t *testing.T, root, fixture, target string) {
 	writeSeam(t, root, target, string(source))
 }
 
+// systemFileAs copies a system-seam fixture into an application whose module
+// differs from the standalone fixture's, so the same authored files can join
+// the combined seam application.
+func systemFileAs(t *testing.T, root, module, fixture, target string) {
+	t.Helper()
+
+	source, err := os.ReadFile(filepath.Join("testdata", "system", fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(
+		t,
+		root,
+		target,
+		strings.ReplaceAll(string(source), "example.test/sysapp", module),
+	)
+}
+
 // systemApp generates the sysapp fixture: a tenant root, a provisioning
 // operation, a generated slug lookup and one tenant-scoped read.
 func systemApp(t *testing.T) string {
@@ -138,16 +157,19 @@ func TestCandidateSystemSeamEndToEnd(t *testing.T) {
 		"TestSystemRowLevelBoundaries",
 	)
 
-	assertSystemNegatives(t, root)
+	assertSystemNegatives(
+		t, root, "example.test/sysapp/", "db/migrations/012_rls_orgs.sql",
+	)
 }
 
 // assertSystemNegatives mutates one file, expects the canonical inspection to
 // report the named check, then restores it and expects a pass again.
-func assertSystemNegatives(t *testing.T, root string) {
+func assertSystemNegatives(
+	t *testing.T,
+	root, module, policyFile string,
+) {
 	t.Helper()
 
-	module := "example.test/sysapp/"
-	policyFile := "db/migrations/012_rls_orgs.sql"
 	appendTo := func(extra string) func(string) string {
 		return func(original string) string {
 			return original + "\n" + extra
