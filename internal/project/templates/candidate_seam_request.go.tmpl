@@ -1,5 +1,6 @@
 package {{.Group}}
 
+{{if or .Endpoint .Strconv .Time .Pagination -}}
 import (
 	{{- if .Endpoint}}
 	"net/url"
@@ -15,11 +16,15 @@ import (
 	"github.com/plutoframework/pluto-core/pagination"
 	{{- end}}
 )
-{{if .Endpoint}}
+{{end}}
+{{- if .Endpoint}}
 // {{.Action}}Request carries the strictly parsed query of {{.Group}}.{{.Action}}.
 type {{.Action}}Request struct {
 {{- range .Query}}
 	{{.GoName}} {{.GoType}} `json:"{{.Name}},omitempty"`
+{{- end}}
+{{- range .Path}}
+	{{.GoName}} {{.GoType}} `json:"-"`
 {{- end}}
 {{- if .Collection}}
 	Limit  int                `json:"limit,omitempty"`
@@ -28,6 +33,11 @@ type {{.Action}}Request struct {
 {{- end}}
 }
 
+{{- if .Path}}
+
+{{template "bindPath" .}}
+{{template "resourceID" .}}
+{{end}}
 // Values returns the canonical filters for binding pagination cursors.
 func (r {{.Action}}Request) Values() url.Values {
 	values := url.Values{}
@@ -146,6 +156,25 @@ func Parse{{.Action}}Query(query url.Values) ({{.Action}}Request, error) {
 {{end}}
 	return request, nil
 }
+{{else if .Path}}
+{{- if .Input}}
+// {{.Action}}Body is the declared JSON body model of {{.Group}}.{{.Action}}.
+type {{.Action}}Body = {{.Input}}
+
+{{end}}
+// {{.Action}}Request carries the validated path parameters of
+// {{.Group}}.{{.Action}}{{if .Input}} and its strictly decoded body{{end}}.
+type {{.Action}}Request struct {
+{{- if .Input}}
+	Body {{.Action}}Body
+{{- end}}
+{{- range .Path}}
+	{{.GoName}} {{.GoType}}
+{{- end}}
+}
+
+{{template "bindPath" .}}
+{{template "resourceID" .}}
 {{else if .Input}}
 // {{.Action}}Request is the declared input model of the internal operation.
 type {{.Action}}Request = {{.Input}}
@@ -171,3 +200,43 @@ type {{.Action}}Response struct {
 {{else}}
 type {{.Action}}Data struct{}
 {{end}}
+
+{{define "resourceID" -}}
+{{- $key := .PathKey -}}
+{{- range .Path}}{{if eq .GoName $key}}
+// ResourceID is the exact resource the gate is bound to: the validated
+// value of path parameter {{q .Name}}, appended to the declared resource.
+func (r {{$.Action}}Request) ResourceID() string {
+{{- if eq .Kind "int64"}}
+	return pathKeyInt64(r.{{.GoName}})
+{{- else}}
+	return r.{{.GoName}}
+{{- end}}
+}
+{{end}}{{end}}
+{{- end}}
+
+{{define "bindPath" -}}
+// BindPath validates every path parameter before any operation runs:
+// uuids are lowercased, strings are bounded and restricted to unreserved
+// characters, integers are canonical decimals.
+func (r *{{.Action}}Request) BindPath(get func(string) string) error {
+	var err error
+{{range .Path}}
+{{- if eq .Kind "uuid"}}
+	if r.{{.GoName}}, err = pathUUID({{q .Name}}, get({{q .Name}})); err != nil {
+		return err
+	}
+{{else if eq .Kind "string"}}
+	if r.{{.GoName}}, err = pathText({{q .Name}}, get({{q .Name}}), {{.Max}}); err != nil {
+		return err
+	}
+{{else}}
+	if r.{{.GoName}}, err = pathInt64({{q .Name}}, get({{q .Name}}), {{.Max}}); err != nil {
+		return err
+	}
+{{end}}
+{{- end}}
+	return nil
+}
+{{- end}}

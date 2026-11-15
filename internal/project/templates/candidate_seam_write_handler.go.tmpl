@@ -11,6 +11,9 @@ import (
 	operations "{{.Module}}/internal/operations/{{.Group}}"
 	"{{.Module}}/internal/paths"
 	"{{.Module}}/internal/transport"
+{{- if .Path}}
+	"github.com/go-chi/chi/v5"
+{{- end}}
 {{- if .Idempotent}}
 	"github.com/plutoframework/pluto-core/idempotency"
 {{- end}}
@@ -22,6 +25,12 @@ type {{.Action}}Operations = operations.{{.Action}}Boundary
 // the body is size limited and strictly decoded into the declared input model
 // (unknown fields, trailing data and non-object JSON are rejected); the
 // generated gate authorizes the exact request before the authored body runs.
+{{- if .Path}}
+//
+// Path parameters are validated against their declared types right after the
+// caller is verified and before the body is read; the gate is bound to the
+// resource they name.
+{{- end}}
 {{- if .Idempotent}}
 //
 // The Idempotency-Key claim is taken only after that authorization, so an
@@ -44,6 +53,25 @@ func Register{{.Action}}(
 				return
 			}
 
+{{- if .Path}}
+
+			var input models.{{.Action}}Request
+			if err := input.BindPath(func(name string) string {
+				return chi.URLParam(r, name)
+			}); err != nil {
+				var rejected *models.PathError
+				if errors.As(err, &rejected) {
+					transport.Error(w, r, 400, rejected.Code)
+
+					return
+				}
+
+				transport.Error(w, r, 400, "invalid_path_parameter")
+
+				return
+			}
+{{- end}}
+
 			raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
 			if err != nil {
 				var tooLarge *http.MaxBytesError
@@ -59,11 +87,22 @@ func Register{{.Action}}(
 			}
 
 			r.Body = io.NopCloser(bytes.NewReader(raw))
+{{if .Path}}{{if .Input}}
+			if !transport.Decode(w, r, &input.Body, bodyLimit) {
+				return
+			}
+{{else}}
+			if len(raw) != 0 {
+				transport.Error(w, r, 400, "invalid_body")
 
+				return
+			}
+{{end}}{{else}}
 			var input models.{{.Action}}Request
 			if !transport.Decode(w, r, &input, bodyLimit) {
 				return
 			}
+{{end}}
 {{- if .Idempotent}}
 
 			if reg.Idempotency == nil {

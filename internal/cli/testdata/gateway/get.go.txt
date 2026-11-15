@@ -1,0 +1,19 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// Get reads the gateway the path names; the adapter answers not found for a
+// gateway the verified tenant cannot see.
+func Get(
+	ctx context.Context,
+	e scope.Execution,
+	ports GetPorts,
+	in models.GetRequest,
+) (models.GatewayInfo, error) {
+	return ports.Registry.Get(ctx, e, in)
+}

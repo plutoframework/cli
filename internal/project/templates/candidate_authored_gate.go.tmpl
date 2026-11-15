@@ -103,7 +103,12 @@ func (operation *{{.Action}}) within(
 		ctx,
 		caller.Identity(),
 		caller.TenantID(),
+{{- if .Authored.PathKey}}
+		{{q .Authored.Resource}}+":"+
+			intent.{{lowerFirst .Action}}IntentRequest.ResourceID(),
+{{- else}}
 		{{q .Authored.Resource}},
+{{- end}}
 		run)
 }
 

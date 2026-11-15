@@ -405,6 +405,17 @@ func managedPublished(m Manifest) (map[string][]byte, error) {
 
 			if d.Body || authoredWriteBody(m, e) {
 				request = e.Group + "." + e.Action + "Request{}"
+
+				if bound, ok := m.Operation(e.Operation); ok &&
+					len(bound.Path) != 0 {
+
+					// The wire body is the declared model, not the request
+					// that also carries the path parameters.
+					request = "nil"
+					if bound.Input != "" {
+						request = e.Group + "." + e.Action + "Body{}"
+					}
+				}
 			}
 
 			response := e.Group + "." + e.Action + "Response{}"

@@ -67,7 +67,11 @@ func (operation *{{.Action}}) execute(
 		scope.Bind(
 			execution,
 			operation.{{lowerFirst .Action}}Gate,
+{{- if .Authored.PathKey}}
+			{{q .Authored.Resource}}+":"+request.ResourceID()),
+{{- else}}
 			{{q .Authored.Resource}}),
+{{- end}}
 		operation.{{lowerFirst .Action}}Ports,
 		request)
 }

@@ -838,6 +838,41 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "\t}()\n\n\tif _, err = tx.Exec(\n\t\tctx,\n\t\t\"SELECT set_config('app.tenant_id_unbound', $1, true)\",\n\t\ttenant.scopeTenant,\n\t); err != nil {\n\t\treturn err\n\t}\n\n\tif err = run(",
                 "TestCandidateAuthoredSeamEndToEnd",
             ),
+            (
+                "path parameter resource binding",
+                "internal/project/manifest_path.go",
+                "if !found || !named[key] {",
+                "if !found && !named[key] {",
+                "./internal/project#TestPathParamRejections",
+            ),
+            (
+                "path parameter gate resource key",
+                "internal/project/templates/candidate_authored_gate.go.tmpl",
+                "intent.{{lowerFirst .Action}}IntentRequest.ResourceID(),",
+                '"",',
+                "./internal/project#TestPathParamWriteGeneration",
+            ),
+            (
+                "bodyless path write refuses a body",
+                "internal/project/templates/candidate_seam_write_handler.go.tmpl",
+                "if len(raw) != 0 {",
+                "if false {",
+                "./internal/project#TestPathParamWithoutBody",
+            ),
+            (
+                "path parameter workflow resource key",
+                "internal/project/templates/candidate_authored_workflow.go.tmpl",
+                'request.ResourceID()),',
+                '"x"),',
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "path uuid length check",
+                "internal/project/templates/candidate_seam_path.go.tmpl",
+                "if len(value) != 36 {",
+                "if false {",
+                "TestCandidateGatewayEndToEnd",
+            ),
         ]
     )
 

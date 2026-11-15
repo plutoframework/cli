@@ -81,7 +81,7 @@ func gatewayApp(t *testing.T) string {
 
 	for _, action := range []string{
 		"create", "rename", "revoke", "rotate", "heartbeat", "status",
-		"history", "channel", "markstale",
+		"history", "channel", "markstale", "get", "edit", "clearbeats",
 	} {
 		gatewayFile(
 			t, root, action+".go.txt",
@@ -120,8 +120,9 @@ func TestCandidateGatewayEndToEnd(t *testing.T) {
 	root := gatewayApp(t)
 
 	for fixture, target := range map[string]string{
-		"candidate_machine_helpers.go.tmpl": "internal/app/gateway_helpers_test.go",
-		"candidate_gateway_runtime.go.tmpl": "internal/app/gateway_runtime_test.go",
+		"candidate_machine_helpers.go.tmpl":      "internal/app/gateway_helpers_test.go",
+		"candidate_gateway_runtime.go.tmpl":      "internal/app/gateway_runtime_test.go",
+		"candidate_gateway_path_runtime.go.tmpl": "internal/app/gateway_path_test.go",
 	} {
 		source, err := os.ReadFile(filepath.Join("testdata", fixture))
 		if err != nil {
@@ -152,7 +153,13 @@ func TestCandidateGatewayEndToEnd(t *testing.T) {
 		"TestGatewayMachineStream",
 		"TestGatewayStreamFlag",
 		"TestGatewayMarkStale",
+		"TestGatewayPathRead",
+		"TestGatewayPathGate",
+		"TestGatewayPathEdit",
+		"TestGatewayPathClearBeats",
 	)
+
+	assertPathResourceBinding(t, root)
 
 	assertGatewayNegatives(t, root, "example.test/gwapp/")
 }
@@ -207,4 +214,46 @@ func assertGatewayNegatives(t *testing.T, root, module string) {
 			},
 		},
 	})
+}
+
+// assertPathResourceBinding checks the generated wiring of the path
+// operations: each gate carries the validated path value as its resource key
+// and uses the policy that demands it, while body-addressed operations keep
+// the fixed key and the exact-match policy.
+func assertPathResourceBinding(t *testing.T, root string) {
+	t.Helper()
+
+	runtime, err := os.ReadFile(
+		filepath.Join(root, "internal/app/candidate_operations_gen.go"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	policies := strings.Count(
+		string(runtime), `candidateTenantResourceID("gateways.registry")`,
+	)
+	if policies != 3 {
+		t.Fatalf("want 3 path-bound gates, got %d", policies)
+	}
+
+	for _, action := range []string{"get", "edit", "clearbeats"} {
+		gate, err := os.ReadFile(filepath.Join(
+			root, "internal/operations/gateways", action+"_gate_gen.go",
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !strings.Contains(string(gate), "IntentRequest.ResourceID()") {
+			t.Fatalf("%s gate is not bound to the path value", action)
+		}
+	}
+
+	rename, err := os.ReadFile(filepath.Join(
+		root, "internal/operations/gateways/rename_gate_gen.go",
+	))
+	if err != nil || strings.Contains(string(rename), "ResourceID()") {
+		t.Fatalf("a body-addressed gate must keep its fixed key: %v", err)
+	}
 }

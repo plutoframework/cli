@@ -28,6 +28,7 @@ type Operation struct {
 	Output         string           `toml:"output,omitempty"`
 	Input          string           `toml:"input,omitempty"`
 	Query          []OperationQuery `toml:"query,omitempty"`
+	Path           []OperationPath  `toml:"path,omitempty"`
 
 	// Stream bounds a response = "stream" operation; see manifest_stream.go.
 	Stream *StreamLimits `toml:"stream,omitempty"`

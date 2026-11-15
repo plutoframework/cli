@@ -1,0 +1,25 @@
+package gateways
+
+import (
+	"context"
+	"fmt"
+
+	"example.test/gwapp/internal/domain"
+	models "example.test/gwapp/internal/models/gateways"
+	rules "example.test/gwapp/internal/rules/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// Edit renames the gateway the path names.
+func Edit(
+	ctx context.Context,
+	e scope.Execution,
+	ports EditPorts,
+	in models.EditRequest,
+) (models.GatewayInfo, error) {
+	if !rules.ValidName(in.Body.Name) {
+		return models.GatewayInfo{}, fmt.Errorf("%w: name", domain.ErrInvalidInput)
+	}
+
+	return ports.Registry.Edit(ctx, e, in)
+}

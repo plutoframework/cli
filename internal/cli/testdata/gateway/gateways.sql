@@ -39,3 +39,7 @@ WHERE org_id = @org_id AND online AND last_seen < @before;
 -- name: AppendAudit :exec
 INSERT INTO audit_events (org_id, actor_id, type)
 VALUES (@org_id, @actor_id, @type);
+
+-- name: ClearBeats :execrows
+DELETE FROM gateway_beats
+WHERE org_id = @org_id AND gateway_id = @gateway_id;

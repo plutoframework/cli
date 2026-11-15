@@ -73,6 +73,15 @@ type OperationQuery struct {
 	After string `toml:"after,omitempty"`
 }
 
+// OperationPath declares one typed path parameter of an authored HTTP entry.
+// The name must match a {name} segment of the endpoint path. A uuid is
+// validated and lowercased; a string needs a max; an int64 is non-negative.
+type OperationPath struct {
+	Name string `toml:"name"`
+	Type string `toml:"type"`
+	Max  int    `toml:"max,omitempty"`
+}
+
 // Authored holds declarations that widen what authored packages may import.
 type Authored struct {
 	Dependencies []AuthoredDependency `toml:"dependencies,omitempty"`
@@ -159,9 +168,9 @@ func (o Operation) usesSeams() bool {
 	return o.Body != "" || o.Resource != "" || o.ResourcePolicy != "" ||
 		len(o.Ports) != 0 || o.Response != "" || o.Item != "" ||
 		o.Output != "" || o.Input != "" || len(o.Query) != 0 ||
-		o.Scope != "" || o.Lookup != "" || o.RateLimit != "" ||
-		o.Auth != "" || o.Principal != "" || o.Stream != nil ||
-		o.Schedule != "" || o.ServiceRole != ""
+		len(o.Path) != 0 || o.Scope != "" || o.Lookup != "" ||
+		o.RateLimit != "" || o.Auth != "" || o.Principal != "" ||
+		o.Stream != nil || o.Schedule != "" || o.ServiceRole != ""
 }
 
 // validateSeams checks every seam declaration. Published projects may declare
@@ -225,6 +234,10 @@ func validateSeams(m Manifest) error {
 		if err := operation.validateSeams(m, ports, models); err != nil {
 			return fmt.Errorf("operation %s: %w", operation.ID(), err)
 		}
+	}
+
+	if err := m.validatePathBindings(); err != nil {
+		return err
 	}
 
 	if err := validateStreams(m); err != nil {
@@ -623,6 +636,10 @@ func (o Operation) validateSeams(
 	case "", BodyGenerated, BodyAuthored, BodySystem:
 	default:
 		return fmt.Errorf("body must be authored or generated")
+	}
+
+	if err := o.validatePath(); err != nil {
+		return err
 	}
 
 	if o.Scope == ScopeEachTenant {

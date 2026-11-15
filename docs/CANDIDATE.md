@@ -406,8 +406,68 @@ failed execution is not retried under its key. The stored response is replayed
 verbatim: do not return secrets (such as an enrollment token) from an
 idempotent write; declare those `exempt` with a `replay_reason`. `required`
 needs an HTTP endpoint; an authored write that no endpoint exposes stays
-`exempt`. The operation cannot take path or query parameters: carry identifiers
-in the body.
+`exempt`. A write takes no query parameters; identify the record with a typed
+path parameter (next section) or carry identifiers in the body.
+
+## Path parameters on authored endpoints
+
+REST routes address one record: `GET|PATCH|PUT|DELETE /api/gateways/{id}`.
+Each `{segment}` of an authored endpoint path is declared and typed on the
+operation, and the entry names the one that selects the resource:
+
+```toml
+[[operations]]
+group = "gateways"
+action = "Edit"
+permission = "gateways.manage"
+write = true
+idempotency = "required"
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.GatewayName"     # JSON body; omit for a bodyless write
+output = "gateways.GatewayInfo"
+path = [{ name = "id", type = "uuid" }]
+
+[[endpoints]]
+group = "gateways"
+action = "Edit"
+operation = "gateways.Edit"
+method = "PATCH"
+path = "/api/gateways/{id}"
+resource_source = "path:id"
+```
+
+Types: `uuid` (canonical hex, lowercased on bind), `string` (`max` 1..256,
+letters, digits and `-._~`) and `int64` (canonical non-negative decimal,
+optional `max`). Names are `[a-z][a-zA-Z0-9]*` like route segments. Validation
+refuses a `{segment}` without a declaration, a declaration that is not in the
+path, a missing or mismatched `resource_source = "path:<name>"`, and path
+parameters on anything but an authored, protected, non-collection
+`response = "object"` operation on the verified user path (not machine,
+stream, enroll, provision, lookup or per-tenant).
+
+The generated handler verifies the caller, then validates every path value
+against its declared type (`400 invalid_path_parameter`, before the body is
+read or any claim is taken), then proceeds as above. The request model is a
+generated struct: a read's carries the path fields beside its query fields; a
+write's has `Body` (the strictly decoded input model, absent when no `input`
+is declared; a bodyless write refuses any body with `400 invalid_body`) and
+one field per path parameter (`request.ID`). Path fields are never part of the
+JSON body or the OpenAPI request schema; OpenAPI lists them as typed `path`
+parameters.
+
+The identity gate is bound to the resource key `"<resource>:<value>"` of the
+parameter named by `resource_source`; the generated policy demands exactly that
+shape, and every data access of the body revalidates the same key. The gate
+authorizes membership and permission, not existence: look the record up
+through `queriesOf` under the verified tenant and map an empty result with
+`scope.NotFound(err)`. Another tenant's id is then a `404 not_found` identical
+to a missing id, while a caller outside the tenant or without the permission
+fails earlier with 401/403. With `idempotency = "required"` the stored claim is
+keyed by the request path, so one key reused on another id is a `409`.
 
 ## Same-transaction writes across groups
 
