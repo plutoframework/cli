@@ -140,13 +140,20 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 
 	// Scaffolds are authored starting points; replace them with real bodies.
 	for fixture, target := range map[string]string{
-		"rules.go.txt":        "internal/rules/orgs/rules.go",
-		"provision.go.txt":    "internal/logic/orgs/provision.go",
-		"count.go.txt":        "internal/logic/orgs/count.go",
-		"tenant_store.go.txt": "internal/adapters/orgs/tenant_store.go",
+		"rules.go.txt": "internal/rules/orgs/rules.go",
+		"count.go.txt": "internal/logic/orgs/count.go",
 	} {
 		systemFileAs(t, root, "example.test/auditapp", fixture, target)
 	}
+
+	// Provisioning also appends the first audit row in its own transaction.
+	seamFile(t, root, "provision.go.txt", "internal/logic/orgs/provision.go")
+	seamFile(
+		t,
+		root,
+		"tenant_store.go.txt",
+		"internal/adapters/orgs/tenant_store.go",
+	)
 
 	seamFile(t, root, "rules.go.txt", "internal/rules/audit/rules.go")
 	seamFile(t, root, "list.go.txt", "internal/logic/audit/list.go")
@@ -257,6 +264,23 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		"TestSystemLookupRateLimit",
 		"TestSystemRowLevelBoundaries",
 	)
+
+	provisionAudit, err := os.ReadFile(
+		"testdata/candidate_provision_audit_runtime.go.tmpl",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(
+		t, root, "internal/app/provision_audit_test.go", string(provisionAudit),
+	)
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestProvisionAudit", "./internal/app",
+	)
+	assertCandidateCaseNames(t, output, "TestProvisionAuditInTransaction")
 
 	assertSeamNegatives(t, root)
 	assertSystemNegatives(

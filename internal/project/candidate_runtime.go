@@ -803,13 +803,32 @@ func writeSystemOperation(
 
 	var ports bytes.Buffer
 
+	transactional := false
+
 	for _, id := range operation.Ports {
+		if foreignPort(operation.Group, id) {
+			transactional = true
+
+			fmt.Fprintf(
+				&ports,
+				"%s: adapters.%sTx, ",
+				foreignPortField(id),
+				adapterField(Port{ID: id}),
+			)
+
+			continue
+		}
+
 		fmt.Fprintf(
 			&ports,
 			"%s: adapters.%s, ",
 			modelName(id),
 			adapterField(Port{ID: id}),
 		)
+	}
+
+	if transactional {
+		ports.WriteString("TxDB: adapters.DB, ")
 	}
 
 	fmt.Fprintf(

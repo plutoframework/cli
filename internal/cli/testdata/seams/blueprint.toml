@@ -79,7 +79,7 @@ methods = [
   "Scan(scope.Execution, int64, int64) ([]models.Entry, error)",
 ]
 tx_methods = ["AppendTx"]
-tx_callers = ["approvals.Approve"]
+tx_callers = ["approvals.Approve", "orgs.Provision"]
 
 [[ports]]
 id = "approvals.Requests"
@@ -181,7 +181,7 @@ description = "Verify audit event integrity."
 id = "orgs.Tenants"
 adapter = "orgs.TenantStore"
 methods = [
-  "Provision(scope.Provisioning, models.Signup) (models.Org, error)",
+  "ProvisionTx(scope.Tx, models.Signup) (models.Org, error)",
   "CountMembers(scope.Execution) (int64, error)",
 ]
 
@@ -206,7 +206,7 @@ idempotency = "exempt"
 replay_reason = "A signup mints a new tenant; replays are rate limited."
 rate_limit = "3/1h"
 body = "authored"
-ports = ["orgs.Tenants"]
+ports = ["orgs.Tenants", "audit.Events"]
 response = "object"
 input = "orgs.Signup"
 output = "orgs.Org"
