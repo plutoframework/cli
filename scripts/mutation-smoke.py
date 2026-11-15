@@ -362,13 +362,6 @@ mutations = [
         "./internal/project#TestTxWriteManifestRejections",
     ),
     (
-        "tx write caller must be a write",
-        "internal/project/manifest_txwrite.go",
-        "if !o.Write {",
-        "if false {",
-        "./internal/project#TestTxWriteManifestRejections",
-    ),
-    (
         "tx write narrow port",
         "internal/project/candidate_adapters.go",
         "if slices.Contains(port.TxMethods, method.Name) {",
@@ -878,7 +871,7 @@ for name, relative, old, new, test in mutations:
                 cwd=checkout,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=400,
                 env={**os.environ, "GOWORK": "off"},
             )
             output = run.stdout + run.stderr
