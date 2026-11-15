@@ -34,3 +34,4 @@ go.work.sum
 # Pluto CLI local build outputs
 /bin/
 /pluto
+__pycache__/
