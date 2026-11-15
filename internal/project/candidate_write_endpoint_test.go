@@ -120,7 +120,9 @@ func TestAuthoredWriteEndpointRejections(t *testing.T) {
 		want string
 	}{
 		"no input model": {
-			func(m *Manifest) { m.Operations[len(m.Operations)-1].Input = "" },
+			func(m *Manifest) {
+				m.Operations[len(m.Operations)-1].Input = ""
+			},
 			"input model",
 		},
 		"page response": {

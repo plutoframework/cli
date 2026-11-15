@@ -150,7 +150,9 @@ func TestGatewayIdempotentWrite(t *testing.T) {
 	other := f.org(t, "idem-other@example.test")
 	created := f.create(t, org, "edge")
 
-	rename := func(name, key, cookie, tenant string) *httptest.ResponseRecorder {
+	rename := func(
+		name, key, cookie, tenant string,
+	) *httptest.ResponseRecorder {
 		headers := map[string]string{}
 		if key != "" {
 			headers["Idempotency-Key"] = key
@@ -299,7 +301,8 @@ func TestGatewayEnrollmentAudited(t *testing.T) {
 	created := f.create(t, org, "unaudited")
 	private, public := gwKey(t)
 
-	if response := f.enrollGateway(created.Token, public); response.Code == 200 {
+	response := f.enrollGateway(created.Token, public)
+	if response.Code == 200 {
 		t.Fatalf("enrollment succeeded without its record: %s",
 			response.Body.String())
 	}
@@ -476,9 +479,9 @@ func TestGatewayMachineStream(t *testing.T) {
 	// Unsigned, forged, stale and replayed upgrades never get a connection.
 	wrong, _ := gwKey(t)
 
-	if _, response, err := stream.dial(t, wrong, id, time.Now(), ""); err == nil ||
-		response == nil || response.StatusCode != 401 {
-		t.Fatalf("forged upgrade: %v %v", response, err)
+	_, forged, err := stream.dial(t, wrong, id, time.Now(), "")
+	if err == nil || forged == nil || forged.StatusCode != 401 {
+		t.Fatalf("forged upgrade: %v %v", forged, err)
 	}
 
 	if _, response, err := stream.dial(
@@ -498,12 +501,15 @@ func TestGatewayMachineStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { _ = conn.CloseNow() })
+	t.Cleanup(func() {
+		_ = conn.CloseNow()
+	})
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"seq":7}`)); err != nil {
+	beat := []byte(`{"seq":7}`)
+	if err := conn.Write(ctx, websocket.MessageText, beat); err != nil {
 		t.Fatal(err)
 	}
 
@@ -600,7 +606,9 @@ func TestGatewayMarkStale(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	go func() { _ = worker.Run(ctx) }()
+	go func() {
+		_ = worker.Run(ctx)
+	}()
 
 	if err := f.app.Operations.GatewaysMarkStale.Enqueue(ctx); err != nil {
 		t.Fatal(err)
