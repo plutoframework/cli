@@ -48,3 +48,38 @@ func historicalRenders(m project.Manifest, name string) [][]byte {
 
 	return renders
 }
+
+// historicalDocuments renders the document templates recorded under
+// history/docs, one set per era, for the manifest. Era directories hold
+// README.md.tmpl.txt and AGENTS.md.tmpl.txt as earlier CLIs embedded them.
+// Record a new era whenever those templates change.
+func historicalDocuments(m project.Manifest) ([]map[string][]byte, error) {
+	eras, err := fs.ReadDir(historyFS, "history/docs")
+	if err != nil {
+		return nil, nil
+	}
+
+	renders := []map[string][]byte{}
+
+	for _, era := range eras {
+		sources := map[string][]byte{}
+
+		for _, name := range []string{"README.md", "AGENTS.md"} {
+			data, err := historyFS.ReadFile(
+				"history/docs/" + era.Name() + "/" + name + ".tmpl.txt",
+			)
+			if err == nil {
+				sources[name] = data
+			}
+		}
+
+		rendered, err := project.DocumentsFromTemplates(m, sources)
+		if err != nil {
+			return nil, err
+		}
+
+		renders = append(renders, rendered)
+	}
+
+	return renders, nil
+}

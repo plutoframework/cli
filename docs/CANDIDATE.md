@@ -106,6 +106,28 @@ business policy, remote provider idempotency or external dependency internals.
 Effects use stable downstream idempotency keys and finite retries; external
 exactly-once delivery is not claimed.
 
+## Regenerating managed files
+
+`pluto generate` renders every managed file from pluto.toml with the installed
+CLI. Edit pluto.toml (or upgrade the CLI), then run it; never hand-edit managed
+files. It works in the published and candidate profiles and is idempotent.
+
+```sh
+pluto generate --dry-run   # unified diff, refusals, new proposals
+pluto generate             # needs a clean Git tree; no hooks run
+```
+
+A managed file is overwritten only while it is pristine relative to a render the
+CLI knows: the current one, or an earlier generator's render recorded in the
+migrate history (drift caused by a CLI upgrade). A file that matches none was
+edited by hand; `generate` prints `file:line` with the first differing line,
+writes nothing and exits nonzero. Move the change into pluto.toml or an
+authored file, restore the managed file and rerun. Applied SQL migrations are
+never rewritten. Required migrations are proposed with framework numbering: the
+forced-RLS migration of each new `[[tables]]` entry and the `[database]
+runtime_role` migration; missing authored adapter stubs are created once. After
+writing, `generate` runs OpenAPI generation and `pluto fmt`.
+
 ## Migrating existing applications
 
 `pluto migrate` moves an application between manifest states (schema version and

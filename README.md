@@ -158,6 +158,10 @@ migrations: manifest transforms, regenerated scaffold files and a precise list o
 manual items for anything edited. Apply from a clean Git tree; see the
 [reference](docs/CANDIDATE.md#migrating-existing-applications).
 
+`pluto generate [--dry-run]` rewrites managed files after pluto.toml edits or a CLI
+upgrade, refusing hand-edited ones; see
+[the docs](docs/CANDIDATE.md#regenerating-managed-files).
+
 ## Read further
 
 - [API and integration reference](docs/REFERENCE.md)

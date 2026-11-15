@@ -32,6 +32,9 @@ go run ./cmd/api
 # curl http://127.0.0.1:8080/healthz
 ```
 
+After editing pluto.toml or upgrading the CLI, run `pluto generate` to rewrite
+managed files (see [CANDIDATE.md](CANDIDATE.md#regenerating-managed-files)).
+
 The candidate profile (explicit boundary profile, `pluto migrate`, authored
 seams, memberships, system and cross-group transaction seams) is documented in
 [CANDIDATE.md](CANDIDATE.md).

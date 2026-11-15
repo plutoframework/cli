@@ -1,5 +1,9 @@
 {{if .Candidate}}# Working on {{.Name}}
 
+Managed files are CLI-owned: edit pluto.toml, then run `pluto generate`
+(`--dry-run` previews) to rewrite them after manifest edits or a CLI upgrade.
+It refuses hand-edited managed files and never overwrites authored files.
+
 This is the explicit, unreleased candidate scoped-record profile. Read
 pluto.toml
 and README.md. Run pluto fmt, pluto openapi, pluto architecture check
@@ -48,6 +52,24 @@ must invoke the same sealed operation. Provider URLs are deployment
 configuration;
 external delivery remains at-least-once and requires stable-key deduplication.
 
+Authored seams (candidate): declare, then write only authored role files.
+- Business code lives in internal/rules/<group> (pure validation and
+  invariants), internal/logic/<group> (authored operation bodies, declared
+  `body = "authored"`) and internal/adapters/<group> (SQL behind declared
+  `[[ports]]`; sqlc query sets via `[[queries]]`). Adapters use only the
+  scope's `queriesOf(...)`; tenant and actor come from the verified scope.
+- Signup that creates an org: declare `tenant_root = true` on the root
+  `[[tables]]` entry and an operation with `scope = "provision"` (authored write,
+  verified identity, no membership; generated code mints the tenant id). Pre-
+  login lookup by slug uses `scope = "lookup"` with `[[lookups]]`.
+- Same-transaction writes across groups: the port declares `tx_methods` and
+  `tx_callers`; the caller operation lists the port.
+- `[memberships]` binds roles to an app table; `active_column`/`active_values`
+  deny suspended subjects. `[database] runtime_role` names the least-privilege
+  role; a migration is proposed and startup refuses owner/BYPASSRLS roles.
+- Declaration changes: edit pluto.toml (or pluto add blueprint), then run
+  `pluto generate`. Full reference: the CANDIDATE.md in the Pluto CLI docs.
+
 {{if .LocalCredentials}}
 Local credentials{{if .OIDC}} and OIDC{{end}} are managed: sign-in creates a
 live session through the runtime's single fenced manager, which also issues the
@@ -65,6 +87,10 @@ release versions, edit pins by hand or silently switch profiles.
 Never log tokens, bodies, secrets, private records or provider payloads.
 {{else}}
 # Working on {{.Name}}
+
+Managed files are CLI-owned: edit pluto.toml, then run `pluto generate`
+(`--dry-run` previews) to rewrite them after manifest edits or a CLI upgrade.
+It refuses hand-edited managed files and never overwrites authored files.
 
 This is the published compatibility profile. Protected operations are drafts:
 canonical architecture checks and pluto vet report ARCH401 until explicit
