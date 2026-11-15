@@ -441,6 +441,14 @@ func inspectCandidateBoundaries(
 		)
 	}
 
+	sqlcOutputs := sqlcGeneratedFiles(root, canonical)
+
+	for _, file := range files {
+		if sqlcOutputs[file.path] {
+			rules.managed[file.path] = true
+		}
+	}
+
 	types := map[string]candidateType{}
 	functions := map[string]candidateType{}
 
@@ -489,6 +497,27 @@ func inspectCandidateBoundaries(
 	for _, file := range files {
 		emit := func(id string, pos token.Pos, message, repair string) {
 			add(id, file.path, set.Position(pos).Line, message, repair)
+		}
+
+		// sqlc output is generated, not authored; ARCH612 proves it with sqlc
+		// diff. It may reach only the scope package and the driver.
+		if sqlcOutputs[file.path] {
+			for _, spec := range file.tree.Imports {
+				path, err := strconv.Unquote(spec.Path.Value)
+				if err != nil || candidateStdlib(path) ||
+					path == module+"/"+scopeDir ||
+					strings.HasPrefix(path, "github.com/jackc/pgx/v5") {
+					continue
+				}
+
+				emit(
+					"ARCH610",
+					spec.Pos(),
+					"sqlc output imports outside scope and the driver: "+path,
+					"Generated query packages use only internal/scope "+
+						"types (through sqlc go_type overrides) and pgx.",
+				)
+			}
 		}
 
 		for _, spec := range file.tree.Imports {

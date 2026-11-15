@@ -7,11 +7,40 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/plutoframework/cli/internal/sqlcheck"
 
 	"github.com/pelletier/go-toml/v2"
 )
+
+// sqlcGeneratedFiles lists the files sqlc writes for the declared query sets:
+// db.go, models.go and one <query file>.go per query file. Only these exact
+// names are exempt from authored ownership; ARCH612 runs sqlc diff to prove
+// their content is what sqlc generates.
+func sqlcGeneratedFiles(root string, m Manifest) map[string]bool {
+	paths := map[string]bool{}
+
+	for _, set := range m.Queries {
+		directory := CandidateQueryPackage(set.Group)
+		paths[directory+"/db.go"] = true
+		paths[directory+"/models.go"] = true
+
+		for _, pattern := range set.Files {
+			matches, _ := filepath.Glob(filepath.Join(
+				root,
+				filepath.FromSlash(pattern),
+			))
+
+			for _, match := range matches {
+				name := strings.TrimSuffix(filepath.Base(match), ".sql")
+				paths[directory+"/"+name+".sql.go"] = true
+			}
+		}
+	}
+
+	return paths
+}
 
 // CandidateQueryPackage is the sqlc output directory of an authored query set.
 func CandidateQueryPackage(group string) string {
@@ -25,10 +54,13 @@ func CandidateQueryPackage(group string) string {
 func candidateSQLCConfig(m Manifest) []byte {
 	var out bytes.Buffer
 
+	// The managed framework output must not change when an application adds
+	// its own tables, so its stanza reads only the foundation migration that
+	// the checked-in managed models describe.
 	out.WriteString(`version: "2"
 sql:
   - engine: postgresql
-    schema: db/migrations
+    schema: db/migrations/001_initial.sql
     queries: db/queries
     gen:
       go:

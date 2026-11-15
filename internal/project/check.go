@@ -388,6 +388,12 @@ func Contracts(root string, m Manifest) error {
 					)
 				}
 
+				// The sealed scope package is the declared capability
+				// surface; its driver imports are not charged to its users.
+				if local == scopeDir {
+					continue
+				}
+
 				if strings.HasPrefix(dependency, m.Project.Module+"/") {
 					if err := visit(dependency); err != nil {
 						return err

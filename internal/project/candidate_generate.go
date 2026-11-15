@@ -375,6 +375,10 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 
 	applyFrameworkMigrations(m, files)
 
+	if len(m.Queries) > 0 {
+		files["sqlc.yaml"] = candidateSQLCConfig(m)
+	}
+
 	return files, nil
 }
 

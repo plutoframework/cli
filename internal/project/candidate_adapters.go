@@ -131,10 +131,6 @@ func candidateAdapterFiles(m Manifest) (map[string][]byte, error) {
 		)
 	}
 
-	if len(m.Queries) > 0 {
-		files["sqlc.yaml"] = candidateSQLCConfig(m)
-	}
-
 	return files, nil
 }
 
