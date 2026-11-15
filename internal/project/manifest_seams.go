@@ -80,7 +80,16 @@ type Memberships struct {
 	TenantColumn  string `toml:"tenant_column"`
 	SubjectColumn string `toml:"subject_column"`
 	RoleColumn    string `toml:"role_column"`
+
+	// ActiveColumn restricts membership to active rows so suspended or
+	// deprovisioned subjects lose their role on the next request. With
+	// ActiveValues the column is compared as text against that set; without
+	// it the column must be boolean and true.
+	ActiveColumn string   `toml:"active_column,omitempty"`
+	ActiveValues []string `toml:"active_values,omitempty"`
 }
+
+var activeValue = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 var (
 	snakeName   = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
@@ -114,7 +123,8 @@ const (
 
 func (m Manifest) hasSeamDeclarations() bool {
 	if len(m.Tables)+len(m.Queries)+len(m.Ports)+len(m.Models) != 0 ||
-		m.Authored != nil || m.Memberships != nil {
+		m.Authored != nil || m.Memberships != nil ||
+		m.Database.RuntimeRole != "" {
 		return true
 	}
 
@@ -472,6 +482,84 @@ func validateMemberships(
 			table.ID(),
 			table.TenantColumn,
 		)
+	}
+
+	return validateMembershipActive(memberships)
+}
+
+var runtimeRoleName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+
+func validateRuntimeRole(m Manifest) error {
+	role := m.Database.RuntimeRole
+	if role == "" {
+		return nil
+	}
+
+	if !runtimeRoleName.MatchString(role) ||
+		role == "postgres" || role == "public" ||
+		strings.HasPrefix(role, "pg_") {
+		return fmt.Errorf(
+			"database runtime_role must be a lowercase snake_case role name " +
+				"that is not postgres, public or pg_*",
+		)
+	}
+
+	if len(m.Tables) == 0 {
+		return fmt.Errorf("database runtime_role requires declared tables")
+	}
+
+	// The framework membership table is created in the reserved range after
+	// every numbered migration, so no earlier grant can cover it.
+	if m.Memberships == nil {
+		return fmt.Errorf(
+			"database runtime_role requires [memberships]: the framework " +
+				"membership table is created after the role migration",
+		)
+	}
+
+	return nil
+}
+
+func validateMembershipActive(memberships *Memberships) error {
+	if memberships.ActiveColumn == "" {
+		if len(memberships.ActiveValues) != 0 {
+			return fmt.Errorf("memberships active_values require active_column")
+		}
+
+		return nil
+	}
+
+	if !snakeName.MatchString(memberships.ActiveColumn) {
+		return fmt.Errorf("memberships active_column must be snake_case")
+	}
+
+	for _, other := range []string{
+		memberships.TenantColumn,
+		memberships.SubjectColumn,
+		memberships.RoleColumn,
+	} {
+		if other == memberships.ActiveColumn {
+			return fmt.Errorf(
+				"memberships active_column must be distinct from other columns",
+			)
+		}
+	}
+
+	if len(memberships.ActiveValues) > 16 {
+		return fmt.Errorf("memberships active_values allows at most 16 values")
+	}
+
+	seen := map[string]bool{}
+
+	for _, value := range memberships.ActiveValues {
+		if !activeValue.MatchString(value) || seen[value] {
+			return fmt.Errorf(
+				"memberships active_values must be distinct 1-64 character " +
+					"values of letters, digits, '_', '-' or '.'",
+			)
+		}
+
+		seen[value] = true
 	}
 
 	return nil

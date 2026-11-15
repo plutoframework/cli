@@ -280,6 +280,20 @@ Both route and direct operation permission checks use that same policy; unknown
 roles invalidate the complete assignment, and a nil policy grants nothing.
 Ownership, tenant-scoped SQL and revocation consistency remain application policy.
 
+Candidate `[memberships]` binds roles to an app-owned declared table. Optional
+`active_column` limits membership to active rows: with `active_values` the column
+is compared as text against that set, without it the column must be boolean and
+true. The predicate is part of every per-request membership query (nothing is
+cached), so a suspended subject is denied on the next request and a reactivated
+one is allowed. `[database] runtime_role` names the least-privilege role: the
+blueprint proposes a NOLOGIN, NOBYPASSRLS role migration granting SELECT/INSERT
+(append-only tables) or SELECT/INSERT/UPDATE/DELETE on declared and `pluto_*`
+tables; enable login and set the credential in the deployment. Generated
+`postgres.VerifyRuntimeRole` runs in the API and worker mains and refuses to
+start when the connected role is a superuser, has BYPASSRLS, owns or inherits
+ownership of a declared table, is not the declared runtime role, or a declared
+table lacks forced row-level security. There is no override.
+
 The templates change authored principal, composition and operation signatures.
 Existing generated apps need an explicit RBAC migration (or a fresh scaffold);
 `add endpoint` does not overwrite authored files to perform that migration.

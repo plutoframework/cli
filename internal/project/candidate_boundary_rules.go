@@ -339,6 +339,7 @@ func candidateSourceRules(
 	}
 
 	rules.managed["internal/storage/identity/memberships_gen.go"] = true
+	rules.managed["internal/storage/postgres/runtime_role_gen.go"] = true
 	rules.protectedTypes[module+"/internal/access.Caller"] = true
 	rules.protectedTypes["github.com/plutoframework/pluto-auth.Identity"] = true
 	rules.protectedTypes["github.com/plutoframework/pluto-rbac/"+

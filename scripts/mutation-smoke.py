@@ -340,6 +340,34 @@ mutations = [
         "",
         "./internal/project#TestTableMigrationForcesRowSecurityAndAppendOnly",
     ),
+    (
+        "membership active predicate",
+        "internal/project/candidate_memberships_app.go",
+        'query += " AND " + quoteIdent(column) + " IS TRUE"',
+        'query += ""',
+        "./internal/project#TestCandidateAppMembershipsActivePredicate",
+    ),
+    (
+        "runtime role append-only grants",
+        "internal/project/candidate_runtime_role.go",
+        'privileges = "SELECT, INSERT"',
+        'privileges = "SELECT, INSERT, UPDATE, DELETE"',
+        "./internal/project#TestRuntimeRoleMigrationIsLeastPrivilege",
+    ),
+    (
+        "runtime role startup owner check",
+        "internal/project/candidate_runtime_role.go",
+        "pg_has_role(current_user, c.relowner, 'USAGE')",
+        "false",
+        "./internal/project#TestRuntimeRoleGuardGeneratedAndWired",
+    ),
+    (
+        "runtime role reserved names",
+        "internal/project/manifest_seams.go",
+        'role == "postgres" || role == "public" ||',
+        'role == "disabled" || role == "public" ||',
+        "./internal/project#TestSeamManifestRejections",
+    ),
 ]
 
 if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":

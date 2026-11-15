@@ -59,6 +59,11 @@ type Capabilities struct {
 type Database struct {
 	Engine  string `toml:"engine"`
 	Queries string `toml:"queries"`
+
+	// RuntimeRole names the least-privilege role the application connects as.
+	// pluto proposes the migration that creates it; the runtime refuses to
+	// start under any other role.
+	RuntimeRole string `toml:"runtime_role,omitempty"`
 }
 type Development struct {
 	Mise   bool `toml:"mise"`
@@ -161,6 +166,10 @@ func (m Manifest) Validate() error {
 
 	if m.Database.Engine != "postgres" || m.Database.Queries != "sqlc" {
 		return fmt.Errorf("database requires engine=postgres and queries=sqlc")
+	}
+
+	if err := validateRuntimeRole(m); err != nil {
+		return err
 	}
 
 	if err := ValidateManifestContracts(m); err != nil {

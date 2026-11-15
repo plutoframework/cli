@@ -109,6 +109,8 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 	for _, path := range []string{
 		"db/migrations/012_rls_users.sql",
 		"db/migrations/013_rls_audit_events.sql",
+		"db/migrations/014_runtime_role.sql",
+		"internal/storage/postgres/runtime_role_gen.go",
 		"internal/adapters/audit/event_store.go",
 		"internal/logic/audit/list.go",
 	} {
@@ -158,6 +160,23 @@ func TestCandidateAuthoredSeamEndToEnd(t *testing.T) {
 		"-run", "^TestAuditSeamEndToEnd$", "./internal/app",
 	)
 	assertCandidateCaseNames(t, output, "TestAuditSeamEndToEnd")
+
+	members, err := os.ReadFile("testdata/candidate_audit_members.go.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeSeam(t, root, "internal/app/audit_members_test.go", string(members))
+
+	output = external(
+		t, root, "go", "test", "-race", "-json", "-count=1",
+		"-run", "^TestAuditMembers", "./internal/app",
+	)
+	assertCandidateCaseNames(
+		t, output,
+		"TestAuditMembersActiveState",
+		"TestAuditMembersRuntimeRole",
+	)
 
 	assertSeamNegatives(t, root)
 }

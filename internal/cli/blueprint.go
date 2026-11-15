@@ -29,6 +29,13 @@ type operationBlueprint struct {
 	Models             []project.Model             `toml:"models"`
 	Authored           *project.Authored           `toml:"authored"`
 	Memberships        *project.Memberships        `toml:"memberships"`
+	Database           *blueprintDatabase          `toml:"database"`
+}
+
+// blueprintDatabase declares the runtime role for a blueprint. Engine and
+// query settings stay owned by pluto.toml.
+type blueprintDatabase struct {
+	RuntimeRole string `toml:"runtime_role"`
 }
 
 func readOperationBlueprint(path string) (operationBlueprint, error) {
@@ -91,7 +98,8 @@ func readOperationBlueprint(path string) (operationBlueprint, error) {
 		blueprint.Ports,
 	)+len(
 		blueprint.Models,
-	) == 0 && blueprint.Authored == nil && blueprint.Memberships == nil {
+	) == 0 && blueprint.Authored == nil && blueprint.Memberships == nil &&
+		blueprint.Database == nil {
 		return blueprint, fmt.Errorf(
 			"blueprint must declare application contracts",
 		)
@@ -203,6 +211,16 @@ func addBlueprintCommand(options Options) *cobra.Command {
 				manifest.Memberships = blueprint.Memberships
 			}
 
+			if blueprint.Database != nil {
+				if manifest.Database.RuntimeRole != "" {
+					return fmt.Errorf(
+						"blueprint cannot replace existing runtime_role",
+					)
+				}
+
+				manifest.Database.RuntimeRole = blueprint.Database.RuntimeRole
+			}
+
 			if err := manifest.Validate(); err != nil {
 				return err
 			}
@@ -262,6 +280,14 @@ func addBlueprintCommand(options Options) *cobra.Command {
 			if len(blueprint.Tables) > 0 {
 				if err := merge(
 					project.ProposeTableMigrations(root, manifest),
+				); err != nil {
+					return err
+				}
+			}
+
+			if blueprint.Database != nil || len(blueprint.Tables) > 0 {
+				if err := merge(
+					project.ProposeRuntimeRoleMigration(root, manifest, files),
 				); err != nil {
 					return err
 				}

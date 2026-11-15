@@ -35,11 +35,35 @@ func candidateAppMemberships(m Manifest) ([]byte, error) {
 		" WHERE " + quoteIdent(m.Memberships.SubjectColumn) + " = $1" +
 		" AND " + quoteIdent(m.Memberships.TenantColumn) + " = $2"
 
-	return []byte(strings.ReplaceAll(
+	activeArgs := ""
+	activeDecl := ""
+
+	if column := m.Memberships.ActiveColumn; column != "" {
+		if len(m.Memberships.ActiveValues) == 0 {
+			query += " AND " + quoteIdent(column) + " IS TRUE"
+		} else {
+			query += " AND " + quoteIdent(column) + "::text = ANY($3)"
+			activeArgs = ",\n\t\tmembershipActiveValues"
+
+			quoted := make([]string, len(m.Memberships.ActiveValues))
+			for index, value := range m.Memberships.ActiveValues {
+				quoted[index] = strconv.Quote(value)
+			}
+
+			activeDecl = "\nvar membershipActiveValues = []string{" +
+				strings.Join(quoted, ", ") + "}\n"
+		}
+	}
+
+	source := strings.ReplaceAll(
 		candidateAppMembershipsSource,
 		"{{MODULE}}",
 		m.Project.Module,
-	) + "\nconst membershipQuery = " + strconv.Quote(query) + "\n"), nil
+	)
+	source = strings.ReplaceAll(source, "{{ACTIVE_ARGS}}", activeArgs)
+
+	return []byte(source + "\nconst membershipQuery = " +
+		strconv.Quote(query) + "\n" + activeDecl), nil
 }
 
 func quoteIdent(name string) string {
@@ -61,7 +85,9 @@ import (
 // Memberships resolves the subject's role in the tenant from the app-owned
 // table declared in [memberships]. Generated; edit pluto.toml instead.
 // The runtime database role must not own the table so row-level security
-// applies.
+// applies. When [memberships] declares an active predicate it is part of the
+// query, and every request re-reads it: nothing is cached, so a suspended
+// subject is denied on the next request and a reactivated one is allowed.
 type Memberships struct {
 	pool *pgxpool.Pool
 }
@@ -102,7 +128,7 @@ func (m *Memberships) Resolve(
 		ctx,
 		membershipQuery,
 		subject,
-		tenant,
+		tenant{{ACTIVE_ARGS}},
 	).Scan(&role); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Principal{}, domain.ErrForbidden

@@ -336,6 +336,12 @@ func candidateManaged(m Manifest) (map[string][]byte, error) {
 
 	files["internal/storage/identity/memberships_gen.go"] = memberships
 
+	if len(m.Tables) > 0 {
+		files["internal/storage/postgres/runtime_role_gen.go"] = candidateRuntimeRoleGuard(
+			m,
+		)
+	}
+
 	if m.Memberships == nil {
 		files["db/migrations/099_memberships.sql"] = candidateMembershipsSchema
 	}

@@ -63,3 +63,60 @@ func TestCandidateManagedUsesAppMembershipsWhenDeclared(t *testing.T) {
 		t.Fatal("framework membership migration must not be generated")
 	}
 }
+
+func TestCandidateAppMembershipsActivePredicate(t *testing.T) {
+	for name, tc := range map[string]struct {
+		column string
+		values []string
+		want   []string
+	}{
+		"none": {want: nil},
+		"boolean": {
+			column: "active",
+			want:   []string{`AND \"active\" IS TRUE`},
+		},
+		"values": {
+			column: "state",
+			values: []string{"active", "trial"},
+			want: []string{
+				`AND \"state\"::text = ANY($3)`,
+				`[]string{"active", "trial"}`,
+				"membershipActiveValues",
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := seamFixture(t)
+			m.Memberships.ActiveColumn = tc.column
+			m.Memberships.ActiveValues = tc.values
+
+			if err := m.Validate(); err != nil {
+				t.Fatal(err)
+			}
+
+			source, err := candidateAppMemberships(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			formatted, err := formatGenerated(source, m.Project.Module)
+			if err != nil {
+				t.Fatalf("generated source does not format: %v", err)
+			}
+
+			text := string(formatted)
+			if tc.column == "" &&
+				(strings.Contains(text, "IS TRUE") ||
+					strings.Contains(text, "ANY($3)") ||
+					strings.Contains(text, "membershipActiveValues")) {
+				t.Fatalf("no predicate expected:\n%s", text)
+			}
+
+			for _, want := range tc.want {
+				if !strings.Contains(text, want) {
+					t.Fatalf("missing %q in:\n%s", want, text)
+				}
+			}
+		})
+	}
+}

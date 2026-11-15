@@ -1,0 +1,127 @@
+package app_test
+
+import (
+	"strings"
+	"testing"
+
+	"example.test/auditapp/internal/storage/postgres"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// A suspended member loses access on the very next request and a
+// reactivated one regains it: the active predicate is part of the
+// per-request membership query and nothing caches the answer.
+func TestAuditMembersActiveState(t *testing.T) {
+	f := auditSetup(t)
+
+	alice := f.enroll(t, "alice@example.test")
+	f.member(t, alice, "north", "recorder")
+
+	set := func(state string) {
+		t.Helper()
+
+		if _, err := f.admin.Exec(
+			t.Context(),
+			`UPDATE users SET state = $1 WHERE org_id = $2 AND id = $3`,
+			state, "north", alice.id,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	f.list(t, alice, "north", "", 200)
+
+	for _, state := range []string{"suspended", "deprovisioned", ""} {
+		set(state)
+		f.list(t, alice, "north", "", 0)
+
+		if err := f.appendEvent(
+			alice, "north", "x", `{}`,
+		); err == nil {
+			t.Fatalf("state %q must deny writes too", state)
+		}
+	}
+
+	set("active")
+	f.list(t, alice, "north", "", 200)
+
+	if err := f.appendEvent(alice, "north", "back", `{}`); err != nil {
+		t.Fatalf("reactivated member denied: %v", err)
+	}
+}
+
+// The generated startup check accepts only the declared least-privilege
+// role and refuses owners and any other role.
+func TestAuditMembersRuntimeRole(t *testing.T) {
+	f := auditSetup(t)
+
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"ALTER ROLE audit_app LOGIN PASSWORD 'runtime'",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// The fixture isolates each run in its own schema; production uses public,
+	// which the generated migration already opens to the role.
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"GRANT USAGE ON SCHEMA "+pgx.Identifier{f.schema}.Sanitize()+
+			" TO audit_app",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	connect := func(user, secret string) *pgxpool.Pool {
+		t.Helper()
+
+		settings := f.runtime.Config().Copy()
+		settings.ConnConfig.User = user
+		settings.ConnConfig.Password = secret
+
+		pool, err := pgxpool.NewWithConfig(t.Context(), settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Cleanup(pool.Close)
+
+		return pool
+	}
+
+	declared := connect("audit_app", "runtime")
+
+	if err := postgres.VerifyRuntimeRole(t.Context(), declared); err != nil {
+		t.Fatalf("declared runtime role refused: %v", err)
+	}
+
+	// Least privilege: events are append-only, users are read-write.
+	if _, err := declared.Exec(
+		t.Context(),
+		`UPDATE audit_events SET seq = seq`,
+	); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("runtime role can update append-only table: %v", err)
+	}
+
+	if _, err := declared.Exec(
+		t.Context(),
+		`DELETE FROM audit_events`,
+	); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("runtime role can delete append-only table: %v", err)
+	}
+
+	// The owner, and a well-formed role that is not the declared one, fail.
+	if err := postgres.VerifyRuntimeRole(
+		t.Context(), f.admin,
+	); err == nil {
+		t.Fatal("owner role must be refused")
+	}
+
+	if err := postgres.VerifyRuntimeRole(
+		t.Context(), f.runtime,
+	); err == nil || !strings.Contains(err.Error(), "runtime_role") {
+		t.Fatalf("undeclared role must be refused: %v", err)
+	}
+}

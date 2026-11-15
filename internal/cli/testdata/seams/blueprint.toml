@@ -118,3 +118,8 @@ table = "access.users"
 tenant_column = "org_id"
 subject_column = "id"
 role_column = "role"
+active_column = "state"
+active_values = ["active"]
+
+[database]
+runtime_role = "audit_app"
