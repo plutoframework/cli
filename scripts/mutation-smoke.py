@@ -684,8 +684,8 @@ mutations.extend(
         (
             "unexposed authored write cannot claim idempotency",
             "internal/project/candidate_authored.go",
-            "!(operation.isAuthoredWriteBody() && m.hasEndpoint(operation)) {",
-            "false {",
+            "(!operation.isAuthoredWriteBody() || !m.hasEndpoint(operation)) {",
+            "(false) {",
             "./internal/project#TestInternalAuthoredWriteCannotRequireIdempotency",
         ),
         (

@@ -103,6 +103,10 @@ func TestAuthoredWriteEndpointExempt(t *testing.T) {
 	}
 
 	handler := string(files["internal/handlers/audit/annotate.go"])
+	if !strings.Contains(handler, "transport.Decode(w, r, &input, bodyLimit)") {
+		t.Error("an exempt write must still decode strictly")
+	}
+
 	if strings.Contains(handler, "Idempotency") ||
 		!strings.Contains(handler, "operation.Execute(") {
 		t.Errorf("an exempt write must not take a claim: %s", handler)
