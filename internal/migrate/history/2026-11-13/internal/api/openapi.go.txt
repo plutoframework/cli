@@ -1,0 +1,295 @@
+// Package api derives OpenAPI from the exact catalog and concrete wire models.
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"@@MODULE@@/internal/paths"
+)
+
+func Document() ([]byte, error) {
+	routes := map[string]map[string]any{}
+	for _, endpoint := range paths.All() {
+		if routes[endpoint.Path] == nil {
+			routes[endpoint.Path] = map[string]any{}
+		}
+
+		var responseSchema map[string]any
+
+		var err error
+
+		redirect := endpoint.SuccessStatus >= 300 &&
+			endpoint.SuccessStatus < 400
+		if !redirect {
+			responseSchema, err = modelSchema(endpoint.Response)
+			if err != nil {
+				return nil, fmt.Errorf("%s response: %w", endpoint.ID, err)
+			}
+		}
+
+		operation := map[string]any{
+			"operationId":  endpoint.ID,
+			"summary":      endpoint.Name,
+			"description":  endpoint.Description,
+			"x-permission": endpoint.Permission,
+			"x-feature":    endpoint.Feature,
+			"responses": map[string]any{
+				strconv.Itoa(endpoint.SuccessStatus): map[string]any{
+					"description": "Success",
+					"content": map[string]any{
+						"application/json": map[string]any{
+							"schema": responseSchema,
+						},
+					},
+				},
+				"default": map[string]any{
+					"description": "Error envelope: code, message, request_" +
+						"id. Incomplete operations return 501.",
+					"content": map[string]any{
+						"application/json": map[string]any{
+							"schema": map[string]any{
+								"$ref": "#/components/schemas/Error",
+							},
+						},
+					},
+				},
+			},
+		}
+		if redirect {
+			operation["responses"].(map[string]any)[strconv.Itoa(
+				endpoint.SuccessStatus,
+			)] = map[string]any{
+				"description": "Browser redirect; no JSON success body.",
+				"headers": map[string]any{
+					"Location": map[string]any{
+						"required": true,
+						"schema": map[string]any{
+							"type":   "string",
+							"format": "uri-reference",
+						},
+					},
+				},
+			}
+		}
+
+		if endpoint.ID == "oidc.begin" {
+			schema, err := modelSchema(endpoint.Response)
+			if err != nil {
+				return nil, err
+			}
+
+			operation["responses"].(map[string]any)["200"] = map[string]any{
+				"description": "With Accept: application/json, returns a " +
+					"server-built authorization URL.",
+				"content": map[string]any{
+					"application/json": map[string]any{"schema": schema},
+				},
+			}
+		}
+
+		if endpoint.Authenticated {
+			operation["security"] = []any{
+				map[string]any{"bearerAuth": []string{}},
+				map[string]any{"sessionCookie": []string{}},
+			}
+		}
+
+		if strings.HasPrefix(endpoint.ID, "credentials.") {
+			operation["responses"].(map[string]any)["default"] = map[string]any{
+				"description": "Opaque authentication code; no credential " +
+					"or challenge data.",
+				"content": map[string]any{
+					"application/json": map[string]any{"schema": map[string]any{
+						"type": "object", "properties": map[string]any{
+							"code": map[string]any{
+								"type": "string",
+							},
+						},
+						"required": []string{
+							"code",
+						}, "additionalProperties": false,
+					}},
+				},
+			}
+		}
+
+		if endpoint.Request != nil {
+			requestSchema, err := modelSchema(endpoint.Request)
+			if err != nil {
+				return nil, fmt.Errorf("%s request: %w", endpoint.ID, err)
+			}
+
+			operation["requestBody"] = map[string]any{
+				"required": true,
+				"content": map[string]any{
+					"application/json": map[string]any{
+						"schema": requestSchema,
+					},
+				},
+			}
+		}
+
+		parameters := []any{}
+		if endpoint.ID == "oidc.begin" {
+			parameters = append(
+				parameters,
+				map[string]any{
+					"name":     "Origin",
+					"in":       "header",
+					"required": true,
+					"schema":   map[string]any{"type": "string"},
+				})
+		}
+
+		if endpoint.ID == "oidc.callback" {
+			for _, name := range []string{"state", "code"} {
+				parameters = append(
+					parameters,
+					map[string]any{
+						"name":     name,
+						"in":       "query",
+						"required": true,
+						"schema":   map[string]any{"type": "string"},
+					})
+			}
+		}
+
+		if strings.HasPrefix(endpoint.ID, "oidc.") {
+			operation["responses"].(map[string]any)["default"] = map[string]any{
+				"description": "Opaque authentication error; no credential " +
+					"data.",
+				"content": map[string]any{
+					"application/json": map[string]any{
+						"schema": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"error": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"code": map[string]any{
+											"type": "string",
+										},
+									},
+									"required": []string{"code"},
+								},
+							},
+							"required": []string{"error"},
+						},
+					},
+				},
+			}
+		}
+
+		if strings.HasPrefix(endpoint.ID, "credentials.") {
+			parameters = append(
+				parameters,
+				map[string]any{
+					"name":     "Origin",
+					"in":       "header",
+					"required": true,
+					"schema":   map[string]any{"type": "string"},
+				})
+		}
+
+		for _, part := range strings.Split(endpoint.Path, "/") {
+			if strings.HasPrefix(part, "{") {
+				parameters = append(
+					parameters,
+					map[string]any{
+						"name":     strings.Trim(part, "{}"),
+						"in":       "path",
+						"required": true,
+						"schema":   map[string]any{"type": "string"},
+					},
+				)
+			}
+		}
+
+		if endpoint.Collection {
+			parameters = append(
+				parameters,
+				map[string]any{
+					"name": "limit",
+					"in":   "query",
+					"schema": map[string]any{
+						"type":    "integer",
+						"default": 25,
+						"minimum": 1,
+						"maximum": 100,
+					},
+				},
+				map[string]any{
+					"name": "cursor",
+					"in":   "query",
+					"schema": map[string]any{
+						"type":      "string",
+						"maxLength": 2048,
+					},
+				})
+		}
+
+		if endpoint.Idempotent {
+			parameters = append(
+				parameters,
+				map[string]any{
+					"name":     "Idempotency-Key",
+					"in":       "header",
+					"required": true,
+					"description": "Client retry key; 409 means conflict " +
+						"or pending reconciliation. 24h completed retention.",
+					"schema": map[string]any{
+						"type":      "string",
+						"minLength": 1,
+						"maxLength": 128,
+						"pattern":   "^[A-Za-z0-9_.:-]+$",
+					},
+				})
+		}
+
+		if len(parameters) > 0 {
+			operation["parameters"] = parameters
+		}
+
+		routes[endpoint.Path][strings.ToLower(endpoint.Method)] = operation
+	}
+
+	document := map[string]any{
+		"openapi": "3.1.0",
+		"info":    map[string]any{"title": "@@NAME@@", "version": "0.1.0"},
+		"paths":   routes,
+		"components": map[string]any{
+			"securitySchemes": map[string]any{
+				"sessionCookie": map[string]any{
+					"type": "apiKey",
+					"in":   "cookie",
+					"name": "__Host-pluto_session",
+				},
+				"bearerAuth": map[string]any{
+					"type":   "http",
+					"scheme": "bearer",
+				},
+			},
+			"schemas": map[string]any{
+				"Error": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"error": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"code":       map[string]any{"type": "string"},
+								"message":    map[string]any{"type": "string"},
+								"request_id": map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(document, "", "  ")
+
+	return append(data, '\n'), err
+}

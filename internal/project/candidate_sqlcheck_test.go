@@ -70,11 +70,28 @@ func sqlcFixture(t *testing.T) (string, Manifest, []byte) {
 		t.Fatal(err)
 	}
 
-	if len(proposals) != 1 {
-		t.Fatalf("want one proposal, got %v", proposals)
+	if len(proposals) != 2 {
+		t.Fatalf("want an up and a down proposal, got %v", proposals)
+	}
+
+	down := string(proposals["db/down/003_rls_audit_events.sql"])
+	if !strings.Contains(
+		down,
+		"DROP POLICY IF EXISTS pluto_tenant_isolation",
+	) ||
+		!strings.Contains(down, "NO FORCE ROW LEVEL SECURITY") ||
+		!strings.Contains(
+			down,
+			"DROP FUNCTION IF EXISTS audit_events_append_only",
+		) {
+		t.Fatalf("down migration does not reverse the policy:\n%s", down)
 	}
 
 	for path, source := range proposals {
+		if strings.HasPrefix(path, "db/down/") {
+			continue
+		}
+
 		if path != "db/migrations/003_rls_audit_events.sql" {
 			t.Fatalf("unexpected proposal path %s", path)
 		}

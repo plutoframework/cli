@@ -104,6 +104,10 @@ func planCandidate(w *Workspace) error {
 		return err
 	}
 
+	if err := orphanedMembershipsSchema(w, next); err != nil {
+		return err
+	}
+
 	if err := candidateModules(w, next); err != nil {
 		return err
 	}
@@ -461,4 +465,31 @@ func adoptMigrationNumbers(w *Workspace, next *project.Manifest) error {
 	next.Migrations.Framework = recorded
 
 	return next.Validate()
+}
+
+// orphanedMembershipsSchema reports the framework memberships migration an
+// application keeps after [memberships] binds an app-owned table. The file may
+// already be applied, so it is reported and never deleted.
+func orphanedMembershipsSchema(w *Workspace, next project.Manifest) error {
+	const name = "db/migrations/099_memberships.sql"
+
+	if next.Memberships == nil {
+		return nil
+	}
+
+	_, exists, err := w.Read(name)
+	if err != nil || !exists {
+		return err
+	}
+
+	w.Note(Item{
+		Path: name,
+		Line: 1,
+		Reason: "framework memberships table is unused: [memberships] binds " +
+			"an application table",
+		Action: "if it was never applied, delete it; if applied, keep it " +
+			"and drop the table in a new numbered migration",
+	})
+
+	return nil
 }
