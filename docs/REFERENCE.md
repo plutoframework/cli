@@ -61,6 +61,31 @@ pluto architecture check --directory . --format json
 pluto vet
 ```
 
+Local sources only build on the machine that has those checkouts. To build the
+candidate profile anywhere the Go module proxy reaches (CI included), select a
+library by a pushed commit instead of a checkout:
+
+```sh
+pluto --no-input init /absolute/path/records --module example.com/records \
+  --multi-tenant --boundary-profile candidate \
+  --candidate-auth-revision <40-hex commit> \
+  --candidate-rbac-revision <40-hex commit> \
+  --candidate-core-revision <40-hex commit> \
+  --candidate-jobs-revision <40-hex commit>
+```
+
+A revision must be a full commit hash. It is resolved through the Go module
+system to the exact version of every module the profile binds from that library
+(submodules carry their own pseudo-versions), and nothing is written until the
+pins verify: each module downloads at exactly its version with go.sum checksums,
+declares its own module path, the pin set survives minimal version selection,
+and a probe of the required candidate APIs compiles against it. Pins are saved
+under `[boundary.pins]` in pluto.toml and become plain go.mod requirements with
+verified go.sum lines and no replace directive. Each library uses either a source
+or pins, never both. Blueprints restore the exact pins, and canonical checks and
+`pluto vet` reject any pinned requirement at another version or any replacement
+of a pinned module; `go mod tidy` may only prune pins that no package imports.
+
 A blueprint adds `resources`, `operations`, `operation_contracts`, `effects`,
 `roles`, `endpoints`, `jobs` and `agents` atomically. Unknown fields, conflicting
 filenames, missing authority or behavior obligations and unsupported combinations
@@ -127,6 +152,9 @@ pluto --no-input migrate --to candidate --contracts contracts.toml \
   --candidate-auth-source ...   # same sources; applies the plan
 ```
 
+The same `--candidate-<lib>-revision` flags adopt verified pins instead of local
+sources; published requirements of the pinned modules move to their pins.
+
 `--to` takes a profile (`published`, `candidate`) or a schema version; the default
 is the latest schema in the current profile. `--dry-run` prints the step list,
 every changed path, the full unified diff and all manual items without writing.
@@ -136,7 +164,9 @@ result is reviewable and reversible with Git; no hooks run.
 A step may change only:
 
 - `pluto.toml`, through a typed manifest transform;
-- `go.mod`, keeping application requirements and adding profile requirements;
+- `go.mod`, keeping application requirements and adding profile requirements
+  (moving pinned candidate modules to their verified versions);
+- `go.sum`, adding verified checksums of pinned candidate modules;
 - scaffold files that are still pristine. A file is pristine when it matches the
   previous profile's render token for token, comments included; formatter-only
   differences (layout, trailing commas) do not count as edits.

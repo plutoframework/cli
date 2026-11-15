@@ -34,7 +34,7 @@ func migrateCommand(options Options) *cobra.Command {
 		Example: "  pluto migrate --to candidate --dry-run " +
 			"--candidate-auth-source /src/pluto-auth ...\n  pluto migrate " +
 			"--to candidate --contracts contracts.toml " +
-			"--candidate-auth-source ...",
+			"--candidate-auth-revision <commit> ...",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root, _, err := project.DiscoverAny(options.Directory)
@@ -51,7 +51,22 @@ func migrateCommand(options Options) *cobra.Command {
 				}
 			}
 
-			input := migrate.Options{Sources: sources}
+			if project.CandidateRevisionsRequested(sources) {
+				if target != migrate.ProfileCandidate {
+					return fmt.Errorf(
+						"candidate revisions only apply to --to candidate",
+					)
+				}
+
+				sources.Mode = migrate.ProfileCandidate
+			}
+
+			pinned, sums, err := pinCandidateProfile(cmd.Context(), sources)
+			if err != nil {
+				return err
+			}
+
+			input := migrate.Options{Sources: pinned, Sums: sums}
 
 			if contracts != "" {
 				path := contracts

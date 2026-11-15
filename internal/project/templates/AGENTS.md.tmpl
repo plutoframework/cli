@@ -60,8 +60,8 @@ Never log notifications, tokens or passwords.
 Apply explicit database migrations before startup. No constructor creates
 schemas,
 users, role assignments or fixture credentials. Candidate dependencies are
-explicit
-local replacements; do not invent release versions or silently switch profiles.
+explicit local replacements or verified exact pins in pluto.toml; do not invent
+release versions, edit pins by hand or silently switch profiles.
 Never log tokens, bodies, secrets, private records or provider payloads.
 {{else}}
 # Working on {{.Name}}

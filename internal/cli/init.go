@@ -63,8 +63,17 @@ func initCommand(options Options) *cobra.Command {
 				tenancy = "multi"
 			}
 
+			if _, err := exec.LookPath("go"); err != nil {
+				return fmt.Errorf("go 1.25.5+ is required: %w", err)
+			}
+
+			boundary, sums, err := pinCandidateProfile(cmd.Context(), profile)
+			if err != nil {
+				return err
+			}
+
 			m := project.Manifest{
-				Boundary:      profile,
+				Boundary:      boundary,
 				SchemaVersion: project.SchemaVersion,
 				Project: project.Project{
 					Name:      name,
@@ -95,13 +104,13 @@ func initCommand(options Options) *cobra.Command {
 				return fmt.Errorf("git is required: %w", err)
 			}
 
-			if _, err := exec.LookPath("go"); err != nil {
-				return fmt.Errorf("go 1.25.5+ is required: %w", err)
-			}
-
 			files, err := project.InitialFiles(m)
 			if err != nil {
 				return err
+			}
+
+			if len(sums) > 0 {
+				files["go.sum"] = project.MergeSums(files["go.sum"], sums)
 			}
 
 			if hook {

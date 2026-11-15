@@ -1,12 +1,13 @@
 {{if .Candidate}}# {{.Name}}
 
-This application uses Pluto's explicit local candidate boundary profile.
-Candidate
-Auth/RBAC/Core/Jobs APIs are unreleased; pluto.toml records their source
-checkouts
-and go.mod has validated local replacements. Published dependency pins remain
-visible. Do not remove replacements and claim the candidate contract still
-works.
+This application uses Pluto's explicit candidate boundary profile. Candidate
+Auth/RBAC/Core/Jobs APIs are unreleased. pluto.toml records each library as
+either a local source checkout (a validated go.mod replacement; builds only on
+that machine) or exact pinned module versions under [boundary.pins] (plain
+requirements of pushed commits, verified when adopted; builds anywhere the Go
+module proxy reaches). Do not remove replacements or change pins by hand and
+claim the candidate contract still works; pluto vet checks go.mod against
+pluto.toml.
 
 Declare supported resources, operations, roles, HTTP entries, jobs and
 host-approved

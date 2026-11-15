@@ -220,14 +220,26 @@ func TestPublishedToCandidateBlockers(t *testing.T) {
 	assertBlocked(t, multi, Options{}, "pluto.toml:3:",
 		"must be an explicit absolute directory")
 
+	// The candidate profile accepts managed local credentials and OIDC, so
+	// identity ingress alone no longer blocks adoption.
 	credentials := publishedManifest("multi")
 	credentials.Capabilities.LocalCredentials = true
 	credentials.Capabilities.OIDC = true
-	assertIngressAccepted(
-		t,
+
+	accepted, err := Build(
 		publishedFixture(t, credentials),
+		ProfileCandidate,
 		Options{Sources: sources},
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, item := range accepted.Manual {
+		if strings.Contains(item.Reason, "identity ingress") {
+			t.Fatalf("supported identity ingress blocked: %s", item)
+		}
+	}
 
 	operations := publishedManifest("multi")
 	operations.Operations = []project.Operation{
@@ -313,22 +325,5 @@ func assertBlocked(t *testing.T, root string, options Options, want ...string) {
 	if _, err := os.Stat(filepath.Join(root, "db/migrations/"+
 		"099_memberships.sql")); err == nil {
 		t.Fatal("blocked plan created candidate files")
-	}
-}
-
-// Candidate ingress now accepts local credentials and OIDC, so the step must
-// not report identity ingress as a blocker for them.
-func assertIngressAccepted(t *testing.T, root string, options Options) {
-	t.Helper()
-
-	plan, err := Build(root, ProfileCandidate, options)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, item := range plan.Manual {
-		if strings.Contains(item.String(), "identity ingress") {
-			t.Fatalf("identity ingress still blocks: %s", item)
-		}
 	}
 }

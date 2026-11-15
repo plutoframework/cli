@@ -142,14 +142,15 @@ func candidateManifest(
 	blockers := []Item{}
 	boundaryLine := tomlLine(raw, "[boundary]", 0)
 
-	if _, err := project.CandidateReplacements(next.Boundary); err != nil {
+	if err := candidateSelection(next.Boundary); err != nil {
 		blockers = append(blockers, Item{
 			Path:   "pluto.toml",
 			Line:   boundaryLine,
 			Reason: err.Error(),
-			Action: "pass --candidate-auth-source, --candidate-rbac-source, " +
-				"--candidate-core-source and --candidate-jobs-source as " +
-				"absolute checkout paths",
+			Action: "select each of auth, rbac, core and jobs with " +
+				"--candidate-<lib>-source (absolute checkout path) or " +
+				"--candidate-<lib>-revision (full commit hash, pinned " +
+				"without replace directives)",
 		})
 	}
 
@@ -249,9 +250,9 @@ func candidateManifest(
 }
 
 // identityIngress is the hook for local credentials and OIDC. The candidate
-// validator currently rejects both; once it accepts them, their foundation
-// files are reconciled like every other scaffold file and any credential-
-// specific manifest or code transforms belong here.
+// validator accepts both as managed ingress; their foundation files are
+// reconciled like every other scaffold file. Any combination the validator
+// rejects is reported here, and credential-specific transforms belong here.
 func identityIngress(next project.Manifest, raw []byte) []Item {
 	if !next.Capabilities.LocalCredentials && !next.Capabilities.OIDC {
 		return nil
@@ -259,7 +260,7 @@ func identityIngress(next project.Manifest, raw []byte) []Item {
 
 	// Probe identity alone: sources, tenancy and operations are reported by
 	// their own checks, and identity is rechecked once sources resolve.
-	if _, err := project.CandidateReplacements(next.Boundary); err != nil {
+	if candidateSelection(next.Boundary) != nil {
 		return nil
 	}
 
@@ -286,6 +287,18 @@ func identityIngress(next project.Manifest, raw []byte) []Item {
 				"local_credentials and oidc before migrating",
 		},
 	}
+}
+
+// candidateSelection checks that every candidate library is selected by a
+// validated local source or by exact pins.
+func candidateSelection(profile project.BoundaryProfile) error {
+	if _, err := project.CandidateReplacements(profile); err != nil {
+		return err
+	}
+
+	_, err := project.CandidatePins(profile)
+
+	return err
 }
 
 func suggestedKind(operation project.Operation) string {
@@ -348,8 +361,9 @@ func publishedScaffold(m project.Manifest) (map[string][]byte, error) {
 	return files, nil
 }
 
-// candidateModules adds candidate requirements and local replacements to the
-// existing go.mod, keeping every application requirement.
+// candidateModules adds candidate requirements and local replacements, or
+// moves pinned candidate modules to their verified versions, keeping every
+// other application requirement. Verified pin checksums join go.sum.
 func candidateModules(w *Workspace, next project.Manifest) error {
 	current, exists, err := w.Read("go.mod")
 	if err != nil {
@@ -360,7 +374,7 @@ func candidateModules(w *Workspace, next project.Manifest) error {
 		return fmt.Errorf("go.mod not found")
 	}
 
-	updated, err := project.ConfigureBoundaryModules(
+	updated, err := project.AdoptBoundaryModules(
 		next.Boundary,
 		len(next.Agents) > 0,
 		current,
@@ -371,6 +385,20 @@ func candidateModules(w *Workspace, next project.Manifest) error {
 
 	if err := w.Write("go.mod", updated); err != nil {
 		return err
+	}
+
+	if len(w.Options.Sums) > 0 {
+		sums, _, err := w.Read("go.sum")
+		if err != nil {
+			return err
+		}
+
+		if err := w.Write(
+			"go.sum",
+			project.MergeSums(sums, w.Options.Sums),
+		); err != nil {
+			return err
+		}
 	}
 
 	w.RequireTidy()
