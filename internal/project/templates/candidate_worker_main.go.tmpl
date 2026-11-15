@@ -170,6 +170,12 @@ func run() error {
 				"_" + strings.ToUpper({{q .Action}}) + "_CREDENTIAL",
 		),
 	{{end}}
+	{{range .Manifest.Operations}}{{if eq .Scope "each_tenant"}}
+		{{upperFirst .Group}}{{.Action}}: os.Getenv(
+			config.Prefix + "JOB_" + strings.ToUpper({{q .Group}}) +
+				"_" + strings.ToUpper({{q .Action}}) + "_CREDENTIAL",
+		),
+	{{end}}{{end}}
 	}
 
 	worker, err := runtime.Worker(credentials)
@@ -180,7 +186,27 @@ func run() error {
 		)
 	}
 
-	if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+{{- if .Manifest.HasEachTenant}}
+
+	// Tenant job schedulers enqueue one delivery per tenant; the worker
+	// delivers them. Either stopping ends the process.
+	scheduleCtx, cancelSchedule := context.WithCancel(ctx)
+	defer cancelSchedule()
+
+	scheduled := make(chan error, 1)
+
+	go func() { scheduled <- runtime.Schedule(scheduleCtx) }()
+
+	err = worker.Run(ctx)
+
+	cancelSchedule()
+	<-scheduled
+{{- else}}
+
+	err = worker.Run(ctx)
+{{- end}}
+
+	if err != nil && !errors.Is(err, context.Canceled) {
 		return errors.New("worker stopped; inspect sanitized job diagnostics")
 	}
 

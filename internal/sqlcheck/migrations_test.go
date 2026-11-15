@@ -388,3 +388,79 @@ func TestCheckMigrationsLookupPolicy(t *testing.T) {
 		})
 	}
 }
+
+func tenantIndexConfig(t *testing.T, extra string) Config {
+	t.Helper()
+
+	cfg := lookupConfig(t, extra)
+	cfg.Lookups = []Lookup{{
+		Table:     "orgs",
+		Key:       "id",
+		Policy:    "pluto_tenant_index",
+		Setting:   "app.tenant_index",
+		Enumerate: true,
+	}}
+
+	return cfg
+}
+
+func TestCheckMigrationsTenantIndexPolicy(t *testing.T) {
+	good := `CREATE POLICY pluto_tenant_index ON orgs FOR SELECT
+    USING (current_setting('app.tenant_index', true) = 'on');`
+
+	for name, test := range map[string]struct {
+		extra string
+		want  string
+	}{
+		"exact policy": {extra: good},
+		"missing":      {want: "no exact lookup policy"},
+		"always true": {
+			extra: strings.Replace(
+				good,
+				"current_setting('app.tenant_index', true) = 'on'",
+				"true",
+				1,
+			),
+			want: "no exact lookup policy",
+		},
+		"other value": {
+			extra: strings.Replace(good, "'on'", "'off'", 1),
+			want:  "no exact lookup policy",
+		},
+		"other setting": {
+			extra: strings.Replace(good, "app.tenant_index", "app.other", 1),
+			want:  "no exact lookup policy",
+		},
+		"for all": {
+			extra: strings.Replace(good, "FOR SELECT", "FOR ALL", 1),
+			want:  "no exact lookup policy",
+		},
+		"with check": {
+			extra: strings.TrimSuffix(good, ";") + " WITH CHECK (true);",
+			want:  "no exact lookup policy",
+		},
+		"another wide policy": {
+			extra: good + "\nCREATE POLICY wide ON orgs USING (true);",
+			want:  "widens access",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := CheckMigrations(tenantIndexConfig(t, test.extra))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if test.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("want clean, got %v", got)
+				}
+
+				return
+			}
+
+			if !strings.Contains(messages(got), test.want) {
+				t.Fatalf("want %q, got %v", test.want, got)
+			}
+		})
+	}
+}

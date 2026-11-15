@@ -43,6 +43,12 @@ type Lookup struct {
 	Key     string
 	Policy  string
 	Setting string
+
+	// Enumerate marks the generated tenant index: its policy admits every
+	// row of the tenant root to SELECT while the transaction-local setting
+	// equals 'on', so only generated code that exposes the tenant column
+	// alone may set it.
+	Enumerate bool
 }
 
 // QuerySet is a declared set of authored sqlc query files.

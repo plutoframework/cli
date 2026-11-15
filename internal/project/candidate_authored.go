@@ -16,6 +16,9 @@ const (
 	scopeDir         = "internal/scope"
 	scopeFile        = scopeDir + "/scope_gen.go"
 	scopetestFile    = scopeDir + "/scopetest/scopetest_gen.go"
+
+	// tenantIndexFile is the generated enumeration of the tenant root table.
+	tenantIndexFile = "internal/storage/tenantindex/index_gen.go"
 )
 
 // authoredPort is one declared port an authored operation consumes.
@@ -55,6 +58,21 @@ type authoredOp struct {
 	// Transactional is set when the operation writes through another group's
 	// tx methods and therefore receives a scope.DB to open its transaction.
 	Transactional bool
+
+	// EachTenant marks a scope = "each_tenant" body: it has no request, and
+	// receives the scope.Execution of one enumerated tenant.
+	EachTenant bool
+	Job        tenantJobView
+}
+
+// tenantJobView carries the declared limits of one tenant job into its
+// generated gate.
+type tenantJobView struct {
+	Kind        string
+	Interval    int64
+	Timeout     int64
+	Concurrency int
+	Attempts    int
 }
 
 // Returns is the Go result list of the authored body, gate and workflow.
@@ -70,6 +88,10 @@ type authoredGroupView struct {
 	Ops            []authoredOp
 	UsesPorts      bool
 	UsesPagination bool
+
+	// UsesModels is false when every operation is a tenant job, which has
+	// no request model and may live in a group with no models package.
+	UsesModels bool
 
 	// ForeignGroups are the other groups whose ports packages the contract
 	// imports for cross-group transactional writes.
@@ -88,6 +110,17 @@ func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 		Action:    operation.Action,
 		Resource:  operation.Resource,
 		Provision: operation.Scope == ScopeProvision,
+	}
+
+	if operation.Scope == ScopeEachTenant {
+		view.EachTenant = true
+		view.Job = tenantJobView{
+			Kind:        operation.JobKind(),
+			Interval:    int64(operation.Interval()),
+			Timeout:     int64(operation.TenantTimeout()),
+			Concurrency: operation.TenantConcurrency(),
+			Attempts:    operation.TenantAttempts(),
+		}
 	}
 
 	switch operation.Response {
@@ -231,6 +264,7 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 		}
 
 		group.Ops = append(group.Ops, view)
+		group.UsesModels = group.UsesModels || !view.EachTenant
 		for _, port := range view.Ports {
 			group.UsesPorts = group.UsesPorts || port.Alias == ""
 		}
@@ -257,6 +291,13 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 			}
 		}
 
+		if operation.Scope == ScopeEachTenant {
+			layout = map[string]string{
+				"_gate_gen.go":     "candidate_tenantjob_gate.go",
+				"_workflow_gen.go": "candidate_tenantjob_workflow.go",
+			}
+		}
+
 		for suffix, name := range layout {
 			source, err := render(name, opData)
 			if err != nil {
@@ -265,6 +306,15 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 
 			files[base+suffix] = source
 		}
+	}
+
+	if m.hasEachTenant() {
+		source, err := render("candidate_tenant_index.go", data)
+		if err != nil {
+			return nil, err
+		}
+
+		files[tenantIndexFile] = source
 	}
 
 	for name, group := range groups {

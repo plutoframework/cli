@@ -1,0 +1,213 @@
+package {{.Group}}
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"time"
+
+	auth "github.com/plutoframework/pluto-auth"
+	jobs "github.com/plutoframework/pluto-jobs"
+	identitygate "github.com/plutoframework/pluto-rbac/identity"
+
+	logic "{{.Module}}/internal/logic/{{.Group}}"
+)
+
+// Declared limits of the tenant job {{.Authored.ID}}.
+const (
+	// {{.Action}}Kind is the pluto-jobs kind of one tenant's delivery.
+	{{.Action}}Kind jobs.Kind = {{q .Authored.Job.Kind}}
+
+	// {{.Action}}Interval is the scheduler period; zero means triggered.
+	{{.Action}}Interval = time.Duration({{.Authored.Job.Interval}})
+
+	// {{.Action}}Timeout bounds one tenant's execution.
+	{{.Action}}Timeout = time.Duration({{.Authored.Job.Timeout}})
+
+	{{lowerFirst .Action}}Concurrency = {{.Authored.Job.Concurrency}}
+	{{lowerFirst .Action}}Attempts    = {{.Authored.Job.Attempts}}
+	{{lowerFirst .Action}}Resource    = {{q .Authored.Resource}}
+	{{lowerFirst .Action}}PageSize    = 200
+)
+
+// {{.Action}}Tenants is the generated tenant index: ids only, never rows.
+type {{.Action}}Tenants interface {
+	Page(context.Context, string, int) ([]string, error)
+	Exists(context.Context, string) (bool, error)
+}
+
+// {{.Action}}Queue is the pluto-jobs enqueue side.
+type {{.Action}}Queue interface {
+	Enqueue(context.Context, jobs.Request) error
+}
+
+// {{.Action}}Boundary is the tenant job: Enqueue is the scheduler tick,
+// Handler is the per-tenant delivery. Neither takes a tenant from a caller.
+type {{.Action}}Boundary interface {
+	sealed{{.Action}}()
+	Enqueue(context.Context) error
+	Handler(string) (jobs.Handler, error)
+}
+
+// {{.Action}} gates the authored body logic.{{.Action}}. Every run is bound to
+// one tenant enumerated by the generated index and re-verified at delivery;
+// the service identity is the configured credential, authorized through the
+// declared service role by the same gate and RBAC as any request.
+type {{.Action}} struct {
+	{{lowerFirst .Action}}Gate    *identitygate.Gate
+	{{lowerFirst .Action}}Manager *auth.Manager
+	{{lowerFirst .Action}}Tenants {{.Action}}Tenants
+	{{lowerFirst .Action}}Queue   {{.Action}}Queue
+	{{lowerFirst .Action}}Ports   logic.{{.Action}}Ports
+	{{lowerFirst .Action}}Slots   chan struct{}
+}
+
+func New{{.Action}}(
+	gate *identitygate.Gate,
+	manager *auth.Manager,
+	tenants {{.Action}}Tenants,
+	queue {{.Action}}Queue,
+	ports logic.{{.Action}}Ports,
+) *{{.Action}} {
+	return &{{.Action}}{
+		{{lowerFirst .Action}}Gate:    gate,
+		{{lowerFirst .Action}}Manager: manager,
+		{{lowerFirst .Action}}Tenants: tenants,
+		{{lowerFirst .Action}}Queue:   queue,
+		{{lowerFirst .Action}}Ports:   ports,
+		{{lowerFirst .Action}}Slots: make(
+			chan struct{},
+			{{lowerFirst .Action}}Concurrency),
+	}
+}
+
+func (*{{.Action}}) sealed{{.Action}}() {}
+
+type {{lowerFirst .Action}}Payload struct {
+	Slot int64 `json:"slot"`
+}
+
+// {{lowerFirst .Action}}ID derives one stable delivery id per tenant and
+// schedule slot, so replicas that tick together enqueue each run once.
+func {{lowerFirst .Action}}ID(tenant string, slot int64) string {
+	sum := sha256.Sum256([]byte(
+		string({{.Action}}Kind) + "\x00" + tenant + "\x00" +
+			time.Unix(slot, 0).UTC().Format(time.RFC3339)))
+
+	return hex.EncodeToString(sum[:16])
+}
+
+// Enqueue enumerates the tenant index page by page and enqueues one delivery
+// per tenant. The queue ignores a delivery that already exists for the slot.
+func (job *{{.Action}}) Enqueue(ctx context.Context) error {
+	if ctx == nil || job == nil || job.{{lowerFirst .Action}}Tenants == nil ||
+		job.{{lowerFirst .Action}}Queue == nil {
+		return errors.New("{{.Authored.ID}} is not configured")
+	}
+
+	slot := time.Now().UTC()
+	if {{.Action}}Interval > 0 {
+		slot = slot.Truncate({{.Action}}Interval)
+	}
+
+	after := ""
+
+	for {
+		ids, err := job.{{lowerFirst .Action}}Tenants.Page(
+			ctx,
+			after,
+			{{lowerFirst .Action}}PageSize)
+		if err != nil {
+			return err
+		}
+
+		for _, tenant := range ids {
+			if err := job.enqueueTenant(ctx, tenant, slot); err != nil {
+				return err
+			}
+		}
+
+		if len(ids) < {{lowerFirst .Action}}PageSize {
+			return nil
+		}
+
+		after = ids[len(ids)-1]
+	}
+}
+
+func (job *{{.Action}}) enqueueTenant(
+	ctx context.Context,
+	tenant string,
+	slot time.Time,
+) error {
+	request, err := jobs.NewRequest(
+		{{.Action}}Kind,
+		{{lowerFirst .Action}}Payload{Slot: slot.Unix()},
+		jobs.Options{
+			TenantID:    &tenant,
+			AvailableAt: slot,
+			MaxAttempts: {{lowerFirst .Action}}Attempts,
+		})
+	if err != nil {
+		return err
+	}
+
+	request.ID = {{lowerFirst .Action}}ID(tenant, slot.Unix())
+
+	return job.{{lowerFirst .Action}}Queue.Enqueue(ctx, request)
+}
+
+// Handler returns the per-tenant delivery. The credential is the configured
+// service credential; the job's tenant label is re-verified against the
+// tenant index and the gate before the authored body runs.
+func (job *{{.Action}}) Handler(credential string) (jobs.Handler, error) {
+	if job == nil || credential == "" {
+		return nil, errors.New("{{.Authored.ID}} requires a service credential")
+	}
+
+	return func(ctx context.Context, item jobs.Job) error {
+		if ctx == nil || item.Kind != {{.Action}}Kind ||
+			item.MaxAttempts != {{lowerFirst .Action}}Attempts ||
+			item.TenantID == nil || *item.TenantID == "" {
+			return jobs.Permanent(jobs.ErrInvalid)
+		}
+
+		if _, err := jobs.Decode[{{lowerFirst .Action}}Payload](item); err != nil {
+			return jobs.Permanent(err)
+		}
+
+		select {
+		case job.{{lowerFirst .Action}}Slots <- struct{}{}:
+			defer func() { <-job.{{lowerFirst .Action}}Slots }()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
+		ctx, cancel := context.WithTimeout(ctx, {{.Action}}Timeout)
+		defer cancel()
+
+		tenant := *item.TenantID
+
+		found, err := job.{{lowerFirst .Action}}Tenants.Exists(ctx, tenant)
+		if err != nil {
+			return err
+		}
+
+		if !found {
+			return jobs.Permanent(jobs.ErrInvalid)
+		}
+
+		return job.{{lowerFirst .Action}}Manager.WithIdentity(
+			ctx,
+			credential,
+			func(ctx context.Context, identity *auth.Identity) error {
+				return job.{{lowerFirst .Action}}Gate.Within(
+					ctx,
+					identity,
+					tenant,
+					{{lowerFirst .Action}}Resource,
+					job.execute)
+			})
+	}, nil
+}

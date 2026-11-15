@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 
+{{- if not .Authored.EachTenant}}
 	models "{{.Module}}/internal/models/{{.Group}}"
+{{- end}}
 {{- if .Authored.Pagination}}
 	"github.com/plutoframework/pluto-core/pagination"
 {{- end}}
@@ -23,9 +25,15 @@ func {{.Action}}(
 	ctx context.Context,
 	e scope.{{if .Authored.Provision}}Provisioning{{else}}Execution{{end}},
 	p {{.Action}}Ports,
+{{- if not .Authored.EachTenant}}
 	in models.{{.Action}}Request,
+{{- end}}
 ) ({{.Authored.Returns}}) {
+{{- if .Authored.EachTenant}}
+	_, _, _ = ctx, e, p
+{{- else}}
 	_, _, _, _ = ctx, e, p, in
+{{- end}}
 {{if .Authored.Result}}
 	var zero {{.Authored.Result}}
 

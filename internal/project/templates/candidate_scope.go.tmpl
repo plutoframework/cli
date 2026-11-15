@@ -16,14 +16,20 @@ import (
 {{- if .HasProvision}}
 	"encoding/hex"
 {{- end}}
+	"encoding/json"
 	"errors"
 	"fmt"
 {{- if .HasProvision}}
 	"sync"
+{{- end}}
+	"time"
+{{- if .HasProvision}}
 
 	auth "github.com/plutoframework/pluto-auth"
 {{- else}}
 {{end}}
+	jobs "github.com/plutoframework/pluto-jobs"
+	jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
 
 	"github.com/jackc/pgx/v5"
@@ -98,6 +104,7 @@ func (t Tenant) String() string {
 // DB opens gate-rechecked tenant transactions. It holds the pool privately.
 type DB struct {
 	scopeDBPool *pgxpool.Pool
+	scopeDBJobs *jobspostgres.Store
 }
 
 // Tx is one open tenant-scoped transaction.
@@ -105,6 +112,7 @@ type Tx struct {
 	scopeTx      pgx.Tx
 	scopeTenant  Tenant
 	scopeSubject string
+	scopeJobs    *jobspostgres.Store
 }
 
 // Tenant is the verified tenant this transaction is bound to.
@@ -198,6 +206,7 @@ func (d DB) transact(
 		scopeTx:      tx,
 		scopeTenant:  tenant,
 		scopeSubject: subject,
+		scopeJobs:    d.scopeDBJobs,
 	}); err != nil {
 		return err
 	}
@@ -223,10 +232,49 @@ func NoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
 
-// Enqueue is reserved for transactional job enqueue; its generator is a later
-// phase, so it fails closed.
-func (t Tx) Enqueue(context.Context, string, []byte) error {
-	return ErrUnsupported
+// ErrUnknownJob rejects an Enqueue of a kind no [[jobs]] entry declares.
+var ErrUnknownJob = errors.New("scope: job kind is not declared")
+
+// enqueueAttempts maps every declared job kind to its declared, finite
+// delivery budget. Authored code can neither add a kind nor choose a budget.
+var enqueueAttempts = map[string]int{
+{{- range .Manifest.Jobs}}
+	{{q .Kind}}: {{.MaxAttempts}},
+{{- end}}
+}
+
+// Enqueue inserts a declared job in this transaction, so it exists if and only
+// if the business change commits. kind must be a declared [[jobs]] kind and
+// payload valid JSON for that job's request model; the delivery's tenant is
+// this transaction's verified tenant, never an argument, and its attempt
+// budget is the declared one. The worker authenticates its configured service
+// credential for the tenant when it delivers, so an enqueue grants nothing.
+func (t Tx) Enqueue(ctx context.Context, kind string, payload []byte) error {
+	attempts, declared := enqueueAttempts[kind]
+	if !declared {
+		return ErrUnknownJob
+	}
+
+	if t.scopeTx == nil || t.scopeJobs == nil ||
+		t.scopeTenant.scopeTenant == "" {
+		return ErrNoTenant
+	}
+
+	tenant := t.scopeTenant.scopeTenant
+
+	request, err := jobs.NewRequest(
+		jobs.Kind(kind),
+		json.RawMessage(payload),
+		jobs.Options{
+			TenantID:    &tenant,
+			AvailableAt: time.Now().UTC(),
+			MaxAttempts: attempts,
+		})
+	if err != nil {
+		return err
+	}
+
+	return t.scopeJobs.EnqueueTx(ctx, t.scopeTx, request)
 }
 
 // Bind is a capability: only generated workflow files and the scope test
@@ -245,7 +293,10 @@ func Bind(
 
 // NewDB is a capability: only generated composition may call it.
 func NewDB(pool *pgxpool.Pool) DB {
-	return DB{scopeDBPool: pool}
+	// A nil pool yields no store; Enqueue then reports ErrNoTenant.
+	store, _ := jobspostgres.New(pool)
+
+	return DB{scopeDBPool: pool, scopeDBJobs: store}
 }
 {{if .HasProvision}}
 // ErrProvisioned rejects a second tenant in one provisioning execution.

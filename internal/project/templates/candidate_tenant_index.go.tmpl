@@ -1,0 +1,177 @@
+// Package tenantindex is the generated, narrow enumeration of the tenant root
+// table for tenant jobs. It reads tenant identifiers only, through a
+// security-invoker view, under a transaction-local switch that no other code
+// sets. Row-level security is never bypassed: with the switch off the view is
+// empty, and no other table or column is reachable from here.
+package tenantindex
+
+import (
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	jobs "github.com/plutoframework/pluto-jobs"
+	jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
+)
+
+const (
+	bindSwitch = "SELECT set_config('app.tenant_index', 'on', true)"
+	pageQuery  = "SELECT tenant_id::text FROM pluto_tenant_index " +
+		"WHERE tenant_id::text > $1 ORDER BY tenant_id::text LIMIT $2"
+	existsQuery = "SELECT 1 FROM pluto_tenant_index " +
+		"WHERE tenant_id::text = $1 LIMIT 1"
+
+	// MaxPage bounds one enumeration page.
+	MaxPage = 500
+)
+
+// Index lists tenant identifiers.
+type Index struct {
+	tenantIndexPool *pgxpool.Pool
+}
+
+// New returns an Index over the application's runtime pool.
+func New(pool *pgxpool.Pool) *Index {
+	return &Index{tenantIndexPool: pool}
+}
+
+func (i *Index) read(
+	ctx context.Context,
+	run func(context.Context, pgx.Tx) error,
+) error {
+	if i == nil || i.tenantIndexPool == nil || ctx == nil {
+		return errors.New("tenant index is not configured")
+	}
+
+	tx, err := i.tenantIndexPool.BeginTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if _, err := tx.Exec(ctx, bindSwitch); err != nil {
+		return err
+	}
+
+	return run(ctx, tx)
+}
+
+// Page returns up to limit tenant identifiers greater than after, in order.
+func (i *Index) Page(
+	ctx context.Context,
+	after string,
+	limit int,
+) ([]string, error) {
+	if limit < 1 || limit > MaxPage {
+		return nil, errors.New("tenant index page limit is out of range")
+	}
+
+	var ids []string
+
+	err := i.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, pageQuery, after, limit)
+		if err != nil {
+			return err
+		}
+
+		defer rows.Close()
+
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+
+			ids = append(ids, id)
+		}
+
+		return rows.Err()
+	})
+
+	return ids, err
+}
+
+// Exists reports whether tenant is a current tenant. A delivery re-checks it:
+// a persisted job label is input, never authority.
+func (i *Index) Exists(ctx context.Context, tenant string) (bool, error) {
+	if tenant == "" {
+		return false, nil
+	}
+
+	found := false
+
+	err := i.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, existsQuery, tenant)
+		if err != nil {
+			return err
+		}
+
+		defer rows.Close()
+
+		found = rows.Next()
+
+		return rows.Err()
+	})
+
+	return found, err
+}
+
+// ErrUnknownTenant rejects a tenant that is not in the index.
+var ErrUnknownTenant = errors.New("tenantindex: unknown tenant")
+
+// VerifyMembership satisfies the identity gate for a tenant job's system
+// execution: the tenant must exist. Authority comes from the service role the
+// gate's requirement grants, not from a membership row.
+func (i *Index) VerifyMembership(
+	ctx context.Context,
+	_, tenant string,
+) error {
+	found, err := i.Exists(ctx, tenant)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return ErrUnknownTenant
+	}
+
+	return nil
+}
+
+// Queue enqueues the per-tenant deliveries of tenant jobs. Delivery ids are
+// derived from the job, tenant and schedule slot, so an id that already
+// exists means another replica enqueued the same run: not an error.
+type Queue struct {
+	tenantQueueStore *jobspostgres.Store
+}
+
+// NewQueue returns a Queue over the runtime pool.
+func NewQueue(pool *pgxpool.Pool) (*Queue, error) {
+	store, err := jobspostgres.New(pool)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Queue{tenantQueueStore: store}, nil
+}
+
+// Enqueue inserts one delivery and ignores a duplicate id.
+func (q *Queue) Enqueue(ctx context.Context, request jobs.Request) error {
+	if q == nil || q.tenantQueueStore == nil {
+		return errors.New("tenant job queue is not configured")
+	}
+
+	err := q.tenantQueueStore.Enqueue(ctx, request)
+
+	var failure *pgconn.PgError
+	if errors.As(err, &failure) && failure.Code == "23505" {
+		return nil
+	}
+
+	return err
+}

@@ -104,13 +104,14 @@ func (d templateData) HasProvision() bool {
 // usesSeamWire reports operations whose wire models and query parser come
 // from the seam generator: authored bodies and generated system lookups.
 func (o Operation) usesSeamWire() bool {
-	return o.Body == BodyAuthored || o.Body == BodySystem
+	return (o.Body == BodyAuthored || o.Body == BodySystem) &&
+		o.Scope != ScopeEachTenant
 }
 
 // outsideContracts reports operations that have no resource behavior
 // contract: authored and system bodies are governed by their own seams.
 func (o Operation) outsideContracts() bool {
-	return o.usesSeamWire()
+	return o.Body == BodyAuthored || o.Body == BodySystem
 }
 
 func validateTenantRoots(tables []Table) error {
@@ -196,6 +197,10 @@ func validateSystem(
 	}
 
 	if err := validateSystemEndpoints(m); err != nil {
+		return err
+	}
+
+	if err := validateEachTenantJobs(m); err != nil {
 		return err
 	}
 

@@ -3,7 +3,9 @@ package {{.Group}}
 import (
 	"context"
 
+{{- if .AuthoredGroup.UsesModels}}
 	models "{{.Module}}/internal/models/{{.Group}}"
+{{- end}}
 {{- if .AuthoredGroup.UsesPorts}}
 	ports "{{.Module}}/internal/ports/{{.Group}}"
 {{- end}}
@@ -40,7 +42,9 @@ var _ func(
 	context.Context,
 	{{if .Provision}}scope.Provisioning{{else}}scope.Execution{{end}},
 	{{.Action}}Ports,
+{{- if not .EachTenant}}
 	models.{{.Action}}Request,
+{{- end}}
 ) ({{.Returns}}) = {{.Action}}
 
 {{end}}

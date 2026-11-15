@@ -33,6 +33,13 @@ type Operation struct {
 	Scope     string `toml:"scope,omitempty"`
 	Lookup    string `toml:"lookup,omitempty"`
 	RateLimit string `toml:"rate_limit,omitempty"`
+
+	// Tenant-iterating jobs (scope = "each_tenant"); see manifest_tenantjobs.go.
+	Schedule    string `toml:"schedule,omitempty"`
+	ServiceRole string `toml:"service_role,omitempty"`
+	Timeout     string `toml:"timeout,omitempty"`
+	Concurrency int    `toml:"concurrency,omitempty"`
+	MaxAttempts int    `toml:"max_attempts,omitempty"`
 }
 
 func (o Operation) ID() string {

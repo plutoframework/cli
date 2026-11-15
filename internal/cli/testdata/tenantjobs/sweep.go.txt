@@ -1,0 +1,17 @@
+package orgs
+
+import (
+	"context"
+
+	"example.test/tenantjobs/internal/scope"
+)
+
+// Sweep records one sweep row for the verified tenant. The tenant and the
+// acting service subject come from the execution, never from input.
+func Sweep(
+	ctx context.Context,
+	e scope.Execution,
+	ports SweepPorts,
+) error {
+	return ports.Sweeps.Record(ctx, e)
+}
