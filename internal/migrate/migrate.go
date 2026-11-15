@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -391,4 +392,45 @@ func sortItems(items []Item) {
 
 		return items[i].Line < items[j].Line
 	})
+}
+
+// List returns the files directly inside a directory as the plan will leave
+// them: disk entries plus planned writes, minus planned deletes.
+func (w *Workspace) List(directory string) ([]string, error) {
+	names := map[string]bool{}
+
+	dir, err := project.SafePath(w.Root, directory)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			names[directory+"/"+entry.Name()] = true
+		}
+	}
+
+	for name := range w.plan.Writes {
+		if path.Dir(name) == directory {
+			names[name] = true
+		}
+	}
+
+	for name := range w.plan.Deletes {
+		delete(names, name)
+	}
+
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+
+	sort.Strings(result)
+
+	return result, nil
 }

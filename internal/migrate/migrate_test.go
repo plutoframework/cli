@@ -229,3 +229,7 @@ func TestWorkspaceRefusesUnsafePaths(t *testing.T) {
 		t.Fatal("path traversal accepted")
 	}
 }
+
+func removeFile(root, name string) error {
+	return os.Remove(filepath.Join(root, filepath.FromSlash(name)))
+}

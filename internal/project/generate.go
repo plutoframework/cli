@@ -577,6 +577,10 @@ func InitialFiles(m Manifest) (map[string][]byte, error) {
 		return nil, err
 	}
 
+	if m.Boundary.Mode == "candidate" {
+		applyFrameworkMigrations(m, files)
+	}
+
 	manifest, err := Encode(m)
 	if err != nil {
 		return nil, err
