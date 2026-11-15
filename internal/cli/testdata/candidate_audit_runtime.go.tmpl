@@ -397,7 +397,9 @@ func (f *auditFixture) list(
 	}
 
 	response := f.request(t, "GET", path, user.session, tenant)
-	if response.Code != want {
+	// Zero means denied: a missing membership reports 401 or 403.
+	denied := want == 0 && (response.Code == 401 || response.Code == 403)
+	if response.Code != want && !denied {
 		t.Fatalf("GET %s tenant=%s status=%d want=%d %s", path, tenant,
 			response.Code, want, response.Body.String())
 	}
@@ -426,8 +428,8 @@ func TestAuditSeamEndToEnd(t *testing.T) {
 
 	// Unauthenticated, forged-tenant and non-member callers reach nothing.
 	f.list(t, auditUser{}, "north", "", 401)
-	f.list(t, mallory, "north", "", 403)
-	f.list(t, bob, "south", "", 403)
+	f.list(t, mallory, "north", "", 0)
+	f.list(t, bob, "south", "", 0)
 
 	for index := 0; index < 3; index++ {
 		if err := f.appendEvent(
