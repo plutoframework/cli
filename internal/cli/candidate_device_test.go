@@ -92,13 +92,21 @@ func deviceApp(t *testing.T) string {
 		filepath.Join(root, "audit-blueprint.toml"))
 
 	for fixture, target := range map[string]string{
-		"rules.go.txt":        "internal/rules/orgs/rules.go",
-		"provision.go.txt":    "internal/logic/orgs/provision.go",
-		"count.go.txt":        "internal/logic/orgs/count.go",
-		"tenant_store.go.txt": "internal/adapters/orgs/tenant_store.go",
+		"rules.go.txt": "internal/rules/orgs/rules.go",
+		"count.go.txt": "internal/logic/orgs/count.go",
 	} {
 		systemFileAs(t, root, "example.test/auditapp", fixture, target)
 	}
+
+	seamFile(t, root, "provision.go.txt", "internal/logic/orgs/provision.go")
+	seamFile(
+		t, root, "tenant_store.go.txt", "internal/adapters/orgs/tenant_store.go",
+	)
+	seamFile(t, root, "watch.go.txt", "internal/logic/audit/watch.go")
+	seamFile(
+		t, root, "record_auth_event.go.txt",
+		"internal/logic/audit/recordauthevent.go",
+	)
 
 	seamFile(t, root, "rules.go.txt", "internal/rules/audit/rules.go")
 	seamFile(t, root, "list.go.txt", "internal/logic/audit/list.go")
