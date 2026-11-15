@@ -10,7 +10,7 @@ import (
 )
 
 func generateCommand(options Options) *cobra.Command {
-	var dry bool
+	var dry, adopt bool
 
 	command := &cobra.Command{
 		Use:   "generate",
@@ -25,8 +25,14 @@ func generateCommand(options Options) *cobra.Command {
 			"Required migrations (table RLS, runtime role) are\nproposed " +
 			"with framework numbering. Authored files are never " +
 			"overwritten.\nWorks for the published and candidate profiles " +
-			"and is idempotent. Applying\nrequires a clean Git tree.",
-		Example: "  pluto generate --dry-run\n  pluto generate",
+			"and is idempotent. Applying\nrequires a clean Git tree.\n\n" +
+			"\"Known\" means the file matches what the CLI last wrote, " +
+			"recorded in\n" + project.LockPath + " (commit it), or a recorded " +
+			"older scaffold. An app with no\nlock whose files came from an " +
+			"older CLI: pluto generate --adopt --dry-run,\nreview the diff, " +
+			"then pluto generate --adopt. --adopt overwrites hand edits\n" +
+			"to managed files too; Git is the safety net.",
+		Example: "  pluto generate --dry-run\n  pluto generate\n  pluto generate --adopt --dry-run",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root, _, err := project.Discover(options.Directory)
@@ -43,7 +49,12 @@ func generateCommand(options Options) *cobra.Command {
 				}
 			}
 
-			plan, err := migrate.Generate(root)
+			generate := migrate.Generate
+			if adopt {
+				generate = migrate.Adopt
+			}
+
+			plan, err := generate(root)
 			if err != nil {
 				return err
 			}
@@ -58,14 +69,16 @@ func generateCommand(options Options) *cobra.Command {
 
 			reportPlan(out, plan)
 
-			if dry {
+			if dry || adopt {
 				if err := migrate.WriteDiff(out, plan); err != nil {
 					return err
 				}
 
-				fmt.Fprintln(out, "Dry run: nothing written.")
+				if dry {
+					fmt.Fprintln(out, "Dry run: nothing written.")
 
-				return manualError(plan)
+					return manualError(plan)
+				}
 			}
 
 			if plan.Blocked {
@@ -107,6 +120,15 @@ func generateCommand(options Options) *cobra.Command {
 		"dry-run",
 		false,
 		"Print the full diff and refusals without writing",
+	)
+
+	command.Flags().BoolVar(
+		&adopt,
+		"adopt",
+		false,
+		"Bring an application without "+project.LockPath+" onto the lock: "+
+			"print the diff, overwrite every managed file with the current "+
+			"render and record it (review with --dry-run first)",
 	)
 
 	return command

@@ -68,6 +68,8 @@ func New(options Options) *cobra.Command {
 		options.Directory = "."
 	}
 
+	project.CLIVersion = options.Version
+
 	root := &cobra.Command{
 		Use:   "pluto",
 		Short: "Generate and check explicit Go APIs and React applications",

@@ -24,7 +24,7 @@ const JobsPostgresVersion = "v0.1.0"
 
 // The published pgx adapter imports the local store in its package, so its
 // password/crypto dependencies are transitive even in session-only PG apps.
-func passwordRequirement(m Manifest) string {
+func authMethodModuleRequirement(m Manifest) string {
 	if m.Capabilities.LocalCredentials {
 		return AuthVersion
 	}
@@ -71,7 +71,7 @@ require (
 		AuthPostgresVersion,
 		JobsVersion,
 		JobsPostgresVersion,
-		passwordRequirement(m),
+		authMethodModuleRequirement(m),
 	))
 
 	files["go.sum"] = []byte(appGoSum)

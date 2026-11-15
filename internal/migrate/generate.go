@@ -20,6 +20,19 @@ import (
 // numbering. Authored adapter stubs are created only while missing.
 // Nothing is written; Write applies the plan.
 func Generate(root string) (*Plan, error) {
+	return generate(root, false)
+}
+
+// Adopt plans generate for an application that has no managed lock, treating
+// every managed file as pristine so one run can bring apps scaffolded by an
+// unrecorded CLI version onto the lock. Hand edits to managed files are
+// overwritten too; the caller must show the plan diff first, and the clean
+// Git tree makes the result reviewable and reversible.
+func Adopt(root string) (*Plan, error) {
+	return generate(root, true)
+}
+
+func generate(root string, adopt bool) (*Plan, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -47,10 +60,26 @@ func Generate(root string) (*Plan, error) {
 		Original: map[string][]byte{},
 		Manifest: manifest,
 	}
+
+	lock, locked, err := project.ReadLock(root)
+	if err != nil {
+		return nil, err
+	}
+
+	if adopt && locked {
+		return nil, fmt.Errorf(
+			"%s exists; --adopt is only for applications without a "+
+				"managed lock (use pluto generate)",
+			project.LockPath,
+		)
+	}
+
 	workspace := &Workspace{
 		Root:          root,
 		Manifest:      manifest,
 		plan:          plan,
+		lock:          lock,
+		adopt:         adopt,
 		pristineTests: map[string]bool{},
 	}
 
@@ -72,6 +101,12 @@ func Generate(root string) (*Plan, error) {
 	}
 
 	plan.Blocked = len(plan.Manual) > 0
+
+	if !plan.Blocked {
+		if err := recordLock(workspace); err != nil {
+			return nil, err
+		}
+	}
 
 	sortItems(plan.Manual)
 	sortItems(plan.Notes)
@@ -125,7 +160,7 @@ func regenerateManaged(w *Workspace, managed map[string][]byte) error {
 
 		known := historicalRenders(w.Manifest, name)
 
-		pristine := false
+		pristine := w.adopt || w.lock.Matches(name, current)
 
 		for _, base := range known {
 			pristine = pristine || sameSource(name, current, base)
@@ -146,7 +181,7 @@ func regenerateManaged(w *Workspace, managed map[string][]byte) error {
 				return err
 			}
 		default:
-			w.Manual(handEdit(name, current, want))
+			w.Manual(handEdit(name, current, want, len(w.lock) == 0))
 		}
 	}
 
@@ -154,18 +189,24 @@ func regenerateManaged(w *Workspace, managed map[string][]byte) error {
 }
 
 // handEdit explains a managed file that matches no known render.
-func handEdit(name string, current, want []byte) Item {
+func handEdit(name string, current, want []byte, noLock bool) Item {
 	line := firstDifference(current, want)
 	have := lineText(current, line)
 	expect := lineText(want, line)
+
+	action := "move the change into pluto.toml or an authored file, " +
+		"restore this file (git checkout) and rerun pluto generate"
+	if noLock {
+		action += "; if it was rendered by an older pluto, run " +
+			"pluto generate --adopt --dry-run, review, then --adopt"
+	}
 
 	return Item{
 		Path: name,
 		Line: line,
 		Reason: "managed file was edited by hand; managed files are " +
 			"CLI-owned\n    - " + have + "\n    + " + expect,
-		Action: "move the change into pluto.toml or an authored file, " +
-			"restore this file (git checkout) and rerun pluto generate",
+		Action: action,
 	}
 }
 
@@ -254,7 +295,7 @@ func refreshDocuments(w *Workspace, m project.Manifest) error {
 			continue
 		}
 
-		pristine := false
+		pristine := w.adopt || w.lock.Matches(name, current)
 
 		for _, render := range older {
 			pristine = pristine || bytes.Equal(current, render[name])
