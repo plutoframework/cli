@@ -27,7 +27,7 @@ func ProposeTableMigrations(
 ) (map[string][]byte, error) {
 	proposals := map[string][]byte{}
 
-	next, err := nextMigrationNumber(root)
+	next, err := nextMigrationNumber(root, m)
 	if err != nil {
 		return nil, err
 	}
@@ -85,13 +85,22 @@ func ProposeTableMigrations(
 	return proposals, nil
 }
 
-func nextMigrationNumber(root string) (int, error) {
+// nextMigrationNumber is one past the highest number on disk or allocated to
+// a recorded [migrations.framework] migration, so a proposal never lands on a
+// number the framework owns even when that file is not rendered yet.
+func nextMigrationNumber(root string, m Manifest) (int, error) {
 	entries, err := os.ReadDir(filepath.Join(root, "db/migrations"))
 	if err != nil {
 		return 0, err
 	}
 
 	highest := 0
+
+	for _, number := range m.Migrations.Framework {
+		if value, err := strconv.Atoi(number); err == nil && value > highest {
+			highest = value
+		}
+	}
 
 	for _, entry := range entries {
 		match := migrationFilePrefix.FindStringSubmatch(entry.Name())

@@ -29,7 +29,10 @@ type authoredOp struct {
 	Resource   string
 	Result     string
 	Pagination bool
-	Ports      []authoredPort
+	// PagedRequest is set when the request model carries a Page the workflow
+	// must bind from verified scope: a page read exposed as an endpoint.
+	PagedRequest bool
+	Ports        []authoredPort
 }
 
 // Returns is the Go result list of the authored body, gate and workflow.
@@ -53,7 +56,7 @@ func modelName(id string) string {
 	return name
 }
 
-func authoredView(operation Operation) (authoredOp, error) {
+func authoredView(m Manifest, operation Operation) (authoredOp, error) {
 	view := authoredOp{
 		ID:       operation.ID(),
 		Action:   operation.Action,
@@ -65,6 +68,12 @@ func authoredView(operation Operation) (authoredOp, error) {
 		view.Result = "pagination.Page[models." + modelName(operation.Item) +
 			"]"
 		view.Pagination = true
+
+		for _, endpoint := range m.Endpoints {
+			if endpoint.Operation == operation.ID() {
+				view.PagedRequest = true
+			}
+		}
 	case ResponseObject:
 		view.Result = "models." + modelName(operation.Output)
 	case ResponseStream:
@@ -168,7 +177,7 @@ func candidateAuthoredManaged(m Manifest) (map[string][]byte, error) {
 			continue
 		}
 
-		view, err := authoredView(operation)
+		view, err := authoredView(m, operation)
 		if err != nil {
 			return nil, err
 		}
@@ -229,7 +238,7 @@ func candidateAuthoredScaffold(
 		return files, nil
 	}
 
-	view, err := authoredView(operation)
+	view, err := authoredView(m, operation)
 	if err != nil {
 		return nil, err
 	}
