@@ -35,7 +35,7 @@ var (
 		commonDomain.ErrConflict)
 	Err{{ .Resource.Name }}Visibility = errors.Join(
 		errors.New("{{ .Resource.ID }} is not visible"),
-		commonDomain.ErrForbidden)
+		commonDomain.ErrNotFound)
 	Err{{ .Resource.Name }}Export = errors.Join(
 		errors.New("{{ .Resource.ID }} export bound exceeded"),
 		commonDomain.ErrExportLimit)
@@ -192,7 +192,7 @@ func New{{ .Resource.Name }}ResourcePolicy(
 				).
 					Scan(&actualOwner)
 				if errors.Is(err, pgx.ErrNoRows) {
-					return rbac.ErrForbidden
+					return commonDomain.ErrNotFound
 				}
 
 				if err != nil {
@@ -224,7 +224,7 @@ func New{{ .Resource.Name }}ResourcePolicy(
 			}
 
 			if !allowed {
-				return rbac.ErrForbidden
+				return commonDomain.ErrNotFound
 			}
 
 			return nil

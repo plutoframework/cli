@@ -39,6 +39,15 @@ type SeamQueryParam struct {
 	After  string
 }
 
+// SeamPathParam is one declared path parameter ready for rendering.
+type SeamPathParam struct {
+	Name   string
+	GoName string
+	GoType string
+	Kind   string
+	Max    int
+}
+
 // SeamOperation is one authored operation ready for rendering.
 type SeamOperation struct {
 	Group      string
@@ -58,6 +67,12 @@ type SeamOperation struct {
 	WriteBody  bool
 	Idempotent bool
 	Query      []SeamQueryParam
+
+	// Path holds the typed path parameters bound into the request model
+	// ahead of the body; PathKey is the Go field the gate's resource key
+	// carries.
+	Path       []SeamPathParam
+	PathKey    string
 	Strconv    bool
 	Time       bool
 	Pagination bool
@@ -67,6 +82,7 @@ type seamGroup struct {
 	Group  string
 	Models []SeamModel
 	Query  bool
+	Path   bool
 }
 
 // isAuthored reports whether an operation has an authored body.
@@ -231,6 +247,28 @@ func seamQueryParams(o Operation) ([]SeamQueryParam, error) {
 	return params, nil
 }
 
+func seamPathParams(o Operation) []SeamPathParam {
+	params := []SeamPathParam{}
+
+	for _, param := range o.Path {
+		item := SeamPathParam{
+			Name:   param.Name,
+			GoName: pathGoName(param.Name),
+			Kind:   param.Type,
+			Max:    param.Max,
+			GoType: "string",
+		}
+
+		if param.Type == pathTypeInt64 {
+			item.GoType = "int64"
+		}
+
+		params = append(params, item)
+	}
+
+	return params
+}
+
 func seamOperation(m Manifest, o Operation) (SeamOperation, error) {
 	out := SeamOperation{
 		Group:      o.Group,
@@ -287,7 +325,8 @@ func seamOperation(m Manifest, o Operation) (SeamOperation, error) {
 		out.WriteBody = true
 		out.Idempotent = o.Idempotency == "required"
 
-		if out.Input == "" || o.Response != ResponseObject || o.Collection {
+		if o.Response != ResponseObject || o.Collection ||
+			out.Input == "" && len(o.Path) == 0 {
 			return out, fmt.Errorf(
 				"operation %s: an authored write endpoint requires an "+
 					"input model and response = \"object\"",
@@ -317,6 +356,11 @@ func seamOperation(m Manifest, o Operation) (SeamOperation, error) {
 	}
 
 	out.Query = query
+	out.Path = seamPathParams(o)
+
+	if key := m.pathKey(o); key != "" {
+		out.PathKey = pathGoName(key)
+	}
 
 	for _, param := range query {
 		out.Strconv = out.Strconv || param.Kind == "int64" ||
@@ -366,6 +410,10 @@ func candidateSeamModels(m Manifest) (map[string][]byte, error) {
 			group.Query = true
 		}
 
+		if len(spec.Path) != 0 {
+			group.Path = true
+		}
+
 		source, err := seamTemplate("candidate_seam_request.go", spec)
 		if err != nil {
 			return nil, err
@@ -396,6 +444,15 @@ func candidateSeamModels(m Manifest) (map[string][]byte, error) {
 
 			files["internal/models/"+name+"/query_gen.go"] = source
 		}
+
+		if group.Path {
+			source, err := seamTemplate("candidate_seam_path.go", group)
+			if err != nil {
+				return nil, err
+			}
+
+			files["internal/models/"+name+"/path_gen.go"] = source
+		}
 	}
 
 	return files, nil
@@ -423,13 +480,30 @@ func (o Operation) isAuthoredWriteBody() bool {
 		!o.isStream()
 }
 
-// seamPathQuery renders the paths.Endpoint Query field for an authored read.
+// seamPathQuery renders the paths.Endpoint Query and Params fields of an
+// authored operation.
 func seamPathQuery(o Operation) string {
-	if len(o.Query) == 0 {
-		return ""
+	var out strings.Builder
+
+	if len(o.Path) != 0 {
+		out.WriteString("Params:[]PathParam{\n")
+
+		for _, param := range o.Path {
+			fmt.Fprintf(
+				&out,
+				"{Name:%q,Type:%q,Max:%d},\n",
+				param.Name,
+				param.Type,
+				param.Max,
+			)
+		}
+
+		out.WriteString("},\n")
 	}
 
-	var out strings.Builder
+	if len(o.Query) == 0 {
+		return out.String()
+	}
 
 	out.WriteString("Query:[]QueryParam{\n")
 

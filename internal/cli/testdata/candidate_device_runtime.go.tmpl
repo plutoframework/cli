@@ -1,0 +1,612 @@
+package app_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+
+	"example.test/auditapp/internal/access"
+	models "example.test/auditapp/internal/models/audit"
+
+	"github.com/plutoframework/pluto-auth/httpauth"
+	"github.com/plutoframework/pluto-auth/methods/password"
+)
+
+type deviceCall struct {
+	method, path string
+	body         any
+	session      string
+	bearer       string
+	tenant       string
+	origin       string
+}
+
+// call runs one request through the real application handler.
+func (f *auditFixture) call(t *testing.T, c deviceCall) (int, map[string]any) {
+	t.Helper()
+
+	var reader *strings.Reader
+
+	if c.body == nil {
+		reader = strings.NewReader("")
+	} else {
+		encoded, err := json.Marshal(c.body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		reader = strings.NewReader(string(encoded))
+	}
+
+	request := httptest.NewRequest(c.method, c.path, reader)
+	request.Header.Set("Content-Type", "application/json")
+
+	origin := c.origin
+	if origin == "" {
+		origin = auditOrigin
+	}
+
+	if c.method != http.MethodGet {
+		request.Header.Set("Origin", origin)
+	}
+
+	if c.tenant != "" {
+		request.Header.Set("X-Tenant-ID", c.tenant)
+	}
+
+	if c.session != "" {
+		request.AddCookie(
+			&http.Cookie{Name: httpauth.CookieName, Value: c.session})
+	}
+
+	if c.bearer != "" {
+		request.Header.Set("Authorization", "Bearer "+c.bearer)
+	}
+
+	response := httptest.NewRecorder()
+	f.app.Handler().ServeHTTP(response, request)
+
+	var out map[string]any
+	_ = json.Unmarshal(response.Body.Bytes(), &out)
+
+	return response.Code, out
+}
+
+type deviceTokens struct {
+	access, refresh, grant, scope, tenant string
+}
+
+func asString(value any) string {
+	text, _ := value.(string)
+
+	return text
+}
+
+// start begins a device request and returns the codes.
+func (f *auditFixture) start(t *testing.T, scope string) (device, user string) {
+	t.Helper()
+
+	status, out := f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/code",
+		body: map[string]any{"client_id": "gryt-cli", "scope": scope},
+	})
+	if status != 200 || asString(out["device_code"]) == "" ||
+		asString(out["verification_uri"]) != "https://app.example.test/device" {
+		t.Fatalf("device code: %d %v", status, out)
+	}
+
+	return asString(out["device_code"]), asString(out["user_code"])
+}
+
+func (f *auditFixture) poll(t *testing.T, device string) (int, map[string]any) {
+	t.Helper()
+
+	return f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/token",
+		body: map[string]any{
+			"grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
+			"client_id":   "gryt-cli",
+			"device_code": device,
+		},
+	})
+}
+
+func (f *auditFixture) refresh(
+	t *testing.T,
+	token, scope string,
+) (int, map[string]any) {
+	t.Helper()
+
+	body := map[string]any{
+		"grant_type": "refresh_token", "client_id": "gryt-cli",
+		"refresh_token": token,
+	}
+	if scope != "" {
+		body["scope"] = scope
+	}
+
+	return f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/token", body: body,
+	})
+}
+
+// issue runs the whole browser-approved flow for owner in tenant.
+func (f *auditFixture) issue(
+	t *testing.T,
+	owner auditUser,
+	tenant, requested, approved string,
+) deviceTokens {
+	t.Helper()
+
+	device, user := f.start(t, requested)
+
+	if status, out := f.poll(t, device); status != 400 ||
+		out["error"] != "authorization_pending" {
+		t.Fatalf("expected pending: %d %v", status, out)
+	}
+
+	status, out := f.call(t, deviceCall{
+		method: "GET", session: owner.session,
+		path: "/auth/device/request?user_code=" + url.QueryEscape(user),
+	})
+	if status != 200 || out["client_name"] != "gryt CLI" ||
+		out["actor_type"] != "agent" {
+		t.Fatalf("lookup: %d %v", status, out)
+	}
+
+	if status, out := f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/approve", session: owner.session,
+		body: map[string]any{
+			"user_code": user, "tenant": tenant, "scope": approved,
+		},
+	}); status != 204 {
+		t.Fatalf("approve: %d %v", status, out)
+	}
+
+	time.Sleep(1200 * time.Millisecond)
+
+	status, out = f.poll(t, device)
+	if status != 200 || out["token_type"] != "Bearer" {
+		t.Fatalf("token: %d %v", status, out)
+	}
+
+	return deviceTokens{
+		access:  asString(out["access_token"]),
+		refresh: asString(out["refresh_token"]),
+		grant:   asString(out["grant_id"]),
+		scope:   asString(out["scope"]),
+		tenant:  asString(out["tenant"]),
+	}
+}
+
+func (f *auditFixture) listAs(t *testing.T, token, tenant string) int {
+	t.Helper()
+
+	status, _ := f.call(t, deviceCall{
+		method: "GET", path: "/api/audit", bearer: token, tenant: tenant,
+	})
+
+	return status
+}
+
+func (f *auditFixture) appendAs(
+	t *testing.T,
+	token, tenant, kind string,
+) error {
+	t.Helper()
+
+	return f.app.WithSession(
+		context.Background(), token, tenant,
+		func(ctx context.Context, caller access.Caller) error {
+			return f.app.Operations.AuditAppend.Execute(ctx, caller,
+				models.AppendRequest{
+					Type: kind, Payload: json.RawMessage(`{"d":true}`),
+				})
+		})
+}
+
+func TestDeviceEndToEnd(t *testing.T) {
+	f := auditSetup(t)
+
+	alice := f.enroll(t, "alice@example.test")
+	bob := f.enroll(t, "bob@example.test")
+	mallory := f.enroll(t, "mallory@example.test")
+
+	f.member(t, alice, "north", "recorder")
+	f.member(t, alice, "south", "auditor")
+	f.member(t, bob, "north", "auditor")
+
+	// A read-only delegation: scopes narrow the owner's recorder role.
+	reader := f.issue(t, alice, "north", "audit.read audit.write", "audit.read")
+	if reader.scope != "audit.read" || reader.tenant != "north" {
+		t.Fatalf("approval must narrow to the approved scope: %+v", reader)
+	}
+
+	// The token's verified identity is alice's, bound to north: the header may
+	// be omitted, may repeat north, and may never name another tenant even
+	// though alice herself belongs to south.
+	if status := f.listAs(t, reader.access, ""); status != 200 {
+		t.Fatalf("delegated read without header: %d", status)
+	}
+
+	if status := f.listAs(t, reader.access, "north"); status != 200 {
+		t.Fatalf("delegated read in its tenant: %d", status)
+	}
+
+	if status := f.listAs(t, reader.access, "south"); status != 403 {
+		t.Fatalf("delegated token reached another tenant: %d", status)
+	}
+
+	status, _ := f.call(t, deviceCall{
+		method: "GET", path: "/api/audit/verify", bearer: reader.access,
+	})
+	if status != 200 {
+		t.Fatalf("delegated verify (audit.read): %d", status)
+	}
+
+	// Alice's own role could append; the delegation's scopes cannot.
+	if err := f.appendAs(t, reader.access, "north", "ro.attempt"); err == nil {
+		t.Fatal("read-only delegation appended: scopes did not narrow")
+	}
+
+	if err := f.appendAs(t, alice.session, "north", "own.event"); err != nil {
+		t.Fatalf("owner session must still append: %v", err)
+	}
+
+	// Scope audit.write grants the permission only when the owner holds it.
+	writer := f.issue(t, alice, "north", "audit.write", "audit.write")
+	if err := f.appendAs(t, writer.access, "north", "agent.event"); err != nil {
+		t.Fatalf("recorder delegation could not append: %v", err)
+	}
+
+	// Identity metadata reaches authored code through scope.Execution.
+	var kinds []string
+
+	page := f.list(t, alice, "north", "", 200)
+	for _, entry := range page.Data {
+		kinds = append(kinds, entry.Type)
+	}
+
+	if !contains(kinds, "own.event/user") ||
+		!contains(kinds, "agent.event/agent/gryt-cli") {
+		t.Fatalf("authored body did not see the actor: %v", kinds)
+	}
+
+	// Bob is only an auditor: approving audit.write delegates nothing he lacks.
+	escalated := f.issue(t, bob, "north", "audit.write", "audit.write")
+	err := f.appendAs(t, escalated.access, "north", "bob.agent")
+	if err == nil {
+		t.Fatal("delegation widened the owner's permissions")
+	}
+
+	// A non-member cannot delegate into a tenant at all.
+	device, user := f.start(t, "audit.read")
+	if status, _ := f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/approve", session: mallory.session,
+		body: map[string]any{
+			"user_code": user, "tenant": "north", "scope": "audit.read",
+		},
+	}); status != 403 {
+		t.Fatalf("non-member approval: %d", status)
+	}
+
+	_ = device
+
+	// A delegate cannot approve, deny, list or manage grants, and cannot
+	// provision tenants.
+	other, otherUser := f.start(t, "audit.read")
+	_ = other
+
+	for name, call := range map[string]deviceCall{
+		"approve": {
+			method: "POST", path: "/auth/device/approve",
+			body: map[string]any{
+				"user_code": otherUser, "tenant": "north",
+				"scope": "audit.read",
+			},
+		},
+		"deny": {
+			method: "POST", path: "/auth/device/deny",
+			body: map[string]any{"user_code": otherUser},
+		},
+		"grants": {method: "GET", path: "/auth/device/grants"},
+		"revoke grant": {
+			method: "DELETE", path: "/auth/device/grants/" + writer.grant,
+		},
+		"provision": {method: "POST", path: "/api/orgs", body: map[string]any{
+			"slug": "evil", "name": "Evil",
+		}},
+	} {
+		call.bearer = writer.access
+		if status, out := f.call(t, call); status != 403 && status != 401 {
+			t.Fatalf("delegate %s: %d %v", name, status, out)
+		}
+	}
+
+	// Refresh rotation, narrowing, no widening, reuse revokes the family.
+	both := "audit.read audit.write"
+	family := f.issue(t, alice, "north", both, both)
+
+	wide := both + " members.count"
+
+	if status, out := f.refresh(t, family.refresh, wide); status != 400 ||
+		out["error"] != "invalid_scope" {
+		t.Fatalf("widening refresh: %d %v", status, out)
+	}
+
+	status, second := f.refresh(t, family.refresh, "audit.read")
+	if status != 200 || second["scope"] != "audit.read" {
+		t.Fatalf("narrowing refresh: %d %v", status, second)
+	}
+
+	if f.listAs(t, family.access, "north") != 401 {
+		t.Fatal("rotated access token still valid")
+	}
+
+	next := asString(second["access_token"])
+	if f.listAs(t, next, "north") != 200 {
+		t.Fatal("rotated access token rejected")
+	}
+
+	if err := f.appendAs(t, next, "north", "narrowed"); err == nil {
+		t.Fatal("refresh narrowing did not persist")
+	}
+
+	// Replaying the consumed refresh token is theft evidence.
+	if status, out := f.refresh(t, family.refresh, ""); status != 400 ||
+		out["error"] != "invalid_grant" {
+		t.Fatalf("refresh reuse: %d %v", status, out)
+	}
+
+	if f.listAs(t, next, "north") != 401 {
+		t.Fatal("reuse detection left the family alive")
+	}
+
+	newest := asString(second["refresh_token"])
+
+	if status, _ := f.refresh(t, newest, ""); status != 400 {
+		t.Fatal("newest refresh token survived reuse detection")
+	}
+
+	// Revocation by the owner and by the holder.
+	revoked := f.issue(t, alice, "north", "audit.read", "audit.read")
+
+	status, grants := f.call(t, deviceCall{
+		method: "GET", path: "/auth/device/grants", session: alice.session,
+	})
+	if status != 200 || !strings.Contains(toJSON(grants), revoked.grant) {
+		t.Fatalf("owner grants: %d %v", status, grants)
+	}
+
+	if status, _ := f.call(t, deviceCall{
+		method: "DELETE", path: "/auth/device/grants/" + revoked.grant,
+		session: bob.session,
+	}); status == 204 {
+		t.Fatal("another user revoked alice's grant")
+	}
+
+	if status, _ := f.call(t, deviceCall{
+		method: "DELETE", path: "/auth/device/grants/" + revoked.grant,
+		session: alice.session,
+	}); status != 204 {
+		t.Fatalf("owner revoke: %d", status)
+	}
+
+	if f.listAs(t, revoked.access, "north") != 401 {
+		t.Fatal("revoked token accepted")
+	}
+
+	held := f.issue(t, alice, "north", "audit.read", "audit.read")
+
+	if status, _ := f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/revoke",
+		body: map[string]any{"token": held.refresh},
+	}); status != 200 {
+		t.Fatalf("holder revoke: %d", status)
+	}
+
+	if f.listAs(t, held.access, "north") != 401 {
+		t.Fatal("token survived holder revocation")
+	}
+
+	// Signing out with the token revokes its family.
+	signout := f.issue(t, alice, "north", "audit.read", "audit.read")
+
+	if status, _ := f.call(t, deviceCall{
+		method: "DELETE", path: "/auth/session", bearer: signout.access,
+	}); status != 200 && status != 204 {
+		t.Fatalf("sign out: %d", status)
+	}
+
+	if f.listAs(t, signout.access, "north") != 401 {
+		t.Fatal("token survived sign out")
+	}
+
+	// A password reset revokes delegated families, like browser sessions.
+	attacker := f.issue(t, alice, "north", "audit.read", "audit.read")
+
+	f.post(t, "/auth/recovery", `{"email":"alice@example.test"}`, 202)
+
+	reset, _ := json.Marshal(map[string]string{
+		"token":    f.sender.token(t, password.RecoverPassword),
+		"password": "another long synthetic passphrase",
+	})
+	f.post(t, "/auth/reset", string(reset), 200)
+
+	if f.listAs(t, attacker.access, "north") != 401 {
+		t.Fatal("delegated token survived a password reset")
+	}
+
+	// Unknown client, undeclared scope and a malformed code.
+	if status, _ := f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/code",
+		body: map[string]any{"client_id": "nobody"},
+	}); status != 401 {
+		t.Fatalf("unknown client: %d", status)
+	}
+
+	if status, _ := f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/code",
+		body: map[string]any{"client_id": "gryt-cli", "scope": "admin"},
+	}); status != 400 {
+		t.Fatalf("undeclared scope: %d", status)
+	}
+
+	// Polling faster than the interval is rate limited and slows the client.
+	fast, _ := f.start(t, "audit.read")
+	time.Sleep(1200 * time.Millisecond)
+
+	if _, out := f.poll(t, fast); out["error"] != "authorization_pending" {
+		t.Fatalf("first poll: %v", out)
+	}
+
+	status, out := f.poll(t, fast)
+	if status != 400 || out["error"] != "slow_down" {
+		t.Fatalf("expected slow_down: %d %v", status, out)
+	}
+
+	// Denial is reported to the poller.
+	denied, deniedUser := f.start(t, "audit.read")
+
+	if status, _ := f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/deny", session: bob.session,
+		body: map[string]any{"user_code": deniedUser},
+	}); status != 204 {
+		t.Fatalf("deny: %d", status)
+	}
+
+	time.Sleep(1200 * time.Millisecond)
+
+	if _, out := f.poll(t, denied); out["error"] != "access_denied" {
+		t.Fatalf("expected access_denied: %v", out)
+	}
+
+	// Tokens and codes never reach the database in plaintext.
+	var leaked int
+
+	if err := f.admin.QueryRow(t.Context(), `
+SELECT count(*) FROM pluto_auth_device_tokens
+WHERE encode(digest, 'escape') LIKE '%' || $1 || '%'`,
+		held.access).Scan(&leaked); err != nil || leaked != 0 {
+		t.Fatalf("plaintext token stored: %d %v", leaked, err)
+	}
+
+	// Delegated access is not available through the owner routes without a
+	// trusted Origin either.
+	if status, _ := f.call(t, deviceCall{
+		method: "POST", path: "/auth/device/deny", session: bob.session,
+		origin: "https://evil.example.test", body: map[string]any{
+			"user_code": deniedUser,
+		},
+	}); status != 403 {
+		t.Fatalf("untrusted origin: %d", status)
+	}
+}
+
+func contains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+
+	return false
+}
+
+func toJSON(value any) string {
+	encoded, _ := json.Marshal(value)
+
+	return string(encoded)
+}
+
+// dialBearer opens the audit stream with a delegated bearer token.
+func dialBearer(
+	t *testing.T,
+	server *httptest.Server,
+	token, tenant string,
+) (*websocket.Conn, int, error) {
+	t.Helper()
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+token)
+	header.Set("Origin", auditOrigin)
+
+	if tenant != "" {
+		header.Set("X-Tenant-ID", tenant)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/audit/watch"
+
+	conn, response, err := websocket.Dial(
+		ctx, url, &websocket.DialOptions{HTTPHeader: header})
+
+	status := 0
+	if response != nil {
+		status = response.StatusCode
+	}
+
+	return conn, status, err
+}
+
+// A delegated token reaches a stream only through the same scope check and
+// live recheck as every other generated gate: scopes narrow before the
+// upgrade, the token's tenant is fixed, and revoking the grant closes the
+// open socket within one recheck interval.
+func TestDeviceStream(t *testing.T) {
+	f := auditSetup(t)
+	server := httptest.NewServer(f.app.Handler())
+	t.Cleanup(server.Close)
+
+	alice := f.enroll(t, "stream-alice@example.test")
+	f.member(t, alice, "north", "recorder")
+	f.member(t, alice, "south", "auditor")
+
+	reader := f.issue(t, alice, "north", "audit.read", "audit.read")
+	writer := f.issue(t, alice, "north", "audit.write", "audit.write")
+
+	// The scope names the permission: the stream opens.
+	conn, status, err := dialBearer(t, server, reader.access, "north")
+	if err != nil {
+		t.Fatalf("scoped stream refused: %v (status %d)", err, status)
+	}
+
+	t.Cleanup(func() {
+		_ = conn.CloseNow()
+	})
+
+	// A scope without audit.read is refused before any upgrade.
+	if _, status, err := dialBearer(
+		t, server, writer.access, "north",
+	); err == nil || status != 403 {
+		t.Fatalf("unscoped stream: status %d err %v", status, err)
+	}
+
+	// The token is bound to its tenant even though the owner is in south.
+	if _, status, err := dialBearer(
+		t, server, reader.access, "south",
+	); err == nil || status != 403 {
+		t.Fatalf("stream reached another tenant: status %d err %v", status, err)
+	}
+
+	// Revoking the grant ends the open stream at the next recheck.
+	if status, _ := f.call(t, deviceCall{
+		method: "DELETE", path: "/auth/device/grants/" + reader.grant,
+		session: alice.session,
+	}); status != 204 {
+		t.Fatalf("revoke: %d", status)
+	}
+
+	if code := expectClose(t, conn, 8*time.Second); code != 1008 {
+		t.Fatalf("revoked stream closed with %d", code)
+	}
+}

@@ -41,6 +41,64 @@ func (c Caller) WorkKind() string {
 	return c.callerWorkKind
 }
 
+{{- if .Manifest.DeviceOn}}
+
+// Delegation reports the delegated-client metadata of the verified session:
+// the client, actor type and approved scopes of a device-issued token. It is
+// absent for an interactive session. It only narrows what the owner may do.
+func (c Caller) Delegation() (auth.Delegation, bool) {
+	return c.callerIdentity.Delegation()
+}
+
+// Permits is the scope check every protected gate runs before the identity
+// gate: a delegated token may exercise only permissions its approved scopes
+// name, and only in the tenant it was approved for. The identity gate then
+// still requires the owner's own live membership and permission, so the
+// effective authority is the intersection and can never exceed the owner's.
+func (c Caller) Permits(permission string) error {
+	delegation, delegated := c.callerIdentity.Delegation()
+	if !delegated {
+		return nil
+	}
+
+	if permission == "" || delegation.Tenant != c.callerTenant ||
+		!delegationAllows(delegation.Scopes, permission) {
+		return domain.ErrForbidden
+	}
+
+	return nil
+}
+
+func CallerFromHTTP(ctx context.Context, tenant string) (Caller, error) {
+	if ctx == nil {
+		return Caller{}, domain.ErrUnauthenticated
+	}
+
+	identity, ok := httpauth.IdentityFromContext(ctx)
+	if !ok || identity == nil {
+		return Caller{}, domain.ErrUnauthenticated
+	}
+
+	// A delegated token is bound to its approved tenant: the header may omit
+	// it but never name another one.
+	if delegation, delegated := identity.Delegation(); delegated {
+		if tenant == "" {
+			tenant = delegation.Tenant
+		}
+
+		if tenant != delegation.Tenant {
+			return Caller{}, domain.ErrForbidden
+		}
+	}
+
+	if tenant == "" {
+		return Caller{}, domain.ErrUnauthenticated
+	}
+
+	return Caller{callerIdentity: identity, callerTenant: tenant}, nil
+}
+{{- else}}
+
 func CallerFromHTTP(ctx context.Context, tenant string) (Caller, error) {
 	if ctx == nil || tenant == "" {
 		return Caller{}, domain.ErrUnauthenticated
@@ -53,6 +111,7 @@ func CallerFromHTTP(ctx context.Context, tenant string) (Caller, error) {
 
 	return Caller{callerIdentity: identity, callerTenant: tenant}, nil
 }
+{{- end}}
 
 // WithSession verifies a credential against the supplied configured issuer. The
 // operation additionally binds the exact trusted Manager, membership and

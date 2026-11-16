@@ -106,8 +106,24 @@ func (s socket) ping(ctx context.Context) error {
 	return s.scopeSocketConn.Ping(ctx)
 }
 
+// closeWait bounds the close handshake: the frame is written first, then the
+// peer gets this long to answer before the connection is dropped.
+const closeWait = 2 * time.Second
+
 func (s socket) close(code int, reason string) {
-	_ = s.scopeSocketConn.Close(websocket.StatusCode(code), reason)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		_ = s.scopeSocketConn.Close(websocket.StatusCode(code), reason)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(closeWait):
+		_ = s.scopeSocketConn.CloseNow()
+	}
 }
 
 var errBinary = errors.New("scope: binary stream message")
@@ -239,8 +255,11 @@ func (state *streamState) terminate(code int, reason string, cause error) {
 	state.scopeStreamOnce.Do(func() {
 		state.scopeStreamCode = code
 		state.scopeStreamReason = reason
-		state.scopeStreamCancel(cause)
+
+		// The close frame goes out before the context is cancelled: a
+		// cancelled read tears the connection down without a frame.
 		state.scopeStreamTransport.close(code, reason)
+		state.scopeStreamCancel(cause)
 	})
 }
 

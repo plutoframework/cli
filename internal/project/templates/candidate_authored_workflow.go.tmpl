@@ -64,10 +64,20 @@ func (operation *{{.Action}}) execute(
 {{end}}
 	return logic.{{.Action}}(
 		ctx,
+{{- $resource := q .Authored.Resource}}
+{{- if .Authored.PathKey}}{{$resource = print $resource "+\":\"+request.ResourceID()"}}{{end}}
+{{- if .Manifest.DeviceOn}}
+		scope.BindActor(
+			ctx,
+			execution,
+			operation.{{lowerFirst .Action}}Gate,
+			{{$resource}}),
+{{- else}}
 		scope.Bind(
 			execution,
 			operation.{{lowerFirst .Action}}Gate,
-			{{q .Authored.Resource}}),
+			{{$resource}}),
+{{- end}}
 		operation.{{lowerFirst .Action}}Ports,
 		request)
 }

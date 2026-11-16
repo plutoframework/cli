@@ -248,3 +248,88 @@ func afterID(request pagination.Request) (int64, error) {
 
 	return strconv.ParseInt(request.After.ID, 10, 64)
 }
+
+// Get reads one gateway of the verified tenant by the path id. A row of
+// another tenant is invisible under row-level security: not found.
+func (s *Store) Get(
+	ctx context.Context,
+	e scope.Execution,
+	in models.GetRequest,
+) (models.GatewayInfo, error) {
+	var out models.GatewayInfo
+
+	err := s.db.Read(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		row, err := queriesOf(tx).GatewayStatus(
+			ctx,
+			queries.GatewayStatusParams{OrgID: tx.Tenant(), ID: in.ID},
+		)
+		if err != nil {
+			return scope.NotFound(err)
+		}
+
+		out = models.GatewayInfo{
+			ID: row.ID, Name: row.Name, State: row.State, Online: row.Online,
+		}
+
+		return nil
+	})
+
+	return out, err
+}
+
+// Edit renames the gateway named by the path id.
+func (s *Store) Edit(
+	ctx context.Context,
+	e scope.Execution,
+	in models.EditRequest,
+) (models.GatewayInfo, error) {
+	var out models.GatewayInfo
+
+	err := s.db.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		row, err := queriesOf(tx).RenameGateway(
+			ctx,
+			queries.RenameGatewayParams{
+				OrgID: tx.Tenant(),
+				ID:    in.ID,
+				Name:  in.Body.Name,
+			},
+		)
+		if err != nil {
+			return scope.NotFound(err)
+		}
+
+		out = models.GatewayInfo{
+			ID: row.ID, Name: row.Name, State: row.State, Online: row.Online,
+		}
+
+		return nil
+	})
+
+	return out, err
+}
+
+// ClearBeats deletes the heartbeat history of the gateway named by the path
+// id; the gateway itself must be visible to the tenant.
+func (s *Store) ClearBeats(
+	ctx context.Context,
+	e scope.Execution,
+	in models.ClearBeatsRequest,
+) (models.GatewayRef, error) {
+	err := s.db.Write(ctx, e, func(ctx context.Context, tx scope.Tx) error {
+		if _, err := queriesOf(tx).GatewayStatus(
+			ctx,
+			queries.GatewayStatusParams{OrgID: tx.Tenant(), ID: in.ID},
+		); err != nil {
+			return scope.NotFound(err)
+		}
+
+		_, err := queriesOf(tx).ClearBeats(
+			ctx,
+			queries.ClearBeatsParams{OrgID: tx.Tenant(), GatewayID: in.ID},
+		)
+
+		return err
+	})
+
+	return models.GatewayRef(in), err
+}

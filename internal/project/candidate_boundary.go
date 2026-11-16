@@ -716,6 +716,10 @@ func candidateDataPackage(path string) bool {
 
 func candidateCriticalPackage(path string) bool {
 	return path == "github.com/plutoframework/pluto-auth" ||
+		strings.HasPrefix(
+			path,
+			"github.com/plutoframework/pluto-auth/device",
+		) ||
 		path == "github.com/plutoframework/pluto-rbac" ||
 		path == "github.com/plutoframework/pluto-rbac/identity" ||
 		path == lifecycleStatePackage

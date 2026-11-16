@@ -416,8 +416,68 @@ failed execution is not retried under its key. The stored response is replayed
 verbatim: do not return secrets (such as an enrollment token) from an
 idempotent write; declare those `exempt` with a `replay_reason`. `required`
 needs an HTTP endpoint; an authored write that no endpoint exposes stays
-`exempt`. The operation cannot take path or query parameters: carry identifiers
-in the body.
+`exempt`. A write takes no query parameters; identify the record with a typed
+path parameter (next section) or carry identifiers in the body.
+
+## Path parameters on authored endpoints
+
+REST routes address one record: `GET|PATCH|PUT|DELETE /api/gateways/{id}`.
+Each `{segment}` of an authored endpoint path is declared and typed on the
+operation, and the entry names the one that selects the resource:
+
+```toml
+[[operations]]
+group = "gateways"
+action = "Edit"
+permission = "gateways.manage"
+write = true
+idempotency = "required"
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.GatewayName"     # JSON body; omit for a bodyless write
+output = "gateways.GatewayInfo"
+path = [{ name = "id", type = "uuid" }]
+
+[[endpoints]]
+group = "gateways"
+action = "Edit"
+operation = "gateways.Edit"
+method = "PATCH"
+path = "/api/gateways/{id}"
+resource_source = "path:id"
+```
+
+Types: `uuid` (canonical hex, lowercased on bind), `string` (`max` 1..256,
+letters, digits and `-._~`) and `int64` (canonical non-negative decimal,
+optional `max`). Names are `[a-z][a-zA-Z0-9]*` like route segments. Validation
+refuses a `{segment}` without a declaration, a declaration that is not in the
+path, a missing or mismatched `resource_source = "path:<name>"`, and path
+parameters on anything but an authored, protected, non-collection
+`response = "object"` operation on the verified user path (not machine,
+stream, enroll, provision, lookup or per-tenant).
+
+The generated handler verifies the caller, then validates every path value
+against its declared type (`400 invalid_path_parameter`, before the body is
+read or any claim is taken), then proceeds as above. The request model is a
+generated struct: a read's carries the path fields beside its query fields; a
+write's has `Body` (the strictly decoded input model, absent when no `input`
+is declared; a bodyless write refuses any body with `400 invalid_body`) and
+one field per path parameter (`request.ID`). Path fields are never part of the
+JSON body or the OpenAPI request schema; OpenAPI lists them as typed `path`
+parameters.
+
+The identity gate is bound to the resource key `"<resource>:<value>"` of the
+parameter named by `resource_source`; the generated policy demands exactly that
+shape, and every data access of the body revalidates the same key. The gate
+authorizes membership and permission, not existence: look the record up
+through `queriesOf` under the verified tenant and map an empty result with
+`scope.NotFound(err)`. Another tenant's id is then a `404 not_found` identical
+to a missing id, while a caller outside the tenant or without the permission
+fails earlier with 401/403. With `idempotency = "required"` the stored claim is
+keyed by the request path, so one key reused on another id is a `409`.
 
 ## Same-transaction writes across groups
 
@@ -523,6 +583,22 @@ id of active memberships. Only the generated hook sets the setting, from a live
 verified session; ARCH612 accepts exactly this policy beside tenant isolation,
 and the runtime role gets SELECT on the view only. Without `[auth.events]`
 neither the policy, the view, nor any read exists.
+
+## Not-found semantics
+
+A resource in another tenant is indistinguishable from a missing one. Row-level
+security and the `tenant_id` predicate make foreign rows invisible, so generated
+resource policies and repositories return `domain.ErrNotFound` and the generated
+handler maps it to `404 {"error":{"code":"not_found"}}` for GET, PUT/transition
+and DELETE alike. Missing membership in the caller's tenant (an `X-Tenant-ID`
+the verified subject does not belong to) and missing permission still fail in
+the gate before any lookup: 401 or 403, never 404. Owner-visibility rows owned
+by someone else are not found too.
+
+Authored adapters map an empty single-row result with
+`return scope.NotFound(err)` (or `scope.NoRows(err)` then `scope.ErrNotFound`);
+any other error passes through unchanged and stays a 500. Do not return a
+forbidden error for a missing row: that leaks existence.
 
 ## Tenant-less system operations
 
@@ -772,3 +848,82 @@ How it runs (all generated):
 
 Delivered rows stay in `pluto_jobs` (pluto-jobs has no retention); plan pruning
 for high-frequency schedules across many tenants.
+
+## Device authorization and scoped delegated tokens
+
+`[auth.device]` declares the OAuth 2.0 device authorization grant (RFC 8628) for
+a CLI or an agent acting for a user. It needs the candidate profile, multi
+tenancy and `--local-credentials` (the owner approves in a signed-in browser
+session). Everything is generated; the generated app mounts these routes under
+`/auth/device` (the `/auth` namespace is reserved) and applies
+`db/migrations/090_device_grants.sql` (`pluto_auth_device_*` tables; codes and
+tokens are stored only as SHA-256 digests).
+
+```toml
+[auth.device]
+verification_uri = "https://app.example.com/device"   # browser page
+# optional, bounded: code_ttl 10m, poll_interval 5s, access_ttl 15m,
+# refresh_ttl 720h, max_lifetime 2160h (absolute per grant)
+
+[[auth.device.scopes]]
+name = "requests.write"
+permissions = ["requests.create", "requests.read"]    # declared operation permissions
+
+[[auth.device.clients]]
+id = "gryt-cli"
+name = "gryt CLI"
+actor_type = "agent"            # carried on every delegated identity; never "user"
+scopes = ["requests.write"]
+```
+
+Flow: `POST /auth/device/code` (public, tenant-less, ingress limited) returns
+`device_code`, `user_code`, `verification_uri(_complete)`, `expires_in` and
+`interval`. The owner opens the page and the browser calls `GET
+/auth/device/request?user_code=` (client and requested scopes) then `POST
+/auth/device/approve` with `user_code`, a `tenant` where the owner holds a
+membership with a role, and a subset of the requested `scope`s (or `/deny`).
+The client polls `POST /auth/device/token` with the device-code grant; polling
+faster than the interval returns `slow_down` and raises the interval, and codes
+are single use. The token response carries `access_token`, `refresh_token`,
+`scope`, `tenant` and `grant_id`. The refresh grant rotates both tokens and may
+narrow scopes, never widen them. Presenting an already rotated refresh token
+revokes the whole token family (`invalid_grant`). `POST /auth/device/revoke`
+(RFC 7009), `DELETE /auth/device/grants/{id}` (owner), password reset, account
+disabling and `DELETE /auth/session` all revoke families.
+
+Enforcement: an access token is an ordinary opaque session through the single
+runtime manager, so requests run the normal gates with the owner's verified
+identity. Each generated gate first calls `caller.Permits(permission)`: the
+operation permission must be named by an approved scope and the tenant must be
+the token's tenant (the `X-Tenant-ID` header may be omitted, never differ).
+The identity gate then still requires the owner's live membership, role and
+resource policy, so the effective authority is the intersection and never
+exceeds the owner's. Delegated tokens are refused on every owner route
+(approve, deny, grants) and on tenant provisioning, and the generic
+`/api/features` front door, which has no permission to intersect, still applies
+only the owner's membership.
+
+Delegated tokens go through every generated gate that has a human caller:
+HTTP operations, path-parameter endpoints (the gate runs `Permits` before
+the lookup, so a scope miss is 403 and a tenant-invisible id is the same
+`404 not_found` the owner gets), and WebSocket streams (`Permits` runs in
+`Prepare` before the upgrade and again at every recheck, so revoking the
+grant closes an open stream with close code 1008, written before the
+connection is torn down). A delegated token naming any tenant other than the
+one it was approved for is `403`, before and regardless of membership, so it
+reveals nothing about the owner's other tenants. Machine routes and per-tenant jobs
+have no human caller and never accept a delegated token.
+
+Metadata: authored bodies read `e.Actor()` on `scope.Execution` (`Kind()` is
+`user` or the client's `actor_type`; `ClientID()`, `GrantID()`). Authored code
+cannot construct or set it (`scope.Actor` is protected; `BindActor` and
+`ContextWithActor` are generated-only capabilities), and cannot import
+`pluto-auth/device`. Generated code that receives an `access.Caller` (for
+example the auth-events hook) can read `Caller.Delegation()`.
+
+Operational notes: user codes are 8 characters from a 20-letter alphabet and
+live for `code_ttl`; lookups and decisions are limited per subject through the
+shared credential attempt limiter (so each approval uses a few of its attempts)
+and the public routes through `Ingress`. Expired requests are pruned
+opportunistically on creation. Requires a pluto-auth revision containing the
+`device` package; the candidate pin probe does not yet check it.

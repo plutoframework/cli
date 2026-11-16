@@ -68,6 +68,9 @@ methods = [
   "Create(scope.Execution, models.NewGateway) (models.CreatedGateway, error)",
   "Rename(scope.Execution, models.RenameGateway) (models.GatewayInfo, error)",
   "Revoke(scope.Execution, models.GatewayRef) (models.GatewayRef, error)",
+  "Get(scope.Execution, models.GetRequest) (models.GatewayInfo, error)",
+  "Edit(scope.Execution, models.EditRequest) (models.GatewayInfo, error)",
+  "ClearBeats(scope.Execution, models.ClearBeatsRequest) (models.GatewayRef, error)",
   "Rotate(scope.Execution, models.GatewayRef) (models.CreatedGateway, error)",
   "Beat(scope.Execution, models.Beat) (models.Ack, error)",
   "Status(scope.Execution, models.StatusRequest) (models.GatewayStatus, error)",
@@ -91,6 +94,10 @@ fields = ["id:string", "token:string"]
 [[models]]
 id = "gateways.RenameGateway"
 fields = ["id:string", "name:string"]
+
+[[models]]
+id = "gateways.GatewayName"
+fields = ["name:string"]
 
 [[models]]
 id = "gateways.GatewayInfo"
@@ -183,6 +190,52 @@ response = "object"
 input = "gateways.GatewayRef"
 output = "gateways.GatewayRef"
 feature = "gateways"
+
+[[operations]]
+group = "gateways"
+action = "Get"
+permission = "gateways.manage"
+idempotency = "none"
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+output = "gateways.GatewayInfo"
+feature = "gateways"
+path = [{ name = "id", type = "uuid" }]
+
+[[operations]]
+group = "gateways"
+action = "Edit"
+permission = "gateways.manage"
+write = true
+idempotency = "required"
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+input = "gateways.GatewayName"
+output = "gateways.GatewayInfo"
+feature = "gateways"
+path = [{ name = "id", type = "uuid" }]
+
+[[operations]]
+group = "gateways"
+action = "ClearBeats"
+permission = "gateways.manage"
+write = true
+idempotency = "exempt"
+replay_reason = "Clearing already-cleared history changes nothing."
+body = "authored"
+resource = "gateways.registry"
+resource_policy = "tenant"
+ports = ["gateways.Registry"]
+response = "object"
+output = "gateways.GatewayRef"
+feature = "gateways"
+path = [{ name = "id", type = "uuid" }]
 
 [[operations]]
 group = "gateways"
@@ -344,6 +397,36 @@ description = "Revoke a gateway; its next request is denied."
 
 [[endpoints]]
 group = "gateways"
+action = "Get"
+operation = "gateways.Get"
+method = "GET"
+path = "/api/gateways/{id}"
+resource_source = "path:id"
+name = "Read gateway"
+description = "Read one gateway of the verified tenant."
+
+[[endpoints]]
+group = "gateways"
+action = "Edit"
+operation = "gateways.Edit"
+method = "PATCH"
+path = "/api/gateways/{id}"
+resource_source = "path:id"
+name = "Edit gateway"
+description = "Rename one gateway; replays of one Idempotency-Key run once."
+
+[[endpoints]]
+group = "gateways"
+action = "ClearBeats"
+operation = "gateways.ClearBeats"
+method = "DELETE"
+path = "/api/gateways/{id}/beats"
+resource_source = "path:id"
+name = "Clear gateway history"
+description = "Delete the recorded heartbeats of one gateway."
+
+[[endpoints]]
+group = "gateways"
 action = "Rotate"
 operation = "gateways.Rotate"
 method = "POST"
@@ -407,3 +490,21 @@ table = "gateways.users"
 tenant_column = "org_id"
 subject_column = "id"
 role_column = "role"
+
+[auth.device]
+verification_uri = "https://app.example.test/device"
+poll_interval = "1s"
+
+[[auth.device.scopes]]
+name = "gateways.manage"
+permissions = ["gateways.manage"]
+
+[[auth.device.scopes]]
+name = "audit.record"
+permissions = ["audit.record"]
+
+[[auth.device.clients]]
+id = "gryt-cli"
+name = "gryt CLI"
+actor_type = "agent"
+scopes = ["gateways.manage", "audit.record"]

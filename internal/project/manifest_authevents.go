@@ -30,6 +30,7 @@ const maxAuthEventTenants = 16
 // AuthSection groups declarations about managed authentication.
 type AuthSection struct {
 	Events *AuthEvents `toml:"events,omitempty"`
+	Device *AuthDevice `toml:"device,omitempty"`
 }
 
 // AuthEvents declares the authored operation the managed sign-in, OIDC
@@ -123,7 +124,7 @@ func (m Manifest) tableByID(id string) (Table, bool) {
 
 func validateAuthEvents(m Manifest) error {
 	if !m.AuthEventsOn() {
-		if m.Auth != nil {
+		if m.Auth != nil && !m.DeviceOn() {
 			return fmt.Errorf("[auth] declares nothing; remove it")
 		}
 

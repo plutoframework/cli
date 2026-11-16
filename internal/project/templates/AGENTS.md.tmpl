@@ -58,6 +58,10 @@ Authored seams (candidate): declare, then write only authored role files.
   `body = "authored"`) and internal/adapters/<group> (SQL behind declared
   `[[ports]]`; sqlc query sets via `[[queries]]`). Adapters use only the
   scope's `queriesOf(...)`; tenant and actor come from the verified scope.
+- Not found: an adapter maps an empty single-row result with
+  `scope.NotFound(err)`; the generated handler answers 404. Cross-tenant rows
+  are invisible (RLS), so never answer 403 for a missing row. Missing
+  membership in the caller's tenant stays 401/403.
 - Signup that creates an org: declare `tenant_root = true` on the root
   `[[tables]]` entry and an operation with `scope = "provision"` (authored write,
   verified identity, no membership; generated code mints the tenant id). Pre-
@@ -113,8 +117,17 @@ Authored seams (candidate): declare, then write only authored role files.
   `input` model and `response = "object"` may be exposed by a POST, PUT, PATCH
   or DELETE `[[endpoints]]` entry. Generated code decodes the strict JSON body
   into the input model, runs the gate first and, for `idempotency = "required"`,
-  claims the `Idempotency-Key` only after authorization. No path or query
-  parameters; never return secrets from an idempotent write (use `exempt`).
+  claims the `Idempotency-Key` only after authorization. Never return secrets
+  from an idempotent write (use `exempt`).
+- Path parameters: type each `{segment}` of an authored endpoint path with
+  `path = [{ name = "id", type = "uuid" }]` on the operation (`uuid`, `string`
+  with `max`, `int64`) and set the entry's `resource_source = "path:id"`. The
+  value is validated (`400 invalid_path_parameter`) before the body is read,
+  bound into the request model (`request.ID`; a write's JSON body is
+  `request.Body`, and the input model may be omitted for a bodyless
+  PUT/DELETE) and carried in the gate's resource key. Look the row up under
+  the verified tenant and `return scope.NotFound(err)`: a foreign id is 404,
+  indistinguishable from a missing one. Never read ids from anywhere else.
 - Streams: `response = "stream"` (`item` = server message model, optional
   `input` = client message model) exposed by one `[[endpoints]]` with
   `transport = "websocket"`. The body is `func(ctx, scope.Execution, ports,
@@ -134,6 +147,20 @@ Keep it to delivery and abuse controls; ARCH609 rejects imports of application
 packages, Pluto authority modules, stores, database clients, reflect or unsafe.
 Never log notifications, tokens or passwords.
 {{end}}
+{{- if .Manifest.DeviceOn}}
+
+Delegated clients (CLI, agents) use the managed device grant declared in
+[auth.device] (RFC 8628): the owner approves in a browser session, the client
+gets scoped short-lived access tokens and rotating refresh tokens (reuse
+revokes the family). A scope names declared operation permissions and only
+narrows: every gate runs `caller.Permits` and then the owner's own live
+membership and permission. Tokens are bound to one tenant. Authored bodies read
+`e.Actor()` (Kind, ClientID, GrantID) for audit and never set it; they cannot
+import pluto-auth/device or call scope.BindActor/ContextWithActor. Delegates
+cannot approve, manage grants or provision tenants. Path endpoints and
+streams run the same scope check (a stream rechecks it, so revoking a grant
+closes the socket); a tenant-invisible path id is the usual 404.
+{{- end}}
 Apply explicit database migrations before startup. No constructor creates
 schemas,
 users, role assignments or fixture credentials. Candidate dependencies are

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -105,6 +106,12 @@ func (reg Registrar) Handle(endpoint paths.Endpoint, handler http.HandlerFunc) {
 
 				r.Header.Get("X-Tenant-ID"),{{end}}
 			)
+			if errors.Is(err, domain.ErrDelegatedTenant) {
+				Error(writer, r, 403, "forbidden")
+
+				return
+			}
+
 			if err != nil || !verified.Verified() {
 				Error(writer, r, 401, "unauthenticated")
 

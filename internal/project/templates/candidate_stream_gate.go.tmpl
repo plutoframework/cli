@@ -88,6 +88,14 @@ func (operation *{{.Action}}) within(
 	if caller.Identity() == nil {
 		return commonDomain.ErrUnauthenticated
 	}
+{{- if .Manifest.DeviceOn}}
+
+	if err := caller.Permits({{q .Authored.Permission}}); err != nil {
+		return err
+	}
+
+	ctx = scope.ContextWithActor(ctx, caller.Identity())
+{{- end}}
 
 	return operation.{{lowerFirst .Action}}Gate.Within(
 		ctx,

@@ -21,10 +21,18 @@ func (operation *{{.Action}}) execute(
 	wire scope.Wire,
 	request models.{{.Action}}Request,
 ) error {
+{{- if .Manifest.DeviceOn}}
+	bound := scope.BindActor(
+		ctx,
+		execution,
+		operation.{{lowerFirst .Action}}Gate,
+		{{q .Authored.Resource}})
+{{- else}}
 	bound := scope.Bind(
 		execution,
 		operation.{{lowerFirst .Action}}Gate,
 		{{q .Authored.Resource}})
+{{- end}}
 
 	return scope.RunStream(
 		ctx,

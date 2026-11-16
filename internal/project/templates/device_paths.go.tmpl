@@ -1,0 +1,191 @@
+package paths
+
+// Device authorization grant routes (RFC 8628) are mounted before tenancy and
+// bypass business idempotency. The first three are public and tenant-less; the
+// rest need the owner's browser session and a trusted Origin for unsafe
+// methods. A delegated token is refused on every owner route.
+var (
+	DeviceCode = Endpoint{
+		ID:   "device.code",
+		Name: "Start device authorization",
+		Description: "Public. Returns a device code, a user code and the " +
+			"verification URI. Rate limited at ingress.",
+		Method:        "POST",
+		Path:          "/auth/device/code",
+		SessionOnly:   true,
+		Request:       DeviceCodeInput{},
+		Response:      DeviceCodeResponse{},
+		SuccessStatus: 200,
+	}
+	DeviceToken = Endpoint{
+		ID:   "device.token",
+		Name: "Poll or refresh device tokens",
+		Description: "Public. device_code grant (polling beyond the interval " +
+			"returns slow_down) or refresh_token grant (rotation; reuse " +
+			"revokes the token family).",
+		Method:        "POST",
+		Path:          "/auth/device/token",
+		SessionOnly:   true,
+		Request:       DeviceTokenInput{},
+		Response:      DeviceTokenResponse{},
+		SuccessStatus: 200,
+	}
+	DeviceRevoke = Endpoint{
+		ID:   "device.revoke",
+		Name: "Revoke a device token family",
+		Description: "Public. RFC 7009: possession of an access or refresh " +
+			"token revokes its whole family; unknown tokens succeed.",
+		Method:        "POST",
+		Path:          "/auth/device/revoke",
+		SessionOnly:   true,
+		Request:       DeviceRevokeInput{},
+		Response:      DeviceAck{},
+		SuccessStatus: 200,
+	}
+	DeviceRequest = Endpoint{
+		ID:   "device.request",
+		Name: "Describe a pending device request",
+		Description: "Owner browser session only. Shows the client and the " +
+			"requested scopes before approval.",
+		Method:        "GET",
+		Path:          "/auth/device/request",
+		Authenticated: true,
+		SessionOnly:   true,
+		Query: []QueryParam{
+			{Name: "user_code", Type: "string", Max: 16},
+		},
+		Response:      DeviceRequestResponse{},
+		SuccessStatus: 200,
+	}
+	DeviceApprove = Endpoint{
+		ID:   "device.approve",
+		Name: "Approve a device request",
+		Description: "Owner browser session and trusted Origin only. " +
+			"Approves a subset of the requested scopes in one tenant the " +
+			"owner belongs to.",
+		Method:        "POST",
+		Path:          "/auth/device/approve",
+		Authenticated: true,
+		SessionOnly:   true,
+		Request:       DeviceApproveInput{},
+		Response:      DeviceAck{},
+		SuccessStatus: 204,
+	}
+	DeviceDeny = Endpoint{
+		ID:            "device.deny",
+		Name:          "Deny a device request",
+		Description:   "Owner browser session and trusted Origin only.",
+		Method:        "POST",
+		Path:          "/auth/device/deny",
+		Authenticated: true,
+		SessionOnly:   true,
+		Request:       DeviceDenyInput{},
+		Response:      DeviceAck{},
+		SuccessStatus: 204,
+	}
+	DeviceGrants = Endpoint{
+		ID:            "device.grants",
+		Name:          "List delegated grants",
+		Description:   "Owner browser session only; active token families.",
+		Method:        "GET",
+		Path:          "/auth/device/grants",
+		Authenticated: true,
+		SessionOnly:   true,
+		Response:      DeviceGrantList{},
+		SuccessStatus: 200,
+	}
+	DeviceRevokeGrant = Endpoint{
+		ID:            "device.revoke_grant",
+		Name:          "Revoke a delegated grant",
+		Description:   "Owner browser session and trusted Origin only.",
+		Method:        "DELETE",
+		Path:          "/auth/device/grants/{id}",
+		Authenticated: true,
+		SessionOnly:   true,
+		Response:      DeviceAck{},
+		SuccessStatus: 204,
+	}
+)
+
+type DeviceAck struct{}
+
+type DeviceCodeInput struct {
+	ClientID string `json:"client_id"`
+	Scope    string `json:"scope,omitempty"`
+}
+
+type DeviceCodeResponse struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
+	ExpiresIn               int    `json:"expires_in"`
+	Interval                int    `json:"interval"`
+}
+
+type DeviceTokenInput struct {
+	GrantType    string `json:"grant_type"`
+	ClientID     string `json:"client_id"`
+	DeviceCode   string `json:"device_code,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Scope        string `json:"scope,omitempty"`
+}
+
+type DeviceTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	Scope        string `json:"scope"`
+	Tenant       string `json:"tenant"`
+	GrantID      string `json:"grant_id"`
+}
+
+type DeviceRevokeInput struct {
+	Token string `json:"token"`
+}
+
+type DeviceRequestResponse struct {
+	ClientID   string   `json:"client_id"`
+	ClientName string   `json:"client_name"`
+	ActorType  string   `json:"actor_type"`
+	Scopes     []string `json:"scopes"`
+	ExpiresIn  int      `json:"expires_in"`
+}
+
+type DeviceApproveInput struct {
+	UserCode string `json:"user_code"`
+	Tenant   string `json:"tenant"`
+	Scope    string `json:"scope"`
+}
+
+type DeviceDenyInput struct {
+	UserCode string `json:"user_code"`
+}
+
+type DeviceGrant struct {
+	ID        string   `json:"id"`
+	ClientID  string   `json:"client_id"`
+	ActorType string   `json:"actor_type"`
+	Tenant    string   `json:"tenant"`
+	Scopes    []string `json:"scopes"`
+	CreatedAt string   `json:"created_at"`
+	ExpiresAt string   `json:"expires_at"`
+}
+
+type DeviceGrantList struct {
+	Data []DeviceGrant `json:"data"`
+}
+
+func DeviceEndpoints() []Endpoint {
+	return []Endpoint{
+		DeviceCode,
+		DeviceToken,
+		DeviceRevoke,
+		DeviceRequest,
+		DeviceApprove,
+		DeviceDeny,
+		DeviceGrants,
+		DeviceRevokeGrant,
+	}
+}

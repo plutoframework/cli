@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	commonDomain "example.test/candidate/internal/domain"
 	domain "example.test/candidate/internal/domain/documents"
 	contract "example.test/candidate/internal/ports/documents"
 	data "example.test/candidate/internal/storage/documents"
@@ -18,7 +19,6 @@ import (
 	"github.com/plutoframework/pluto-core/idempotency"
 	"github.com/plutoframework/pluto-core/state"
 	jobs "github.com/plutoframework/pluto-jobs"
-	rbac "github.com/plutoframework/pluto-rbac"
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
 )
 
@@ -571,7 +571,7 @@ func TestCandidateSQLForgedActorFactDenied(t *testing.T) {
 
 			_, err = repository.Commit(ctx, execution, attempt, forged)
 			if f.guard == "none" {
-				if !errors.Is(err, rbac.ErrForbidden) {
+				if !errors.Is(err, commonDomain.ErrNotFound) {
 					return fmt.Errorf("AUTHORITATIVE_OWNER_SCOPE %v", err)
 				}
 			} else if !errors.Is(err, state.ErrGuard) {

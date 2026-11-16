@@ -1,0 +1,251 @@
+package app_test
+
+import (
+	"fmt"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// pathFixture is a tenant with one gateway and a second tenant that must
+// never see it.
+type gwPathFixture struct {
+	*gwFixture
+	org     gwOrg
+	other   gwOrg
+	gateway string
+}
+
+func gwPathSetup(t *testing.T, email string) gwPathFixture {
+	t.Helper()
+
+	f := gwSetupEnv(t, map[string]string{flagOn: "true"})
+	org := f.org(t, "path-"+email)
+	other := f.org(t, "path-other-"+email)
+
+	return gwPathFixture{
+		gwFixture: f,
+		org:       org,
+		other:     other,
+		gateway:   f.create(t, org, "edge").ID,
+	}
+}
+
+func (f gwPathFixture) as(
+	method, path, body string,
+	org gwOrg,
+	headers map[string]string,
+) *httptest.ResponseRecorder {
+	return f.send(method, path, body, org.admin.session, org.tenant, headers)
+}
+
+// A well-formed id of a gateway the verified tenant cannot see is the same
+// 404 as a missing one; a malformed id is refused (400) before anything
+// runs; the gate runs before the lookup, so membership and permission
+// failures never reveal whether the id exists.
+func TestGatewayPathRead(t *testing.T) {
+	f := gwPathSetup(t, "read@example.test")
+	url := "/api/gateways/" + f.gateway
+
+	read := f.as("GET", url, "", f.org, nil)
+	f.expect(t, read, 200)
+
+	if got := answer(t, read).Data; got.ID != f.gateway || got.Name != "edge" {
+		t.Fatalf("unexpected gateway %+v", got)
+	}
+
+	// The id is normalized before it is bound.
+	upper := f.as(
+		"GET", "/api/gateways/"+strings.ToUpper(f.gateway), "", f.org, nil,
+	)
+	f.expect(t, upper, 200)
+
+	// Cross-tenant: the other tenant's admin gets exactly the missing-row
+	// answer; so does an unknown id of the owning tenant.
+	foreign := f.as("GET", url, "", f.other, nil)
+	f.expect(t, foreign, 404)
+
+	missing := f.as(
+		"GET", "/api/gateways/00000000-0000-4000-8000-000000000000", "",
+		f.org, nil,
+	)
+	f.expect(t, missing, 404)
+
+	if foreign.Body.String() != missing.Body.String() ||
+		!strings.Contains(foreign.Body.String(), "not_found") {
+		t.Fatalf("a foreign id differs from a missing one: %s vs %s",
+			foreign.Body.String(), missing.Body.String())
+	}
+
+	// Naming the owning tenant with another tenant's session is refused in
+	// the gate (not a member), before any lookup.
+	f.expect(t, f.send("GET", url, "", f.other.admin.session, f.org.tenant,
+		nil), 401)
+	f.expect(t, f.send("GET", url, "", "", f.org.tenant, nil), 401)
+
+	// Malformed ids are 400 and never reach the operation.
+	for name, id := range map[string]string{
+		"not a uuid":  "edge",
+		"short":       "1234",
+		"no dashes":   strings.ReplaceAll(f.gateway, "-", ""),
+		"bad digit":   strings.Replace(f.gateway, f.gateway[:1], "g", 1),
+		"suffixed":    f.gateway + "0",
+		"percent":     "%00",
+		"dotdot":      "..",
+		"sql":         "x'%20or%201=1",
+	} {
+		response := f.as("GET", "/api/gateways/"+id, "", f.org, nil)
+		rejected := strings.Contains(
+			response.Body.String(), "invalid_path_parameter",
+		)
+		if response.Code != 400 || !rejected {
+			t.Fatalf("%s: status=%d %s", name, response.Code,
+				response.Body.String())
+		}
+	}
+
+	f.expect(t, f.as("GET", "/api/gateways/edge", "", f.org, nil), 400)
+	f.expect(t, f.as("GET", "/api/gateways/"+f.gateway+"?x=1", "", f.org,
+		nil), 400)
+}
+
+// The gate is bound to "<resource>:<id>": the path value is the resource key
+// every data access of the body revalidates, and a viewer is refused.
+func TestGatewayPathGate(t *testing.T) {
+	f := gwPathSetup(t, "gate@example.test")
+
+	viewer := f.enroll(t, "path-viewer@example.test")
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"INSERT INTO users (org_id, id, role) VALUES ($1, $2, 'viewer')",
+		f.org.tenant, viewer.id,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	url := "/api/gateways/" + f.gateway
+	f.expect(t, f.send("GET", url, "", viewer.session, f.org.tenant, nil), 403)
+
+	// A flag-off application stops the route before the gate.
+	off := gwSetup(t)
+	orgOff := off.org(t, "path-off@example.test")
+	denied := off.send(
+		"GET", "/api/gateways/00000000-0000-4000-8000-000000000000", "",
+		orgOff.admin.session, orgOff.tenant, nil,
+	)
+	off.expect(t, denied, 403)
+
+	if !strings.Contains(denied.Body.String(), "feature_disabled") {
+		t.Fatalf("a disabled flag must stop the route: %s",
+			denied.Body.String())
+	}
+}
+
+// A path write: the id binds the resource and the strict JSON body binds the
+// change; a foreign or missing id changes nothing and is a 404.
+func TestGatewayPathEdit(t *testing.T) {
+	f := gwPathSetup(t, "edit@example.test")
+	url := "/api/gateways/" + f.gateway
+	key := func(value string) map[string]string {
+		return map[string]string{"Idempotency-Key": value}
+	}
+
+	edit := func(
+		path, body string, org gwOrg, headers map[string]string,
+	) *httptest.ResponseRecorder {
+		return f.as("PATCH", path, body, org, headers)
+	}
+
+	f.expect(t, edit(url, `{"name":"one"}`, f.org, nil), 400)
+
+	// Malformed id: refused before the body is read or a claim stored.
+	f.expect(t, edit("/api/gateways/edge", `{"name":"one"}`, f.org,
+		key("key-path-bad-0001")), 400)
+
+	// Not a member: refused in the gate before any claim.
+	f.expect(t, f.send("PATCH", url, `{"name":"x"}`, f.other.admin.session,
+		f.org.tenant, key("key-path-denied1")), 401)
+
+	if f.scalar(t, "SELECT count(*) FROM pluto_idempotency") != "0" {
+		t.Fatal("a refused request stored an idempotency claim")
+	}
+
+	// The id may not ride in the body: the model has no such field.
+	f.expect(t, edit(url, fmt.Sprintf(`{"id":%q,"name":"x"}`, f.gateway),
+		f.org, key("key-path-body-0001")), 400)
+
+	// Cross-tenant and unknown ids are 404 and change nothing.
+	f.expect(t, edit(url, `{"name":"stolen"}`, f.other,
+		key("key-path-cross-001")), 404)
+	f.expect(t, edit("/api/gateways/00000000-0000-4000-8000-000000000000",
+		`{"name":"x"}`, f.org, key("key-path-miss-0001")), 404)
+
+	if f.scalar(t, "SELECT name FROM gateways WHERE id = $1",
+		f.gateway) != "edge" {
+		t.Fatal("a refused edit changed the gateway")
+	}
+
+	first := edit(url, `{"name":"one"}`, f.org, key("key-path-edit-0001"))
+	f.expect(t, first, 200)
+
+	if answer(t, first).Data.Name != "one" {
+		t.Fatalf("unexpected response %s", first.Body.String())
+	}
+
+	// Replay of one key, path and body returns the stored response.
+	replay := edit(url, `{"name":"one"}`, f.org, key("key-path-edit-0001"))
+	f.expect(t, replay, 200)
+
+	if replay.Body.String() != first.Body.String() {
+		t.Fatal("a replay did not return the stored response")
+	}
+
+	// The same key and body on another gateway is a different request.
+	second := f.create(t, f.org, "second").ID
+	f.expect(t, edit("/api/gateways/"+second, `{"name":"one"}`, f.org,
+		key("key-path-edit-0001")), 409)
+
+	if f.scalar(t, "SELECT name FROM gateways WHERE id = $1", second) !=
+		"second" {
+		t.Fatal("a conflicting replay changed another gateway")
+	}
+}
+
+// A bodyless path write refuses a body and acts only on a visible gateway.
+func TestGatewayPathClearBeats(t *testing.T) {
+	f := gwPathSetup(t, "beats@example.test")
+	url := "/api/gateways/" + f.gateway + "/beats"
+
+	for _, tenant := range []string{f.org.tenant, f.other.tenant} {
+		if _, err := f.admin.Exec(
+			t.Context(),
+			"INSERT INTO gateway_beats (org_id, gateway_id, seq) "+
+				"VALUES ($1, $2, 1), ($1, $2, 2)",
+			tenant, f.gateway,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	count := func(tenant string) string {
+		return f.scalar(t, "SELECT count(*) FROM gateway_beats "+
+			"WHERE org_id = $1", tenant)
+	}
+
+	f.expect(t, f.as("DELETE", url, `{"x":1}`, f.org, nil), 400)
+	f.expect(t, f.as("DELETE", "/api/gateways/edge/beats", "", f.org, nil),
+		400)
+
+	// The other tenant's admin cannot clear it: 404, nothing deleted.
+	f.expect(t, f.as("DELETE", url, "", f.other, nil), 404)
+
+	if count(f.org.tenant) != "2" || count(f.other.tenant) != "2" {
+		t.Fatal("a refused request deleted history")
+	}
+
+	f.expect(t, f.as("DELETE", url, "", f.org, nil), 200)
+
+	if count(f.org.tenant) != "0" || count(f.other.tenant) != "2" {
+		t.Fatal("the clear did not stay inside the verified tenant")
+	}
+}

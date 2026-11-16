@@ -1,0 +1,29 @@
+package access
+
+// deviceScopePermissions maps each declared [auth.device] scope to the
+// operation permissions it names. It is generated from pluto.toml and is only
+// ever consulted to NARROW a request: the identity gate separately requires
+// the owner's own live membership and permission.
+var deviceScopePermissions = map[string][]string{
+{{- range .Manifest.Auth.Device.ScopePermissions}}
+	{{q .Name}}: {
+{{- range .Permissions}}
+		{{q .}},
+{{- end}}
+	},
+{{- end}}
+}
+
+// delegationAllows reports whether any approved scope names the permission.
+// An unknown scope names nothing, so an unrecognized token fails closed.
+func delegationAllows(scopes []string, permission string) bool {
+	for _, scope := range scopes {
+		for _, allowed := range deviceScopePermissions[scope] {
+			if allowed == permission {
+				return true
+			}
+		}
+	}
+
+	return false
+}

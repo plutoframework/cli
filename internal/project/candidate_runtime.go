@@ -771,6 +771,10 @@ func (r *CandidateRuntime) Worker(
 		source.WriteString(candidateTenantResourceSource)
 	}
 
+	if m.hasPathOperations() {
+		source.WriteString(candidateTenantResourceIDSource)
+	}
+
 	// Keep imported candidate framework modules available for bootstrap
 	// projects.
 	source.WriteString(`var _ = identitygate.New
@@ -789,6 +793,11 @@ func writeAuthoredOperation(
 ) {
 	suffix := fmt.Sprint(index)
 
+	policy := "candidateTenantResource"
+	if len(operation.Path) != 0 {
+		policy = "candidateTenantResourceID"
+	}
+
 	fmt.Fprintf(
 		source,
 		`
@@ -798,7 +807,7 @@ func writeAuthoredOperation(
 	}
 
 	resource%[1]s, err := requirement%[1]s.WithResourcePolicy(
-		candidateTenantResource(%[3]s),
+		%[4]s(%[3]s),
 	)
 	if err != nil {
 		return nil, err
@@ -816,6 +825,7 @@ func writeAuthoredOperation(
 		suffix,
 		strconv.Quote(operation.Permission),
 		strconv.Quote(operation.Resource),
+		policy,
 	)
 
 	var ports bytes.Buffer
@@ -912,6 +922,28 @@ func writeMachineOperation(source *bytes.Buffer, operation Operation) {
 		ports.String(),
 	)
 }
+
+// candidateTenantResourceIDSource is the policy of operations that bind path
+// parameters: the resource key is the declared resource, a colon and the
+// validated value of the one path parameter naming the record. The key is
+// exactly that shape; a bare resource or an empty value is refused.
+const candidateTenantResourceIDSource = `
+func candidateTenantResourceID(resource string) rbac.ResourcePolicyFunc {
+	return func(
+		_ context.Context,
+		request rbac.Request,
+		id string,
+	) error {
+		prefix := resource + ":"
+		if len(id) <= len(prefix) || id[:len(prefix)] != prefix ||
+			request.Scope.TenantID == "" {
+			return rbac.ErrForbidden
+		}
+
+		return nil
+	}
+}
+`
 
 // candidateTenantResourceSource is the tenant resource policy of authored
 // operations: membership and permission are verified by the gate, row-level

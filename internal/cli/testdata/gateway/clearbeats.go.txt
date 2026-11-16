@@ -1,0 +1,18 @@
+package gateways
+
+import (
+	"context"
+
+	models "example.test/gwapp/internal/models/gateways"
+	"example.test/gwapp/internal/scope"
+)
+
+// ClearBeats deletes the history of the gateway the path names.
+func ClearBeats(
+	ctx context.Context,
+	e scope.Execution,
+	ports ClearBeatsPorts,
+	in models.ClearBeatsRequest,
+) (models.GatewayRef, error) {
+	return ports.Registry.ClearBeats(ctx, e, in)
+}

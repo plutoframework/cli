@@ -25,6 +25,11 @@ type Authentication struct {
 	{{if .OIDC}}
 
 	OIDC        http.Handler{{end}}
+	{{- if .Manifest.DeviceOn}}
+
+	// Device serves the device authorization grant under /auth/device.
+	Device http.Handler
+	{{- end}}
 	Accounts    AccountDisabler
 	Credentials http.Handler
 	Idempotency *httpidem.Handler
@@ -54,6 +59,25 @@ func (s sessionPrincipal) Authenticate(
 	_ string{{if .Multi}},
 	tenant string{{end}}) (domain.Principal, error) {
 	session, ok := httpauth.FromContext(ctx)
+{{- if .Manifest.DeviceOn}}
+
+	// A delegated token is bound to its approved tenant: the header may omit
+	// it but never name another one. Its scopes narrow what the operation
+	// gates allow (access.Caller.Permits); membership and roles are still the
+	// owner's own, so a delegation can never exceed them.
+	if ok && session.Delegation != nil{{if .Multi}} {
+		if tenant == "" {
+			tenant = session.Delegation.Tenant
+		}
+
+		if tenant != session.Delegation.Tenant {
+			return domain.Principal{}, domain.ErrDelegatedTenant
+		}
+	}{{else}} {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}{{end}}
+{{- end}}
+
 	if !ok{{if .Multi}} || tenant == ""{{end}} {
 		return domain.Principal{}, domain.ErrUnauthenticated
 	}

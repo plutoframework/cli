@@ -9,7 +9,15 @@ import (
 var (
 	ErrInvalidInput    = errors.New("invalid operation input")
 	ErrConflict        = errors.New("operation conflict")
+	// ErrNotFound is the one outcome for a resource that is missing or not
+	// visible to the caller's verified tenant; the two are indistinguishable.
+	ErrNotFound        = errors.New("resource not found")
 	ErrExportLimit     = errors.New("export bound exceeded")
+	// ErrDelegatedTenant is a valid delegated token used for a tenant other
+	// than the one it was approved for: forbidden, never unauthenticated.
+	ErrDelegatedTenant = errors.Join(
+		errors.New("delegated token is bound to another tenant"),
+		rbac.ErrForbidden)
 	ErrNotImplemented  = errors.New("operation not implemented")
 	ErrUnauthenticated = rbac.ErrUnauthenticated
 	ErrForbidden       = rbac.ErrForbidden

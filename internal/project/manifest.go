@@ -269,6 +269,10 @@ func (m Manifest) Validate() error {
 		flags[e.Feature] = e.ClientVisible
 	}
 
+	if err := validateAuthDevice(m); err != nil {
+		return err
+	}
+
 	return nil
 }
 

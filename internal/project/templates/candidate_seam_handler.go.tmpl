@@ -9,6 +9,9 @@ import (
 	operations "{{.Module}}/internal/operations/{{.Group}}"
 	"{{.Module}}/internal/paths"
 	"{{.Module}}/internal/transport"
+{{- if .Path}}
+	"github.com/go-chi/chi/v5"
+{{- end}}
 )
 
 type {{.Action}}Operations = operations.{{.Action}}Boundary
@@ -45,6 +48,24 @@ func Register{{.Action}}(
 
 				return
 			}
+
+{{- if .Path}}
+
+			if err := input.BindPath(func(name string) string {
+				return chi.URLParam(r, name)
+			}); err != nil {
+				var rejected *models.PathError
+				if errors.As(err, &rejected) {
+					transport.Error(w, r, 400, rejected.Code)
+
+					return
+				}
+
+				transport.Error(w, r, 400, "invalid_path_parameter")
+
+				return
+			}
+{{- end}}
 
 			output, err := operation.Execute(r.Context(), caller, input)
 			if err != nil {

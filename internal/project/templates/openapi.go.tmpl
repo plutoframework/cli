@@ -227,13 +227,14 @@ func Document() ([]byte, error) {
 
 		for _, part := range strings.Split(endpoint.Path, "/") {
 			if strings.HasPrefix(part, "{") {
+				name := strings.Trim(part, "{}")
 				parameters = append(
 					parameters,
 					map[string]any{
-						"name":     strings.Trim(part, "{}"),
+						"name":     name,
 						"in":       "path",
 						"required": true,
-						"schema":   map[string]any{"type": "string"},
+						"schema":   pathSchema(endpoint.Params, name),
 					},
 				)
 			}
@@ -334,6 +335,37 @@ func Document() ([]byte, error) {
 	}
 
 	return encodeDocument(document)
+}
+
+// pathSchema is the declared type of a path parameter; an undeclared one
+// (a generated record route) stays a plain string.
+func pathSchema(params []paths.PathParam, name string) map[string]any {
+	for _, param := range params {
+		if param.Name != name {
+			continue
+		}
+
+		switch param.Type {
+		case "uuid":
+			return map[string]any{"type": "string", "format": "uuid"}
+		case "int64":
+			schema := map[string]any{"type": "integer", "minimum": 0}
+			if param.Max > 0 {
+				schema["maximum"] = param.Max
+			}
+
+			return schema
+		default:
+			return map[string]any{
+				"type":      "string",
+				"minLength": 1,
+				"maxLength": param.Max,
+				"pattern":   "^[A-Za-z0-9._~-]+$",
+			}
+		}
+	}
+
+	return map[string]any{"type": "string"}
 }
 
 func queryParameter(param paths.QueryParam) map[string]any {

@@ -1,0 +1,199 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"sync/atomic"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	auth "github.com/plutoframework/pluto-auth"
+	"github.com/plutoframework/pluto-auth/device"
+	"github.com/plutoframework/pluto-auth/device/devicehttp"
+	"github.com/plutoframework/pluto-auth/methods/password"
+	authpostgres "github.com/plutoframework/pluto-auth/stores/postgres"
+
+	"{{.Module}}/internal/auth/credentials"
+	"{{.Module}}/internal/transport"
+)
+
+// deviceBase is the fenced account/session store the overlay wraps. It must
+// keep the account-session issuance contract of the local store.
+type deviceBase interface {
+	password.AccountStore
+	auth.AccountSessionStore
+}
+
+// deviceSessions overlays the account session store so a delegated access
+// token authenticates through the one Manager every route already uses. An
+// unknown digest falls through to the device grant store; the resulting
+// session carries its Delegation. Sign-out, subject revocation, account
+// disabling and password reset also revoke delegated token families, so no
+// delegated token outlives what revokes a browser session.
+type deviceSessions struct {
+	deviceBase
+	service atomic.Pointer[device.Service]
+}
+
+func newDeviceSessions(base deviceBase) *deviceSessions {
+	return &deviceSessions{deviceBase: base}
+}
+
+func (s *deviceSessions) Use(
+	ctx context.Context,
+	digest auth.Digest,
+	now time.Time,
+	idle time.Duration,
+) (auth.Session, error) {
+	session, err := s.deviceBase.Use(ctx, digest, now, idle)
+	if !errors.Is(err, auth.ErrNotFound) {
+		return session, err
+	}
+
+	service := s.service.Load()
+	if service == nil {
+		return auth.Session{}, err
+	}
+
+	return service.Session(ctx, digest, now)
+}
+
+func (s *deviceSessions) Delete(ctx context.Context, digest auth.Digest) error {
+	if service := s.service.Load(); service != nil {
+		if err := service.RevokeDigest(ctx, digest); err != nil {
+			return err
+		}
+	}
+
+	return s.deviceBase.Delete(ctx, digest)
+}
+
+func (s *deviceSessions) DeleteSubject(ctx context.Context, subject string) error {
+	if service := s.service.Load(); service != nil {
+		if err := service.RevokeSubject(ctx, subject); err != nil {
+			return err
+		}
+	}
+
+	return s.deviceBase.DeleteSubject(ctx, subject)
+}
+
+func (s *deviceSessions) Disable(ctx context.Context, subject string) error {
+	if service := s.service.Load(); service != nil {
+		if err := service.RevokeSubject(ctx, subject); err != nil {
+			return err
+		}
+	}
+
+	return s.deviceBase.Disable(ctx, subject)
+}
+
+// Reset revokes delegated families first (the challenge names the account),
+// so a recovered account never keeps a token an attacker obtained earlier.
+func (s *deviceSessions) Reset(
+	ctx context.Context,
+	digest auth.Digest,
+	version int64,
+	hash string,
+	now time.Time,
+) error {
+	if service := s.service.Load(); service != nil {
+		account, err := s.ChallengeAccount(
+			ctx, password.RecoverPassword, digest, now)
+		if err != nil {
+			return err
+		}
+
+		if err := service.RevokeSubject(ctx, account.ID); err != nil {
+			return err
+		}
+	}
+
+	return s.deviceBase.Reset(ctx, digest, version, hash, now)
+}
+
+// deviceAuthorizer lets an owner delegate only inside a tenant where the
+// verified subject currently holds a membership with at least one role.
+type deviceAuthorizer struct {
+	memberships transport.MembershipResolver
+}
+
+func (a deviceAuthorizer) AuthorizeDelegation(
+	ctx context.Context,
+	subject, tenant string,
+	_ []string,
+) error {
+	principal, err := a.memberships.Resolve(ctx, subject, tenant)
+	if err != nil {
+		return err
+	}
+
+	if !principal.Verified() || principal.ActorID != subject ||
+		principal.TenantID != tenant || len(principal.Roles) == 0 {
+		return errors.New("delegation denied")
+	}
+
+	return nil
+}
+
+// newCandidateDevice composes the device grant from the declared
+// [auth.device] clients and scopes. Clients, scopes, lifetimes and the
+// verification page are fixed by the manifest, never by a request.
+func newCandidateDevice(
+	pool *pgxpool.Pool,
+	authentication transport.Authentication,
+	memberships transport.MembershipResolver,
+	integrations credentials.Integrations,
+	sessions *deviceSessions,
+) (http.Handler, error) {
+	if pool == nil || authentication.Manager == nil ||
+		authentication.HTTP == nil || memberships == nil ||
+		integrations.Limiter == nil || integrations.Ingress == nil ||
+		sessions == nil {
+		return nil, errors.New("invalid device authorization composition")
+	}
+
+{{- $d := .Manifest.Auth.Device.Durations}}
+
+	store, err := authpostgres.NewDevice(pool)
+	if err != nil {
+		return nil, err
+	}
+
+	service, err := device.New(store, device.Config{
+		Clients: []device.Client{
+{{- range .Manifest.Auth.Device.SortedClients}}
+			{
+				ID:        {{q .ID}},
+				Name:      {{q .Name}},
+				ActorType: {{q .ActorType}},
+				Scopes: []string{
+{{- range .Scopes}}
+					{{q .}},
+{{- end}}
+				},
+			},
+{{- end}}
+		},
+		Sessions:        authentication.Manager,
+		Authorizer:      deviceAuthorizer{memberships: memberships},
+		Limiter:         integrations.Limiter,
+		VerificationURI: {{q .Manifest.Auth.Device.VerificationURI}},
+		CodeTTL:         {{$d.Go $d.Code}},
+		PollInterval:    {{$d.Go $d.Poll}},
+		AccessTTL:       {{$d.Go $d.Access}},
+		RefreshTTL:      {{$d.Go $d.Refresh}},
+		MaxLifetime:     {{$d.Go $d.Max}},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sessions.service.Store(service)
+
+	return devicehttp.New(service, devicehttp.Config{
+		Transport: authentication.HTTP,
+		Ingress:   integrations.Ingress,
+	})
+}

@@ -1,0 +1,141 @@
+package app_test
+
+import (
+	"encoding/json"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+// deviceToken runs the browser-approved device flow for org's admin and
+// returns the delegated access token limited to scope.
+func (f *gwPathFixture) deviceToken(
+	t *testing.T,
+	org gwOrg,
+	scope string,
+) string {
+	t.Helper()
+
+	call := func(
+		method, path, body, cookie string,
+	) (int, map[string]any) {
+		response := f.send(method, path, body, cookie, "", nil)
+
+		var out map[string]any
+
+		_ = json.Unmarshal(response.Body.Bytes(), &out)
+
+		return response.Code, out
+	}
+
+	status, out := call("POST", "/auth/device/code",
+		`{"client_id":"gryt-cli","scope":"`+scope+`"}`, "")
+	if status != 200 {
+		t.Fatalf("device code: %d %v", status, out)
+	}
+
+	device, _ := out["device_code"].(string)
+	user, _ := out["user_code"].(string)
+
+	status, out = call("POST", "/auth/device/approve",
+		`{"user_code":"`+user+`","tenant":"`+org.tenant+`","scope":"`+
+			scope+`"}`, org.admin.session)
+	if status != 204 {
+		t.Fatalf("device approve: %d %v", status, out)
+	}
+
+	time.Sleep(1200 * time.Millisecond)
+
+	status, out = call("POST", "/auth/device/token",
+		`{"grant_type":"urn:ietf:params:oauth:grant-type:device_code",`+
+			`"client_id":"gryt-cli","device_code":"`+
+			device+`"}`, "")
+	token, _ := out["access_token"].(string)
+
+	if status != 200 || token == "" {
+		t.Fatalf("device token: %d %v", status, out)
+	}
+
+	return token
+}
+
+func (f *gwPathFixture) bearer(
+	method, path, body, token, tenant string,
+	headers map[string]string,
+) *httptest.ResponseRecorder {
+	merged := map[string]string{"Authorization": "Bearer " + token}
+	for key, value := range headers {
+		merged[key] = value
+	}
+
+	return f.send(method, path, body, "", tenant, merged)
+}
+
+// A delegated token passes the same gates as the owner's session on authored
+// path endpoints: the scope check, then the owner's live membership and the
+// same typed 404 for an id the tenant cannot see.
+func TestGatewayDelegatedPath(t *testing.T) {
+	f := gwPathSetup(t, "device@example.test")
+	url := "/api/gateways/" + f.gateway
+
+	manage := f.deviceToken(t, f.org, "gateways.manage")
+	record := f.deviceToken(t, f.org, "audit.record")
+
+	read := f.bearer("GET", url, "", manage, f.org.tenant, nil)
+	f.expect(t, read, 200)
+
+	if answer(t, read).Data.ID != f.gateway {
+		t.Fatalf("unexpected gateway %s", read.Body.String())
+	}
+
+	// A foreign or unknown id is the owner's own 404, byte for byte.
+	theirs := "/api/gateways/" + f.create(t, f.other, "theirs").ID
+	foreignOwner := f.as("GET", theirs, "", f.org, nil)
+	foreign := f.bearer("GET", theirs, "", manage, f.org.tenant, nil)
+	f.expect(t, foreign, 404)
+
+	if foreign.Body.String() != foreignOwner.Body.String() ||
+		!strings.Contains(foreign.Body.String(), "not_found") {
+		t.Fatalf("delegated not-found differs: %s vs %s",
+			foreign.Body.String(), foreignOwner.Body.String())
+	}
+
+	// The scope does not name the permission: refused before any lookup,
+	// for reads and writes alike, existing id or not.
+	f.expect(t, f.bearer("GET", url, "", record, f.org.tenant, nil), 403)
+	f.expect(t, f.bearer("GET",
+		"/api/gateways/00000000-0000-4000-8000-000000000000", "", record,
+		f.org.tenant, nil), 403)
+	f.expect(t, f.bearer("PATCH", url, `{"name":"x"}`, record, f.org.tenant,
+		map[string]string{"Idempotency-Key": "key-device-denied-1"}), 403)
+	f.expect(t, f.bearer("DELETE", url+"/beats", "", record, f.org.tenant,
+		nil), 403)
+
+	// A scoped write works and is attributed to the owner's tenant only.
+	edit := f.bearer("PATCH", url, `{"name":"agent"}`, manage, f.org.tenant,
+		map[string]string{"Idempotency-Key": "key-device-edit-0001"})
+	f.expect(t, edit, 200)
+
+	if f.scalar(t, "SELECT name FROM gateways WHERE id = $1", f.gateway) !=
+		"agent" {
+		t.Fatal("a delegated edit did not apply")
+	}
+
+	// The token is bound to its tenant. Naming another tenant the owner
+	// belongs to is a valid token used out of scope: 403.
+	if _, err := f.admin.Exec(
+		t.Context(),
+		"INSERT INTO users (org_id, id, role) VALUES ($1, $2, 'admin')",
+		f.other.tenant, f.org.admin.id,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	f.expect(t, f.bearer("GET", url, "", manage, f.other.tenant, nil), 403)
+
+	// Any tenant but the token's is 403, member or not: the check precedes
+	// membership, so a token reveals nothing about the owner's tenants.
+	third := f.gwFixture.org(t, "device-third@example.test")
+	f.expect(t, f.bearer("GET", url, "", manage, third.tenant, nil), 403)
+}

@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 root = Path(__file__).resolve().parent.parent
@@ -569,6 +570,11 @@ mutations = [
     ),
 ]
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mutation_cases_device import cases as device_cases  # noqa: E402
+
+mutations.extend(device_cases)
+
 mutations.extend(
     [
         (
@@ -656,8 +662,8 @@ mutations.extend(
         (
             "authored write endpoint needs an input model",
             "internal/project/candidate_seam_models.go",
-            'if out.Input == "" || o.Response != ResponseObject || o.Collection {',
-            'if false {',
+            'out.Input == "" && len(o.Path) == 0 {',
+            'false {',
             "./internal/project#TestAuthoredWriteEndpointRejections",
         ),
         (
@@ -704,6 +710,26 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                     "\t\t\t\t\tactualOwner)"
                 ),
                 "return nil",
+                "TestCandidateGeneratedConsumer",
+            ),
+            (
+                "candidate cross-tenant not-found",
+                "internal/project/templates/candidate_data.go.tmpl",
+                (
+                    '\t\t\tif !allowed {\n'
+                    '\t\t\t\treturn commonDomain.ErrNotFound'
+                ),
+                (
+                    '\t\t\tif !allowed {\n'
+                    '\t\t\t\treturn rbac.ErrForbidden'
+                ),
+                "TestCandidateGeneratedConsumer",
+            ),
+            (
+                "candidate not-found transport mapping",
+                "internal/project/templates/http.go.tmpl",
+                "Error(w, r, http.StatusNotFound, \"not_found\")",
+                "Error(w, r, http.StatusForbidden, \"forbidden\")",
                 "TestCandidateGeneratedConsumer",
             ),
             (
@@ -818,6 +844,41 @@ if os.environ.get("PLUTO_CLI_CANDIDATE_PROFILE") == "1":
                 "\t}()\n\n\tif _, err = tx.Exec(\n\t\tctx,\n\t\t\"SELECT set_config('app.tenant_id_unbound', $1, true)\",\n\t\ttenant.scopeTenant,\n\t); err != nil {\n\t\treturn err\n\t}\n\n\tif err = run(",
                 "TestCandidateAuthoredSeamEndToEnd",
             ),
+            (
+                "path parameter resource binding",
+                "internal/project/manifest_path.go",
+                "if !found || !named[key] {",
+                "if !found && !named[key] {",
+                "./internal/project#TestPathParamRejections",
+            ),
+            (
+                "path parameter gate resource key",
+                "internal/project/templates/candidate_authored_gate.go.tmpl",
+                "intent.{{lowerFirst .Action}}IntentRequest.ResourceID(),",
+                '"",',
+                "./internal/project#TestPathParamWriteGeneration",
+            ),
+            (
+                "bodyless path write refuses a body",
+                "internal/project/templates/candidate_seam_write_handler.go.tmpl",
+                "if len(raw) != 0 {",
+                "if false {",
+                "./internal/project#TestPathParamWithoutBody",
+            ),
+            (
+                "path parameter workflow resource key",
+                "internal/project/templates/candidate_authored_workflow.go.tmpl",
+                '+\\":\\"+request.ResourceID()"}}',
+                '+\\":\\"+x"}}',
+                "TestCandidateGatewayEndToEnd",
+            ),
+            (
+                "path uuid length check",
+                "internal/project/templates/candidate_seam_path.go.tmpl",
+                "if len(value) != 36 {",
+                "if false {",
+                "TestCandidateGatewayEndToEnd",
+            ),
         ]
     )
 
@@ -834,6 +895,8 @@ required_assertions = {
         "shared attempt window not enforced across replicas"
     ),
     "candidate authoritative transition guard": "FORGED_ACTOR_FACTS_COMMITTED",
+    "candidate cross-tenant not-found": "CROSS_TENANT_NOT_FOUND",
+    "candidate not-found transport mapping": "CROSS_TENANT_NOT_FOUND",
     "candidate downstream stable delivery key": (
         "TYPED_DELIVERY_SINK_REJECTED_PAYLOAD"
     ),

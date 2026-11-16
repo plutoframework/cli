@@ -26,14 +26,17 @@ import (
 {{- if .HasProvision}}
 
 	auth "github.com/plutoframework/pluto-auth"
+{{- else if .Manifest.DeviceOn}}
+
+	auth "github.com/plutoframework/pluto-auth"
 {{- else}}
 {{end}}
 	jobs "github.com/plutoframework/pluto-jobs"
 	jobspostgres "github.com/plutoframework/pluto-jobs/stores/postgres"
+	commonDomain "{{.Module}}/internal/domain"
 	identitygate "github.com/plutoframework/pluto-rbac/identity"
 {{- if .HasMachine}}
 
-	commonDomain "{{.Module}}/internal/domain"
 	machineauth "{{.Module}}/internal/ports/machineauth"
 	machinestore "{{.Module}}/internal/storage/machineauth"
 {{- end}}
@@ -58,6 +61,10 @@ type Execution struct {
 
 	// scopeMachine is set instead of scopeExecution for a machine caller.
 	scopeMachine *machineauth.Verified
+{{- end}}
+{{- if .Manifest.DeviceOn}}
+
+	scopeActor Actor
 {{- end}}
 }
 
@@ -256,6 +263,20 @@ func Queries[Q, D any](t Tx, constructor func(D) Q) Q {
 // NoRows reports an empty single-row result.
 func NoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
+}
+
+// ErrNotFound is the typed not-found the generated handler maps to 404.
+var ErrNotFound = commonDomain.ErrNotFound
+
+// NotFound maps an empty single-row result to ErrNotFound and returns every
+// other error unchanged. Row-level security hides other tenants' rows, so a
+// cross-tenant resource is indistinguishable from a missing one.
+func NotFound(err error) error {
+	if NoRows(err) {
+		return ErrNotFound
+	}
+
+	return err
 }
 
 // ErrUnknownJob rejects an Enqueue of a kind no [[jobs]] entry declares.
@@ -565,4 +586,78 @@ func machineState(err error) error {
 
 	return err
 }
-{{end}}
+{{end}}{{- if .Manifest.DeviceOn}}
+
+// Actor describes who is acting for an Execution: the owner interactively, or
+// a delegated client (CLI, agent) the owner approved through the device grant.
+// It carries client and actor-type metadata for authored code and audit. It
+// grants nothing: scopes were already intersected with the owner's permissions
+// by the gate. It has no constructor reachable from authored code.
+type Actor struct {
+	scopeActorKind   string
+	scopeActorClient string
+	scopeActorGrant  string
+}
+
+// Kind is "user" for an interactive session, else the declared actor_type of
+// the delegated client (for example "agent").
+func (a Actor) Kind() string {
+	if a.scopeActorKind == "" {
+		return "user"
+	}
+
+	return a.scopeActorKind
+}
+
+// Delegated reports whether the actor is a delegated client.
+func (a Actor) Delegated() bool {
+	return a.scopeActorKind != ""
+}
+
+// ClientID is the declared device client, empty for an interactive session.
+func (a Actor) ClientID() string {
+	return a.scopeActorClient
+}
+
+// GrantID identifies the approved token family, empty when interactive.
+func (a Actor) GrantID() string {
+	return a.scopeActorGrant
+}
+
+// Actor is the acting identity of this execution.
+func (e Execution) Actor() Actor {
+	return e.scopeActor
+}
+
+type actorContextKey struct{}
+
+// ContextWithActor is a capability: only generated gates may call it. It
+// records the verified identity's delegation for the generated workflow.
+func ContextWithActor(ctx context.Context, identity *auth.Identity) context.Context {
+	var actor Actor
+
+	if delegation, ok := identity.Delegation(); ok {
+		actor = Actor{
+			scopeActorKind:   delegation.ActorType,
+			scopeActorClient: delegation.ClientID,
+			scopeActorGrant:  delegation.GrantID,
+		}
+	}
+
+	return context.WithValue(ctx, actorContextKey{}, actor)
+}
+
+// BindActor is Bind for a gate that carried the acting identity in ctx. Only
+// generated workflow files and the scope test harness may call it.
+func BindActor(
+	ctx context.Context,
+	execution *identitygate.Execution,
+	gate *identitygate.Gate,
+	resource string,
+) Execution {
+	bound := Bind(execution, gate, resource)
+	bound.scopeActor, _ = ctx.Value(actorContextKey{}).(Actor)
+
+	return bound
+}
+{{- end}}

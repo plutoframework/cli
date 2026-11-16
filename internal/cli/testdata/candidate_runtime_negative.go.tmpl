@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"example.test/candidate/internal/access"
@@ -66,6 +67,47 @@ func TestCandidateRuntimeDeniedBeforeDataOrProvider(t *testing.T) {
 	)
 	if wrong.Code != 403 && wrong.Code != 401 {
 		t.Fatalf("WRONG_TENANT %d", wrong.Code)
+	}
+
+	// A resource in another tenant the caller belongs to is invisible under
+	// row-level security: reads and writes report 404, exactly like an id
+	// that never existed. Missing membership above stays 401/403.
+	for index, probe := range []struct {
+		method string
+		path   string
+		tenant string
+		body   string
+	}{
+		{"GET", "/records/denied-1", "south", ""},
+		{"GET", "/records/never-existed", "north", ""},
+		{
+			"POST", "/records/approve", "south",
+			`{"resource_id":"denied-1"}`,
+		},
+		{
+			"POST", "/records/approve", "north",
+			`{"resource_id":"never-existed"}`,
+		},
+	} {
+		key := ""
+		if probe.method == "POST" {
+			key = fmt.Sprintf("nf-probe-%s-%02d", probe.tenant, index)
+		}
+
+		got := f.http(
+			t, probe.method, probe.path, f.bob, probe.tenant, key,
+			probe.body)
+		if got.Code != 404 ||
+			!strings.Contains(got.Body.String(), `"not_found"`) {
+			t.Fatalf("CROSS_TENANT_NOT_FOUND %s %s %s: %d %s",
+				probe.method, probe.path, probe.tenant, got.Code, got.Body)
+		}
+	}
+
+	visible := f.http(
+		t, "GET", "/records/denied-1", f.bob, "north", "", "")
+	if visible.Code != 200 {
+		t.Fatalf("OWN_TENANT_READ %d", visible.Code)
 	}
 
 	foreignStore, err := authmemory.New(4)

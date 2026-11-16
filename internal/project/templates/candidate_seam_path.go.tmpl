@@ -1,0 +1,77 @@
+package {{.Group}}
+
+import "strconv"
+
+// PathError is a rejected path parameter. Code is a stable client-visible
+// error code; Param names the offending parameter.
+type PathError struct {
+	Code  string
+	Param string
+}
+
+func (e *PathError) Error() string {
+	return e.Code + ": " + e.Param
+}
+
+func invalidPath(name string) error {
+	return &PathError{Code: "invalid_path_parameter", Param: name}
+}
+
+// pathUUID returns the lowercase canonical form of a UUID.
+func pathUUID(name, value string) (string, error) {
+	if len(value) != 36 {
+		return "", invalidPath(name)
+	}
+
+	out := []byte(value)
+
+	for index, char := range out {
+		switch {
+		case index == 8 || index == 13 || index == 18 || index == 23:
+			if char != '-' {
+				return "", invalidPath(name)
+			}
+		case char >= '0' && char <= '9', char >= 'a' && char <= 'f':
+		case char >= 'A' && char <= 'F':
+			out[index] = char + ('a' - 'A')
+		default:
+			return "", invalidPath(name)
+		}
+	}
+
+	return string(out), nil
+}
+
+// pathText admits 1..limit unreserved URL characters.
+func pathText(name, value string, limit int) (string, error) {
+	if value == "" || len(value) > limit {
+		return "", invalidPath(name)
+	}
+
+	for _, char := range []byte(value) {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z',
+			char >= '0' && char <= '9',
+			char == '-', char == '.', char == '_', char == '~':
+		default:
+			return "", invalidPath(name)
+		}
+	}
+
+	return value, nil
+}
+
+// pathInt64 admits a canonical non-negative decimal, at most limit when set.
+func pathInt64(name, value string, limit int) (int64, error) {
+	number, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || number < 0 || strconv.FormatInt(number, 10) != value ||
+		limit > 0 && number > int64(limit) {
+		return 0, invalidPath(name)
+	}
+
+	return number, nil
+}
+
+func pathKeyInt64(value int64) string {
+	return strconv.FormatInt(value, 10)
+}
